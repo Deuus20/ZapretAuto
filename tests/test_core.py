@@ -258,6 +258,8 @@ def test_gui_smoke(tmp_path, monkeypatch):
     finally:
         w.tray.hide()
         w._timer.stop()
+        w.deleteLater()  # destroy Qt objects before the interpreter exits (else a crash at shutdown)
+        app.processEvents()
 
 
 def test_gamepick_saves_profile_not_global(tmp_path, monkeypatch):
@@ -397,6 +399,7 @@ def test_gui_timed_pause(tmp_path, monkeypatch):
         monkeypatch.setattr(w.runner, "stop", lambda: state.update(on=False))
         monkeypatch.setattr(w, "start_runner", lambda: state.update(on=True))
         w.tray.showMessage = lambda *a, **k: None
+        w.settings["ipset_updated"] = time.time()  # else _tick() starts the weekly ipset download in a thread
         w.pause(1)
         assert state["on"] is False
         w._resume_at = time.time() - 1  # pretend the minute is over
@@ -405,3 +408,5 @@ def test_gui_timed_pause(tmp_path, monkeypatch):
     finally:
         w.tray.hide()
         w._timer.stop()
+        w.deleteLater()  # destroy Qt objects before the interpreter exits (else a crash at shutdown)
+        app.processEvents()

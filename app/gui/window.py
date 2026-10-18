@@ -1279,7 +1279,10 @@ class MainWindow(QWidget):
             self.start_watcher()
 
     def quit(self):
+        self._cancel = True  # let a running pick stop at its next step
         self.runner.stop()
         self.stop_watcher()
         self.tray.hide()
+        for w in list(self._workers):  # a QThread destroyed while running aborts the process on exit
+            w.wait(3000)
         QApplication.quit()
