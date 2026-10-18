@@ -305,6 +305,13 @@ def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> 
     shared = _try_shared(runner, targets, log) if use_shared else None
     if shared:
         return shared
+    try:
+        from .diag import dns_poisoned
+        if forged := dns_poisoned():
+            log("Внимание: провайдер подменяет DNS (" + ", ".join(forged) + "). Пока не включён защищённый DNS "
+                "(DoH), обход не поможет — см. «Диагностику».")
+    except Exception:  # noqa: BLE001
+        pass
     results = {"_baseline": probe_all(targets)}
     n = len(targets)
     base_ok = score(results["_baseline"])[0]
