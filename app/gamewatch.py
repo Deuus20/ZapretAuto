@@ -15,7 +15,7 @@ from . import paths
 from .tester import load_settings, save_settings
 
 PLACEHOLDER = "203.0.113.113/32"
-SKIP_PORTS = {80, 443}
+SKIP_PORTS: set[int] = set()  # game logins often use 443 to CDNs: collect them too
 GAME_DIRS = ("steamapps\\common", "\\epic games\\", "\\riot games\\", "\\battle.net\\", "\\ubisoft",
              "\\ea games\\", "\\gog games\\", "\\xboxgames\\", "\\windowsapps\\")
 NON_GAME_EXES = {

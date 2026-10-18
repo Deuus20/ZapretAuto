@@ -55,7 +55,7 @@ class Strategy:
             if i:
                 out.append("--new")
             args = [sub(a).replace('"', "") for a in p.args]
-            if p.group.split(":")[1] == "game":  # route game ipset through game profiles too
+            if "ipset-all" in p.group:  # route game ipset through every ipset profile (game ports + 80/443)
                 args.insert(1, f"--ipset={paths.LISTS / 'ipset-games.txt'}")
             out += args
         return out
