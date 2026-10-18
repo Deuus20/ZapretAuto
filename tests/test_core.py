@@ -443,3 +443,14 @@ def test_gui_game_ips_do_not_restart_winws(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
+
+
+def test_vpn_exclude_not_rewritten_when_unchanged(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setattr(paths, "LISTS", tmp_path)
+    monkeypatch.setattr(vpn, "server_ips", lambda: {"45.132.253.182"})
+    vpn.write_exclude()
+    f = tmp_path / "ipset-exclude-vpn.txt"
+    os.utime(f, (1, 1))
+    vpn.write_exclude()
+    assert f.stat().st_mtime == 1  # untouched: winws would otherwise reload it every minute

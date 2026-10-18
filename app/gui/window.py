@@ -731,7 +731,6 @@ class MainWindow(QWidget):
         dom = re.sub(r"^(https?://)?([^/:?#]+).*$", r"\2", (text or "").strip()).lower()
         if not ok or not re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", dom):
             return
-        settings_snapshot = dict(self.settings)
 
         def work(log):
             from app import lists, vpn
@@ -743,12 +742,7 @@ class MainWindow(QWidget):
             if before:
                 return f"{dom} уже открывается — обход для него не нужен."
             added = lists.add_user_domain(dom)
-            s = tester.chosen_strategy()
-            if s and self.runner.running:
-                self.runner.start(s, *self._game_flags(),
-                                  settings_snapshot.get("auto_hostlist", True))
-                import time as _t
-                _t.sleep(1.5)
+            time.sleep(1.0)  # winws re-reads the changed list by itself (on the next packet): no restart
             if any(tester.probe(t) is not None for _ in range(3)):  # first tries through DPI can be reset
                 return f"Готово: {dom} добавлен в обход и открывается."
             ip_ok = tester.probe(tester.Target("ip", f"tcp://{dom}:443")) is not None
@@ -842,6 +836,9 @@ class MainWindow(QWidget):
                 self.tray.showMessage("ZapretAuto", "Обход снова включён.")
         if self._ticks % 5 == 0:  # ~10 s
             self._check_profiles()
+        if self._ticks % 30 == 0 and self.runner.running and not self.busy:  # ~1 min: VPN may have moved
+            from app import vpn
+            self._run(lambda log: vpn.write_exclude(), lambda _: None)  # winws reloads the file itself
         if now - self._last_tick > 60:  # timer is 2 s: a long gap means sleep/hibernate
             self.log("пробуждение после сна — перезапускаю обход")
             if self._expect_running and not self.busy:
@@ -876,9 +873,7 @@ class MainWindow(QWidget):
             self.log("еженедельное обновление ipset…")
             def ipset_done(ok):
                 if ok:
-                    stats.record("ipset")
-                    if self.runner.running and not self.busy:
-                        self.start_runner()
+                    stats.record("ipset")  # winws re-reads ipset-all.txt by itself
             self._run(lambda log: lists.update_ipset(log), ipset_done)
         if now >= self._next_health:
             self._next_health = now + 600
@@ -952,8 +947,7 @@ class MainWindow(QWidget):
             self.start_watcher() if v else self.stop_watcher()
         elif key == "telegram":
             from app import lists
-            self._run(lambda log: lists.set_telegram(v, log),
-                      lambda _: self.start_runner() if self.runner.running and not self.busy else None)
+            self._run(lambda log: lists.set_telegram(v, log), lambda _: None)  # winws reloads the file itself
         elif key in ("game_tcp", "game_udp", "auto_hostlist") and self.runner.running and not self.busy:
             self.start_runner()
 
