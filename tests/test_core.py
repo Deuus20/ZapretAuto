@@ -279,3 +279,32 @@ def test_gamepick_saves_profile_not_global(tmp_path, monkeypatch):
     assert c == {"base": "ALT11", "picks": {}}
     assert st["strategy"]["base"] == "ALT12"  # global untouched
     assert st["game_profiles"]["game-win64.exe"]["base"] == "ALT11"
+
+
+def _fake_pick_env(monkeypatch, tmp_path, baseline_ok, vpn=None, bind=None):
+    from app import tester, vpn as vpnmod
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    settings._cache = None
+    targets = [tester.Target(f"T{i}", f"https://t{i}.example") for i in range(10)]
+    monkeypatch.setattr(tester, "load_targets", lambda: targets)
+    monkeypatch.setattr(tester, "probe_all",
+                        lambda ts: {t.key: (0.1 if i < baseline_ok else None) for i, t in enumerate(ts)})
+    monkeypatch.setattr(tester, "vpn_active", lambda: vpn)
+    monkeypatch.setattr(vpnmod, "bind_ip", lambda: bind)
+    monkeypatch.setattr(paths, "sync_lists", lambda: None)
+    return tester
+
+
+def test_auto_pick_keeps_strategy_when_nothing_is_blocked(tmp_path, monkeypatch):
+    tester = _fake_pick_env(monkeypatch, tmp_path, baseline_ok=9)
+    settings.save_settings(strategy={"base": "ALT12", "picks": {}})
+    logs = []
+    assert tester.auto_pick(logs.append, use_shared=False) == {"base": "ALT12", "picks": {}}
+    assert any("почти ничего не блокируется" in m for m in logs)
+
+
+def test_auto_pick_aborts_on_vpn_without_bypass_route(tmp_path, monkeypatch):
+    tester = _fake_pick_env(monkeypatch, tmp_path, baseline_ok=3, vpn="AmneziaVPN", bind=None)
+    logs = []
+    assert tester.auto_pick(logs.append, use_shared=False) == {}
+    assert any("VPN" in m for m in logs)
