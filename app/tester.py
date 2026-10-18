@@ -53,7 +53,7 @@ class _SrcAdapter(requests.adapters.HTTPAdapter):
         return super().init_poolmanager(*a, **kw)
 
 
-def fetch(url: str, max_bytes: int, deadline: float) -> tuple[int, str, int]:
+def fetch(url: str, max_bytes: int, deadline: float, h3: bool = False) -> tuple[int, str, int]:
     """Download up to max_bytes; returns (status, final_url, bytes). Uses a Chrome TLS fingerprint
     (curl_cffi) when available: DPI and strategies react to the ClientHello, and browsers/Discord send
     Chrome's, not Python's. Raises on network failure."""
@@ -64,6 +64,8 @@ def fetch(url: str, max_bytes: int, deadline: float) -> tuple[int, str, int]:
         cr = None
     if cr is not None:
         kw = {"interface": BIND} if BIND else {}
+        if h3:  # QUIC (UDP 443): browsers use it for YouTube/Google, and strategies have separate UDP profiles
+            kw["http_version"] = "v3only"
         r = cr.get(url, impersonate="chrome", timeout=TIMEOUT, stream=True, proxies={}, **kw)
         try:
             got = 0
@@ -121,6 +123,7 @@ def load_targets() -> list[Target]:
     out += [Target("FastlyPyPI", "https://pypi.org"), Target("FastlyPython", "https://www.python.org"),
             Target("GitHub", "https://github.com")]  # also needed for our own updates
     out += STUN_TARGETS
+    out += _quic_targets()
     out.append(Target("YouTubeSpeed", "speed://youtube", "tcp:443:list-google"))
     if load_settings().get("telegram"):
         out.append(Target("TelegramWeb", "https://web.telegram.org"))
@@ -216,6 +219,22 @@ def probe_tcp(t: Target) -> float | None:
         return None
 
 
+def _quic_targets() -> list["Target"]:
+    """HTTP/3 probes, scored for the UDP:443 profile that handles the host (hostlist vs ipset)."""
+    try:
+        import importlib.util
+        if not importlib.util.find_spec("curl_cffi"):
+            return []
+    except Exception:  # noqa: BLE001
+        return []
+    gen = _domains("list-general.txt") | _domains("list-general-user.txt")
+    out = []
+    for key, host in (("YouTubeQUIC", "www.youtube.com"), ("DiscordQUIC", "discord.com")):
+        listed = any(host == d or host.endswith("." + d) for d in gen)
+        out.append(Target(key, f"h3://{host}/", "udp:443:list-general" if listed else "udp:443:ipset-all"))
+    return out
+
+
 def probe(t: Target) -> float | None:
     """Seconds to read READ_BYTES (or full body), None on failure."""
     if t.is_stun:
@@ -225,8 +244,10 @@ def probe(t: Target) -> float | None:
     if t.url.startswith("tcp://"):
         return probe_tcp(t)
     t0 = time.perf_counter()
+    h3 = t.url.startswith("h3://")
+    url = "https://" + t.url[5:] if h3 else t.url
     try:
-        status, final, _ = fetch(t.url, READ_BYTES, TIMEOUT * 2)
+        status, final, _ = fetch(url, READ_BYTES, TIMEOUT * 2, h3=h3)
     except Exception:  # noqa: BLE001  (requests / curl_cffi network errors)
         return None
     if status == 451 or BLOCK_PAGE.search(final):  # ISP stub page
