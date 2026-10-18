@@ -347,3 +347,11 @@ def test_dns_poison_detection(monkeypatch):
     monkeypatch.setattr(socket, "gethostbyname_ex", lambda d: (d, [], fake[d]))
     monkeypatch.setattr(diag, "_doh", lambda d: {"104.21.32.39"})
     assert diag.dns_poisoned() == ["discord.com", "rutracker.org"]  # private IP / no overlap with DoH
+
+
+def test_quic_targets_grouped_by_profile():
+    pytest.importorskip("curl_cffi")
+    from app import tester
+    q = {t.key: t for t in tester.load_targets() if t.url.startswith("h3://")}
+    assert q["YouTubeQUIC"].group.startswith("udp:443:")
+    assert q["DiscordQUIC"].group == "udp:443:list-general"  # discord.com is in Flowseal's general list
