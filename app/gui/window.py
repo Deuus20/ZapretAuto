@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
-                               QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSystemTrayIcon,
+                               QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from app import diag, lists, logs, stats, strategies, tester
@@ -26,7 +26,37 @@ except Exception:  # noqa: BLE001
 from app.paths import ROOT
 TASK = "ZapretAuto"
 AUTO = "Авто (микс)"
-COLORS = {"on": "#2ecc71", "off": "#8a8a8a", "busy": "#f39c12"}
+COLORS = {"on": "#22c55e", "off": "#9aa3b5", "busy": "#f59e0b"}
+
+
+def app_icon(color: str = "#3b82f6") -> QIcon:
+    """Shield with a power symbol; drawn at several sizes so tray and taskbar stay crisp."""
+    from PySide6.QtGui import QPainterPath, QPen
+    icon = QIcon()
+    for size in (16, 20, 24, 32, 48, 64, 128, 256):
+        pm = QPixmap(size, size)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        w = float(size)
+        path = QPainterPath()
+        path.moveTo(w * .5, w * .04)
+        path.lineTo(w * .9, w * .18)
+        path.cubicTo(w * .9, w * .62, w * .72, w * .84, w * .5, w * .97)
+        path.cubicTo(w * .28, w * .84, w * .1, w * .62, w * .1, w * .18)
+        path.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(color))
+        p.drawPath(path)
+        pen = QPen(QColor("#ffffff"), max(1.5, w * .085), Qt.SolidLine, Qt.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        r = w * .22
+        p.drawArc(int(w * .5 - r), int(w * .5 - r), int(2 * r), int(2 * r), 125 * 16, 290 * 16)
+        p.drawLine(int(w * .5), int(w * .24), int(w * .5), int(w * .5))
+        p.end()
+        icon.addPixmap(pm)
+    return icon
 
 
 def circle(color: str) -> QIcon:
@@ -88,6 +118,13 @@ QTabBar::tab { background: transparent; padding: 7px 14px; color: #9aa3b5; borde
 QTabBar::tab:selected { color: #e6e8ee; border-bottom: 2px solid #3b82f6; }
 QPlainTextEdit, QTableWidget, QListWidget { background: #1b1e25; border: none; border-radius: 8px; font-family: Consolas; }
 QHeaderView::section { background: #1e2129; color: #9aa3b5; border: none; padding: 5px; }
+QWidget#chipsrow { background: transparent; }
+QLabel#chip { border-radius: 10px; padding: 2px 9px; font-size: 9pt; }
+QLabel#chip[ok="yes"] { background: #14301f; color: #4ade80; }
+QLabel#chip[ok="no"] { background: #3a1a1a; color: #f87171; }
+QLabel#empty { color: #8b93a3; padding: 30px; background: transparent; }
+QProgressBar#thin { background: #1e2129; border: none; border-radius: 2px; }
+QProgressBar#thin::chunk { background: #3b82f6; border-radius: 2px; }
 QToolTip { background: #262a34; color: #e6e8ee; border: 1px solid #3b82f6; padding: 6px; }
 """
 
@@ -148,6 +185,9 @@ class MainWindow(QWidget):
         logs._on_crash = lambda msg: self.bridge.log.emit(f"внутренняя ошибка: {msg} (подробности в журнале)")
         self._health_fails = 0
         self._health_running = False
+        self._last_tick = time.time()
+        self._crashes: list[float] = []
+        self._repick_pending = False
         self._net = None
         self._next_health = time.time() + 120
 
@@ -179,14 +219,35 @@ class MainWindow(QWidget):
         col.addStretch()
         col.addWidget(self.status)
         col.addWidget(self.substatus)
+        self.chips = QHBoxLayout()
+        self.chips.setSpacing(6)
+        chips_w = QWidget()
+        chips_w.setLayout(self.chips)
+        chips_w.setObjectName("chipsrow")
+        self.chips.setContentsMargins(0, 2, 0, 2)
+        col.addWidget(chips_w)
         self.btn_check_access = QPushButton("Проверить доступ")
         self.btn_check_access.setToolTip("Проверить, открываются ли Discord, YouTube и голосовой чат прямо сейчас")
         self.btn_check_access.setCursor(Qt.PointingHandCursor)
         self.btn_check_access.clicked.connect(self.check_access)
-        col.addWidget(self.btn_check_access, 0, Qt.AlignLeft)
+        brow = QHBoxLayout()
+        brow.addWidget(self.btn_check_access)
+        self.btn_site = QPushButton("Сайт не открывается…")
+        self.btn_site.setToolTip("Проверить конкретный сайт и, если поможет, добавить его в обход")
+        self.btn_site.setCursor(Qt.PointingHandCursor)
+        self.btn_site.clicked.connect(self.check_site)
+        brow.addWidget(self.btn_site)
+        brow.addStretch()
+        col.addLayout(brow)
         col.addStretch()
         hl.addLayout(col, 1)
         lay.addWidget(head)
+        self.progress = QProgressBar(objectName="thin")
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(4)
+        self.progress.setRange(0, 0)
+        self.progress.hide()
+        lay.addWidget(self.progress)
 
         # strategy row
         row = QHBoxLayout()
@@ -232,6 +293,9 @@ class MainWindow(QWidget):
             ("game_tcp", "Обход TCP для игр", False,
              "Game filter TCP: обход TCP-трафика игр на портах 1024-65535 (только адреса из ipset и списка игр).",
              True),
+            ("auto_hostlist", "Сам находить заблокированные сайты", True,
+             "winws сам замечает сайты, которые не открываются из-за DPI, и включает для них обход. "
+             "Найденное видно во вкладке «Списки» → list-auto.txt (можно удалить лишнее).", True),
             ("telegram", "Telegram (экспериментально)", False,
              "Добавить подсети Telegram в обход. Помогает не всем провайдерам: если Telegram "
              "заблокирован по IP, zapret бессилен — нужен прокси.", True),
@@ -266,6 +330,12 @@ class MainWindow(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.verticalHeader().hide()
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.games_empty = QLabel(objectName="empty")
+        self.games_empty.setAlignment(Qt.AlignCenter)
+        self.games_empty.setWordWrap(True)
+        gl.addWidget(self.games_empty, 1)
         gl.addWidget(self.table)
         r = QHBoxLayout()
         b1 = QPushButton("Игнорировать")
@@ -418,7 +488,7 @@ class MainWindow(QWidget):
         w.start()
 
     def _tray(self):
-        self.tray = QSystemTrayIcon(circle(COLORS["off"]), self)
+        self.tray = QSystemTrayIcon(app_icon(COLORS["off"]), self)
         m = QMenu()
         self.act_toggle = QAction("Включить", m)
         self.act_toggle.triggered.connect(self.toggle)
@@ -439,6 +509,31 @@ class MainWindow(QWidget):
     def log(self, text: str):
         self.logbox.appendPlainText(time.strftime("%H:%M:%S ") + text)
         logs.log.info(text)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not getattr(self, "_dark_title", False):
+            self._dark_title = True
+            try:
+                import ctypes
+                hwnd, on = int(self.winId()), ctypes.c_int(1)
+                for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (new / pre-20H1 builds)
+                    if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(on), 4) == 0:
+                        break
+            except Exception:  # noqa: BLE001
+                pass
+
+    def set_chips(self, res: dict):
+        """Colored pills: service ✓/✗ after an access check."""
+        while self.chips.count():
+            it = self.chips.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+        for name, ok in res.items():
+            c = QLabel(f"{'✓' if ok else '✗'} {name}", objectName="chip")
+            c.setProperty("ok", "yes" if ok else "no")
+            self.chips.addWidget(c)
+        self.chips.addStretch()
 
     def show_window(self):
         self.show()
@@ -466,8 +561,13 @@ class MainWindow(QWidget):
     def refresh(self):
         run = self.runner.running
         state = "busy" if self.busy else ("on" if run else "off")
-        self.tray.setIcon(circle(COLORS[state]))
-        self.setWindowIcon(circle(COLORS[state]))
+        if getattr(self, "_icon_state", None) != state:  # redraw only on change
+            self._icon_state = state
+            self.tray.setIcon(app_icon(COLORS[state]))
+            self.setWindowIcon(app_icon(COLORS[state]))
+        self.progress.setVisible(self.busy)
+        if not self.busy:
+            self.progress.setRange(0, 0)
         title = self.busy_text if self.busy else ("Обход включён" if run else "Обход выключен")
         self.status.setText(title)
         if self.error and not self.busy:
@@ -480,7 +580,7 @@ class MainWindow(QWidget):
                                        else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
         self.tray.setToolTip(f"ZapretAuto — {title}")
         self.btn_toggle.setAccessibleName(title)
-        for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access):
+        for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site):
             w.setEnabled(not self.busy)
         self.btn_toggle.setProperty("state", state)
         self.btn_toggle.setIcon(power_icon({"on": "#22c55e", "busy": "#f59e0b"}.get(state, "#9aa3b5")))
@@ -506,7 +606,8 @@ class MainWindow(QWidget):
             return False
         try:
             self.runner.start(s, self.settings.get("game_tcp", False),
-                              self.settings.get("game_udp", False) or self._game_udp_wanted())
+                              self.settings.get("game_udp", False) or self._game_udp_wanted(),
+                              self.settings.get("auto_hostlist", True))
             self.log(f"запущено: {s.name}")
             stats.record("start")
             self.error = ""
@@ -550,6 +651,50 @@ class MainWindow(QWidget):
         if save:
             self.save(show_advanced=on)
 
+    def _game_running(self) -> bool:
+        return bool(self.watcher and any(g.get("active") for g in self.watcher.games().values()))
+
+    def check_site(self):
+        """'Site does not open': test it, add to the bypass list, re-test, explain the outcome."""
+        text, ok = QInputDialog.getText(self, "Сайт не открывается", "Адрес сайта (например example.com):")
+        dom = re.sub(r"^(https?://)?([^/:?#]+).*$", r"\2", (text or "").strip()).lower()
+        if not ok or not re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", dom):
+            return
+        settings_snapshot = dict(self.settings)
+
+        def work(log):
+            from app import lists, vpn
+            tester.BIND = vpn.bind_ip() if tester.vpn_active() else None  # test the direct path
+            t = tester.Target("site", f"https://{dom}")
+            if not self.runner.running:
+                return "Сначала включите обход (большая кнопка), потом проверьте сайт."
+            before = tester.probe(t) is not None
+            if before:
+                return f"{dom} уже открывается — обход для него не нужен."
+            added = lists.add_user_domain(dom)
+            s = tester.chosen_strategy()
+            if s and self.runner.running:
+                self.runner.start(s, settings_snapshot.get("game_tcp", False),
+                                  settings_snapshot.get("game_udp", False) or self._game_udp_wanted(),
+                                  settings_snapshot.get("auto_hostlist", True))
+                import time as _t
+                _t.sleep(1.5)
+            if tester.probe(t) is not None:
+                return f"Готово: {dom} добавлен в обход и открывается."
+            ip_ok = tester.probe(tester.Target("ip", f"tcp://{dom}:443")) is not None
+            if added:
+                lists.remove_user_domain(dom)
+            if not ip_ok:
+                return f"{dom} заблокирован по IP-адресу — zapret тут не поможет, нужен VPN."
+            return f"Не помогло для {dom}. Попробуйте «Подобрать лучшую стратегию»."
+
+        def done(msg):
+            if msg:
+                self.log(msg)
+                QMessageBox.information(self, "Проверка сайта", msg)
+        self.log(f"проверяю {dom}…")
+        self._run(work, done)
+
     def _health(self):
         """Background check of key services; two failed checks in a row -> re-pick automatically."""
         if self._health_running or self.busy or not self.runner.running:
@@ -562,6 +707,7 @@ class MainWindow(QWidget):
                 return
             core = [v for k, v in res.items() if k in ("Discord", "YouTube", "Скорость YouTube")]
             stats.record("check", ok=all(core))
+            self.set_chips(res)
             if all(core):
                 self._health_fails = 0
                 return
@@ -571,6 +717,16 @@ class MainWindow(QWidget):
             self._next_health = time.time() + 60  # re-check soon
             if self._health_fails >= 2 and self.settings.get("auto_repick", True):
                 self._health_fails = 0
+                if self._game_running():
+                    if not self._repick_pending:
+                        self._repick_pending = True
+                        self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. "
+                                              "Починю после игры, чтобы не прерывать матч.")
+                    return
+                if time.time() - self.settings.get("last_auto_repick", 0) < 6 * 3600:
+                    self.log("автоподбор уже был недавно — жду, чтобы не дёргать обход")
+                    return
+                self.save(last_auto_repick=time.time())
                 stats.record("repick", reason=bad)
                 self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. Подбираю стратегию заново…")
                 self.autopick()
@@ -578,13 +734,28 @@ class MainWindow(QWidget):
 
     def _tick(self):
         """Detect winws dying on its own (antivirus, driver conflict)."""
-        if self._expect_running and not self.busy and not self.runner.running:
-            self._expect_running = False
-            stats.record("crash")
-            self.error = "Обход неожиданно остановился. Проверьте антивирус и вкладку «Диагностика»."
-            self.log("winws завершился сам")
-            self.tray.showMessage("ZapretAuto", self.error)
         now = time.time()
+        if now - self._last_tick > 60:  # timer is 2 s: a long gap means sleep/hibernate
+            self.log("пробуждение после сна — перезапускаю обход")
+            if self._expect_running and not self.busy:
+                self.start_runner()
+            self._next_health = now + 30
+        self._last_tick = now
+        if self._expect_running and not self.busy and not self.runner.running:
+            stats.record("crash")
+            self._crashes = [t for t in self._crashes if now - t < 600] + [now]
+            if len(self._crashes) <= 3:
+                self.log(f"winws завершился сам — перезапуск ({len(self._crashes)}/3)")
+                self.start_runner()
+            else:
+                self._expect_running = False
+                self.error = "Обход постоянно падает. Проверьте антивирус и вкладку «Диагностика»."
+                self.log("winws падает слишком часто — автоперезапуск остановлен")
+                self.tray.showMessage("ZapretAuto", self.error)
+        if self._repick_pending and not self.busy and not self._game_running():
+            self._repick_pending = False
+            self.log("игра закрыта — чиню обход")
+            self.autopick()
         net = tester.egress_adapter() if int(now) % 10 < 2 else self._net  # cheap: ~every 10 s
         if self._net is not None and net != self._net:
             self.log(f"сеть изменилась ({self._net} → {net}), проверю доступ")
@@ -626,9 +797,10 @@ class MainWindow(QWidget):
                 self.substatus.setText("Не удалось проверить")
                 return
             txt = "   ".join(f"{k} {'✓' if ok else '✗'}" for k, ok in res.items())
+            self.set_chips(res)
             self.log("проверка доступа: " + txt)
-            self.substatus.setText(txt + ("" if all(res.values()) else
-                                          "   — если что-то ✗, нажмите «Подобрать лучшую стратегию»"))
+            self.substatus.setText("Всё работает" if all(res.values()) else
+                                   "Если что-то ✗ — нажмите «Подобрать лучшую стратегию»")
         self._run(lambda log: tester.quick_check(), done)
 
     def _game_udp_wanted(self) -> bool:
@@ -669,7 +841,7 @@ class MainWindow(QWidget):
             from app import lists
             self._run(lambda log: lists.set_telegram(v, log),
                       lambda _: self.start_runner() if self.runner.running and not self.busy else None)
-        elif key in ("game_tcp", "game_udp") and self.runner.running and not self.busy:
+        elif key in ("game_tcp", "game_udp", "auto_hostlist") and self.runner.running and not self.busy:
             self.start_runner()
 
     def set_autostart(self, on: bool):
@@ -718,8 +890,11 @@ class MainWindow(QWidget):
             m = re.match(r"\[(\d+)/(\d+)\]", t)
             if m:
                 self.substatus.setText(f"Проверено стратегий: {m.group(1)} из {m.group(2)}")
+                self.progress.setRange(0, int(m.group(2)) + 4)
+                self.progress.setValue(int(m.group(1)))
             elif t.startswith("Финальная"):
                 self.substatus.setText("Финальная проверка лучших вариантов…")
+                self.progress.setValue(self.progress.maximum() - 2)
         self.worker = self._run(lambda log: tester.auto_pick(log), self._autopick_done, line)
 
     def _autopick_done(self, res):
@@ -792,6 +967,11 @@ class MainWindow(QWidget):
         games = self.watcher.games() if self.watcher else {}
         ign = set(self.settings.get("games_ignore", []))
         rows = [(k, v) for k, v in games.items() if k not in ign]
+        self.games_empty.setVisible(not rows)
+        self.games_empty.setText(
+            "Пока игр не найдено. Запустите игру — она появится здесь сама." if self.watcher else
+            "Включите «Следить за играми» в настройках — запущенные игры появятся здесь сами.")
+        self.table.setVisible(bool(rows))
         self.table.setRowCount(len(rows))
         for i, (exe, g) in enumerate(rows):
             ping = g.get("ping_ms")

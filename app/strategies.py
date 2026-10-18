@@ -37,7 +37,7 @@ class Strategy:
     wf_udp: str
     profiles: list[Profile] = field(default_factory=list)
 
-    def argv(self, game_tcp: bool = False, game_udp: bool = False) -> list[str]:
+    def argv(self, game_tcp: bool = False, game_udp: bool = False, auto_hostlist: bool = False) -> list[str]:
         subs = {
             "%BIN%": str(paths.BIN) + "\\",
             "%LISTS%": str(paths.LISTS) + "\\",
@@ -56,6 +56,9 @@ class Strategy:
                 out.append("--new")
             args = [sub(a).replace('"', "") for a in p.args]
             args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-vpn.txt'}")  # never touch VPN tunnels
+            if auto_hostlist and p.group == "tcp:80,443:list-general":
+                # winws adds domains whose connections fail (RST / retransmits) and desyncs them from then on
+                args += [f"--hostlist-auto={paths.LISTS / 'list-auto.txt'}", "--hostlist-auto-fail-threshold=3"]
             if "ipset-all" in p.group:  # route game ipset through every ipset profile (game ports + 80/443)
                 args.insert(1, f"--ipset={paths.LISTS / 'ipset-games.txt'}")
                 args.insert(1, f"--ipset={paths.LISTS / 'ipset-telegram.txt'}")

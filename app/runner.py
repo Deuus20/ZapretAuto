@@ -36,7 +36,8 @@ class Runner:
         p = self.proc
         return p is not None and p.poll() is None
 
-    def start(self, s: Strategy, game_tcp: bool = False, game_udp: bool = False) -> None:
+    def start(self, s: Strategy, game_tcp: bool = False, game_udp: bool = False,
+              auto_hostlist: bool = False) -> None:
         with self._lock:
             self.stop()
             paths.sync_lists()
@@ -45,7 +46,7 @@ class Runner:
             except Exception:  # noqa: BLE001
                 pass
             self.proc = subprocess.Popen(
-                s.argv(game_tcp, game_udp), cwd=paths.BIN, creationflags=CREATE_NO_WINDOW,
+                s.argv(game_tcp, game_udp, auto_hostlist), cwd=paths.BIN, creationflags=CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,  # an undrained PIPE would block winws
             )
             self.current = s

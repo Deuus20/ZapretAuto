@@ -42,6 +42,24 @@ def update_ipset(log=print) -> bool:
     return True
 
 
+def add_user_domain(domain: str) -> bool:
+    """Append a domain to list-general-user.txt; False if already there."""
+    f = paths.LISTS / "list-general-user.txt"
+    have = {l.strip().lower() for l in f.read_text(encoding="utf-8").splitlines()} if f.exists() else set()
+    if domain.lower() in have:
+        return False
+    with open(f, "a", encoding="utf-8") as fh:
+        fh.write(("" if not have or f.read_text(encoding="utf-8").endswith("\n") else "\n") + domain + "\n")
+    return True
+
+
+def remove_user_domain(domain: str) -> None:
+    f = paths.LISTS / "list-general-user.txt"
+    if f.exists():
+        keep = [l for l in f.read_text(encoding="utf-8").splitlines() if l.strip().lower() != domain.lower()]
+        f.write_text("\n".join(keep) + "\n", encoding="utf-8")
+
+
 def user_list_paths() -> dict:
     return {
         "list-general-user.txt": paths.LISTS / "list-general-user.txt",

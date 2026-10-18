@@ -15,6 +15,7 @@ SolidCompression=yes
 OutputDir=dist
 OutputBaseFilename=ZapretAuto-Setup
 UninstallDisplayIcon={app}\ZapretAuto.exe
+SetupIconFile=assets\icon.ico
 WizardStyle=modern
 CloseApplications=force
 

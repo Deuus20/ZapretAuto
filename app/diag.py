@@ -112,10 +112,42 @@ def run_checks() -> list[dict]:
     else:
         res.append(_item("VPN", "ok", ("раздельный туннель или VPN выключен" if srv else "нет") +
                          (f"; серверы VPN исключены из обхода: {', '.join(sorted(srv))}" if srv else "")))
+    quic_off = _quic_disabled()
+    res.append(_item("QUIC в браузерах", "ok",
+                     "отключён политикой" if quic_off else
+                     "включён — если YouTube в браузере тормозит, а «Проверить доступ» показывает ✓, нажмите «Исправить»",
+                     None if quic_off else "disable_quic"))
     return res
 
 
+QUIC_POLICIES = (r"SOFTWARE\Policies\Google\Chrome", r"SOFTWARE\Policies\Microsoft\Edge",
+                 r"SOFTWARE\Policies\YandexBrowser")
+
+
+def _quic_disabled() -> bool:
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, QUIC_POLICIES[0]) as k:
+            return winreg.QueryValueEx(k, "QuicAllowed")[0] == 0
+    except OSError:
+        return False
+
+
+def _disable_quic() -> str:
+    """Browsers then use TCP for YouTube, which the bypass handles more reliably. Restart the browser."""
+    import winreg
+    for path in QUIC_POLICIES:
+        with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as k:
+            winreg.SetValueEx(k, "QuicAllowed", 0, winreg.REG_DWORD, 0)
+    return "QUIC отключён для Chrome, Edge и Яндекс.Браузера — перезапустите браузер"
+
+
 def apply_fix(fix_id: str) -> str:
+    if fix_id == "disable_quic":
+        try:
+            return _disable_quic()
+        except OSError as e:
+            return f"не удалось: {e}"
     cmds = {
         "tcp_timestamps": [["netsh", "interface", "tcp", "set", "global", "timestamps=enabled"]],
         "stop_zapret_service": [["sc", "stop", "zapret"]],

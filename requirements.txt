@@ -3,3 +3,5 @@ psutil
 requests
 pyinstaller
 pytest
+pillow
+pyflakes

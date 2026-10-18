@@ -22,6 +22,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - Build: `powershell -File build.ps1` -> dist\ZapretAuto (onedir, uac-admin, vendor copied next to exe).
 
 ## Tools
+- `python tools/make_icon.py`: regenerate assets/icon.ico from app_icon().
 - `python tools/shot.py <out.png> [maxW]`: screenshot (use maxW 1024 to save tokens), then Read the png.
 
 ## Tests

@@ -239,6 +239,10 @@ def quick_check() -> dict[str, bool]:
     BIND = vpnmod.bind_ip() if vpn_active() else None  # check the direct path, not the VPN
     ts = [t for t in load_targets() if t.key in QUICK.values()]
     res = probe_all(ts)
+    retry = [t for t in ts if res.get(t.key) is None]
+    if retry:  # single probes through DPI are noisy: confirm failures once
+        time.sleep(3)
+        res.update({k: v for k, v in probe_all(retry).items() if v is not None})
     return {name: res.get(key) is not None for name, key in QUICK.items() if key in res}
 
 
