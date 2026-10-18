@@ -55,6 +55,24 @@ Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\vendor"
 
 [Code]
+procedure RunHidden(const Exe, Params: String);
+var
+  Code: Integer;
+begin
+  Exec(Exe, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
+{ WinDivert64.sys stays locked by the loaded driver even after winws exits: unload it before copying files }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /IM ZapretAuto.exe');
+  RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /IM winws.exe');
+  RunHidden(ExpandConstant('{sys}\sc.exe'), 'stop WinDivert');
+  RunHidden(ExpandConstant('{sys}\sc.exe'), 'delete WinDivert');
+  Sleep(1500);
+  Result := '';
+end;
+
 function IsSelfUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:UPDATE|0}') = '1';
