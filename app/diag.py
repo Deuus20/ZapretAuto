@@ -52,6 +52,42 @@ def first_problem() -> str | None:
     return None
 
 
+ANYCAST_DOMAINS = ("discord.com", "rutracker.org")  # Cloudflare anycast: same IPs from any resolver
+STUB_CHECK_DOMAINS = ("www.youtube.com",)
+
+
+def _doh(name: str) -> set[str]:
+    import requests
+    j = requests.get("https://1.1.1.1/dns-query", params={"name": name, "type": "A"},
+                     headers={"accept": "application/dns-json"}, timeout=6).json()
+    return {a["data"] for a in j.get("Answer", []) if a.get("type") == 1}
+
+
+def dns_poisoned() -> list[str] | None:
+    """Domains whose system-resolver answers look forged (bogus IPs, or no overlap with DoH for anycast
+    domains). None if DoH itself is unreachable."""
+    import ipaddress
+    import socket
+    bad = []
+    for d in ANYCAST_DOMAINS + STUB_CHECK_DOMAINS:
+        try:
+            sys_ips = set(socket.gethostbyname_ex(d)[2])
+        except OSError:
+            continue
+        if any((a := ipaddress.ip_address(ip)).is_private or a.is_loopback or a.is_unspecified or a.is_link_local
+               for ip in sys_ips):
+            bad.append(d)
+            continue
+        if d in ANYCAST_DOMAINS:
+            try:
+                doh = _doh(d)
+            except Exception:  # noqa: BLE001
+                return None
+            if doh and not (sys_ips & doh):
+                bad.append(d)
+    return bad
+
+
 def run_checks() -> list[dict]:
     res = []
     procs = _procs()
@@ -115,6 +151,15 @@ def run_checks() -> list[dict]:
         res.append(_item("Secure DNS (DoH)", "warn", "не включён — провайдер может подменять DNS"))
     else:
         res.append(_item("Secure DNS (DoH)", "ok", "включён"))
+
+    bad = dns_poisoned()
+    if bad is None:
+        res.append(_item("Подмена DNS", "ok", "не удалось проверить (нет доступа к 1.1.1.1)"))
+    elif bad:
+        res.append(_item("Подмена DNS", "err", "провайдер подменяет адреса: " + ", ".join(bad) +
+                         " — обход не поможет, пока не включён защищённый DNS (DoH) в Windows или браузере"))
+    else:
+        res.append(_item("Подмена DNS", "ok", "ответы DNS совпадают с DNS-over-HTTPS"))
 
     try:
         from .tester import vpn_active

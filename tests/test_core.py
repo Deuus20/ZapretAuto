@@ -335,3 +335,12 @@ def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
     logs = []
     assert tester.auto_pick(logs.append, use_shared=False) == {"base": "ALT11", "picks": {}}
     assert any("оставляю текущую" in m for m in logs)
+
+
+def test_dns_poison_detection(monkeypatch):
+    from app import diag
+    import socket
+    fake = {"discord.com": ["10.10.10.10"], "rutracker.org": ["1.2.3.4"], "www.youtube.com": ["142.251.150.4"]}
+    monkeypatch.setattr(socket, "gethostbyname_ex", lambda d: (d, [], fake[d]))
+    monkeypatch.setattr(diag, "_doh", lambda d: {"104.21.32.39"})
+    assert diag.dns_poisoned() == ["discord.com", "rutracker.org"]  # private IP / no overlap with DoH
