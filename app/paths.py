@@ -30,6 +30,8 @@ USER_LISTS = {
     "list-general-user.txt": "# Never leave this file empty\ndomain.example.abc\n",
     "list-exclude-user.txt": "domain.example.abc\n",
     "ipset-games.txt": "203.0.113.113/32\n",
+    "ipset-telegram.txt": "203.0.113.113/32\n",
+    "ipset-exclude-vpn.txt": "203.0.113.113/32\n",
 }
 
 

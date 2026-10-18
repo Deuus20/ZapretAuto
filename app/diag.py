@@ -102,7 +102,16 @@ def run_checks() -> list[dict]:
         v = vpn_active()
     except Exception:  # noqa: BLE001
         v = None
-    res.append(_item("VPN", "warn" if v else "ok", f"трафик идёт через {v}" if v else "нет"))
+    from . import vpn as vpnmod
+    srv = vpnmod.server_ips()
+    if v:
+        b = vpnmod.bind_ip()
+        res.append(_item("VPN", "ok" if b else "warn",
+                         f"весь трафик идёт через {v}; " + ("подбор и проверки идут мимо него" if b else
+                                                            "обход zapret бесполезен, пока VPN включён")))
+    else:
+        res.append(_item("VPN", "ok", ("раздельный туннель или VPN выключен" if srv else "нет") +
+                         (f"; серверы VPN исключены из обхода: {', '.join(sorted(srv))}" if srv else "")))
     return res
 
 

@@ -10,9 +10,7 @@
       "Read(./vendor/zapret/lists/ipset-all.txt.backup)",
       "Read(./vendor/zapret/service.bat)",
       "Read(./vendor/zapret/utils/test zapret.ps1)",
-      "Read(./.venv/**)",
-      "Read(./build/**)",
-      "Read(./dist/**)"
+      "Read(./.venv/**)"
     ]
   }
 }
