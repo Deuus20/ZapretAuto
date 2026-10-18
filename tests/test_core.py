@@ -378,3 +378,30 @@ def test_vpn_exclude_file(tmp_path, monkeypatch):
     monkeypatch.setattr(vpn, "server_ips", lambda: set())
     vpn.write_exclude()
     assert (tmp_path / "ipset-exclude-vpn.txt").read_text().split() == [vpn.PLACEHOLDER]  # never empty
+
+
+def test_gui_timed_pause(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        state = {"on": True}
+        monkeypatch.setattr(type(w.runner), "running", property(lambda self: state["on"]))
+        monkeypatch.setattr(w.runner, "stop", lambda: state.update(on=False))
+        monkeypatch.setattr(w, "start_runner", lambda: state.update(on=True))
+        w.tray.showMessage = lambda *a, **k: None
+        w.pause(1)
+        assert state["on"] is False
+        w._resume_at = time.time() - 1  # pretend the minute is over
+        w._tick()
+        assert state["on"] is True and w._resume_at == 0
+    finally:
+        w.tray.hide()
+        w._timer.stop()

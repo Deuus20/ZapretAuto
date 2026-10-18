@@ -519,9 +519,11 @@ class MainWindow(QWidget):
         a3.triggered.connect(self.show_window)
         a5 = QAction("Проверить доступ", m)
         a5.triggered.connect(lambda: self.check_access(notify=True))
+        a6 = QAction("Выключить на 15 минут", m)
+        a6.triggered.connect(lambda: self.pause(15))
         a4 = QAction("Выход", m)
         a4.triggered.connect(self.quit)
-        for a in (self.act_toggle, a5, a2, a3, a4):
+        for a in (self.act_toggle, a6, a5, a2, a3, a4):
             m.addAction(a)
         self._menu = m
         self.tray.setContextMenu(m)
@@ -703,6 +705,18 @@ class MainWindow(QWidget):
                 self.refresh()
         self._run(lambda log: diag.first_problem(), done)
 
+    def pause(self, minutes: int):
+        """Turn the bypass off for a while (e.g. a site that dislikes it) and back on automatically."""
+        if self.busy or not self.runner.running:
+            return
+        self._expect_running = False
+        self.runner.stop()
+        stats.record("stop")
+        self._resume_at = time.time() + minutes * 60
+        self.log(f"обход выключен на {minutes} мин")
+        self.tray.showMessage("ZapretAuto", f"Обход выключен на {minutes} минут, потом включится сам.")
+        self.refresh()
+
     def cancel_busy(self):
         self._cancel = True
         self.btn_cancel.setEnabled(False)
@@ -821,6 +835,12 @@ class MainWindow(QWidget):
         """Detect winws dying on its own (antivirus, driver conflict)."""
         now = time.time()
         self._ticks = getattr(self, "_ticks", 0) + 1
+        resume = getattr(self, "_resume_at", 0)
+        if resume and time.time() >= resume:
+            self._resume_at = 0
+            if not self.runner.running and not self.busy:
+                self.start_runner()
+                self.tray.showMessage("ZapretAuto", "Обход снова включён.")
         if self._ticks % 5 == 0:  # ~10 s
             self._check_profiles()
         if now - self._last_tick > 60:  # timer is 2 s: a long gap means sleep/hibernate
@@ -902,6 +922,7 @@ class MainWindow(QWidget):
         if self.busy:
             return
         self.error = ""
+        self._resume_at = 0  # a manual on/off cancels a timed pause
         if self.runner.running:
             self._expect_running = False
             self.runner.stop()
