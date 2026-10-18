@@ -2,6 +2,9 @@
 
 # ZapretAuto
 
+[![tests](https://github.com/yuav2/ZapretAuto/actions/workflows/tests.yml/badge.svg)](https://github.com/yuav2/ZapretAuto/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/yuav2/ZapretAuto)](https://github.com/yuav2/ZapretAuto/releases/latest)
+
 Программа, которая сама включает и чинит обход блокировок Discord, YouTube и онлайн-игр. Внутри — движок
 [zapret](https://github.com/bol-van/zapret) (winws + WinDivert) и стратегии
 [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube). ZapretAuto сам подбирает
