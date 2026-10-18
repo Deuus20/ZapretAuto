@@ -15,6 +15,9 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - `gamewatch.py`: psutil poll for new processes with remote endpoints; probe; add IPs to data ipset + game filter.
 - `gui/`: tray + main window.
 
+## Tools
+- `python tools/shot.py <out.png> [maxW]`: screenshot (use maxW 1024 to save tokens), then Read the png.
+
 ## Token rules
 - Don't read vendor/bin, big lists, service.bat or `test zapret.ps1` (denied). Grep them if needed.
 - Read only the file ranges you need. Batch shell commands. Short replies.

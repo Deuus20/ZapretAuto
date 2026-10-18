@@ -67,7 +67,7 @@ def parse_bat(path: Path) -> Strategy:
     m = re.search(r'winws\.exe"\s+(.*)', text)
     if not m:
         raise ValueError(f"no winws command in {path.name}")
-    tokens = shlex.split(m.group(1), posix=False)
+    tokens = shlex.split(m.group(1).replace("^!", "!"), posix=False)
     wf_tcp = wf_udp = GAME_OFF
     profiles, cur = [], []
     for t in tokens:
