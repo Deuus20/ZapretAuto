@@ -17,6 +17,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - `vpn.py`: VPN server IPs -> ipset-exclude-vpn.txt (all profiles), bind_ip() to test around full-tunnel VPN.
 - `sharedb.py`: shared per-ISP (ASN) picks: strategies-db.json in repo, reports via issues merged by .github/workflows/strategy-db.yml + scripts/merge_report.py.
 - `diag.py`: system checks + fixes. `lists.py`: ipset update from GitHub (marker ipset-all.txt.custom), user list paths.
+- `gui/style.py`: palette, stylesheet, drawn icons. `gui/worker.py`: QThread Worker + Bridge signals.
 - `gui/window.py`: tray + main window; `main.py` entry (elevation, single instance; env ZAPRET_NO_AUTOSTART=1 skips autostart for tests).
 - Settings keys (data/settings.json): strategy{base,picks}, game_tcp, game_udp, auto_update, game_watch, games, games_force, games_ignore.
 - Build: `powershell -File build.ps1` -> dist\ZapretAuto (onedir, uac-admin, vendor copied next to exe).
