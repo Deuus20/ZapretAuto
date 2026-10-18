@@ -1,6 +1,6 @@
 """Repeatable game-login test matrix: each config N times, interleaved, incl. a no-bypass baseline.
 
-Usage: python tools/game_matrix.py <steam_appid> <process_prefix> <rounds> <out.json>
+Usage: python tools/game_matrix.py <steam_appid> <process_prefix> <rounds> <out.json> [configs_json]
 Login success = the game holds LOGIN_SERVERS+ distinct ESTABLISHED servers within WAIT seconds.
 """
 import json
@@ -25,6 +25,8 @@ CONFIGS = {
     "ALT11": ({"base": "ALT11", "picks": {}}, False),
     "FTAA": ({"base": "FAKE TLS AUTO ALT", "picks": {}}, False),
 }
+if len(sys.argv) > 5:  # optional JSON {"name": {"base":..,"picks":{..}} | null}; auto-hostlist on
+    CONFIGS = {k: (None if v is None else (v, True)) for k, v in json.loads(sys.argv[5]).items()}
 by = {s.name: s for s in strategies.load_all()}
 
 

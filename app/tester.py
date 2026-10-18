@@ -273,7 +273,7 @@ def quick_check() -> dict[str, bool]:
     return {name: res.get(key) is not None for name, key in QUICK.items() if key in res}
 
 
-def auto_pick(log=print) -> dict:
+def auto_pick(log=print, use_shared: bool | None = None) -> dict:
     """Test every strategy, mix the best profile per group, save to data/settings.json."""
     runner, targets = Runner(), load_targets()
     paths.sync_lists()
@@ -290,7 +290,9 @@ def auto_pick(log=print) -> dict:
                 "Отключите VPN или настройте раздельное туннелирование.")
             return {}
         log(f"Включён VPN «{vpn}» — проверяю мимо него, через адаптер {BIND}.")
-    shared = _try_shared(runner, targets, log)
+    if use_shared is None:  # shared picks are a fast first setup; re-picks always search fully
+        use_shared = not load_settings().get("strategy")
+    shared = _try_shared(runner, targets, log) if use_shared else None
     if shared:
         return shared
     results = {"_baseline": probe_all(targets)}
@@ -362,7 +364,7 @@ def _try_shared(runner: Runner, targets, log) -> dict | None:
         ok = sum(score(r)[0] for r in runs)
         total = len(targets) * ROUNDS
         log(f"  результат: {ok} из {total}")
-        if ok >= 0.85 * total:
+        if ok >= 0.92 * total:
             save_settings(strategy=c, last_pick={"score": ok, "total": total, "shared": True})
             log("Готово: взята проверенная комбинация для вашего провайдера.")
             return c

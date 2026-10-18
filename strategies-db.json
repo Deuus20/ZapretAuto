@@ -15,7 +15,8 @@
       }
      },
      "score": 23,
-     "total": 28
+     "total": 28,
+     "app": "1.0.3"
     },
     {
      "choice": {
@@ -29,20 +30,10 @@
       }
      },
      "score": 23,
-     "total": 28
+     "total": 28,
+     "app": "1.0.3"
     }
-   ],
-   "choice": {
-    "base": "ALT12",
-    "picks": {
-     "tcp:443:list-google": "FAKE TLS AUTO",
-     "tcp:80,443,8443:ipset-all": "ALT7",
-     "tcp:80,443:list-general": "ALT12",
-     "udp:19294-19344:discord,stun": "SIMPLE FAKE ALT2",
-     "udp:other": "ALT4"
-    }
-   },
-   "votes": 2
+   ]
   }
  }
 }

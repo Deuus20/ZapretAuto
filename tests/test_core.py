@@ -125,7 +125,7 @@ def _merge_mod():
 
 
 def _body(**over):
-    r = {"asn": "AS25513", "isp": "MGTS", "zapret": "1.10.3", "app": "1.0.3",
+    r = {"asn": "AS25513", "isp": "MGTS", "zapret": "1.10.3", "app": "1.0.8",
          "choice": {"base": "ALT12", "picks": {"tcp:443:list-google": "FAKE TLS AUTO ALT", "udp:other": "ALT3"}},
          "score": 23, "total": 28} | over
     return "text\n```json\n" + json.dumps(r) + "\n```\n"
@@ -186,3 +186,11 @@ def test_gamepick_majority_rating(monkeypatch):
     seq2 = iter([False, False, True])
     monkeypatch.setattr(gamepick, "_attempt", lambda *a: (next(seq2), 0, 0))
     assert gamepick._rate("g", "x", lambda: False, 3) == 0  # stops after 2 failures
+
+
+def test_merge_ignores_old_app_reports():
+    m = _merge_mod()
+    db = m.merge({}, m.parse(_body(app="1.0.3")))
+    assert "choice" not in db["AS25513"]["1.10.3"]
+    db = m.merge(db, m.parse(_body(app="1.0.8", choice={"base": "SIMPLE FAKE ALT", "picks": {}}, score=34, total=36)))
+    assert db["AS25513"]["1.10.3"]["choice"]["base"] == "SIMPLE FAKE ALT"
