@@ -13,6 +13,7 @@ from .runner import Runner
 
 READ_BYTES = 32 * 1024  # DPI often freezes TLS sessions after ~16 KB
 TIMEOUT = 5
+ROUNDS = 3
 
 
 @dataclass
@@ -131,11 +132,16 @@ def auto_pick(log=print) -> dict:
         winner = max(tested.values(), key=lambda s: score({k: results[s.name][k] for k in keys}))
         picks[g] = winner.name
     mixed = strategies.mix("mix", {g: tested[n] for g, n in picks.items()}, best)
-    results["mix"] = test_strategy(runner, mixed, targets)
-    log(f"mix {picks}: {score(results['mix'])[0]}/{len(targets)}" if results["mix"] else "mix: winws failed")
-
-    use_mix = results["mix"] and score(results["mix"]) > score(results[best.name])
-    choice = {"base": best.name, "picks": picks if use_mix else {}}
+    # single runs are noisy: re-test finalists several times and sum successes
+    finalists = sorted(tested.values(), key=lambda s: score(results[s.name]), reverse=True)[:3] + [mixed]
+    totals = {}
+    for s in finalists:
+        runs = [r for r in (test_strategy(runner, s, targets) for _ in range(ROUNDS)) if r]
+        totals[s.name] = (sum(score(r)[0] for r in runs), sum(score(r)[1] for r in runs))
+        results[f"final:{s.name}"] = runs
+        log(f"final {s.name}: {totals[s.name][0]}/{len(targets) * ROUNDS}")
+    win = max(totals, key=totals.get)
+    choice = {"base": best.name, "picks": picks} if win == "mix" else {"base": win, "picks": {}}
     paths.DATA.mkdir(exist_ok=True)
     (paths.DATA / "results.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
     save_settings(strategy=choice)
