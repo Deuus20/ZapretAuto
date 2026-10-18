@@ -2,6 +2,7 @@
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
@@ -141,6 +142,10 @@ class MainWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(2000)
+        self._health_fails = 0
+        self._health_running = False
+        self._net = None
+        self._next_health = time.time() + 120
 
     # ---------- UI ----------
     def _build(self):
@@ -213,6 +218,12 @@ class MainWindow(QWidget):
              "Game filter UDP: обход UDP-трафика игр на портах 1024-65535. Включается сам, когда найдена игра."),
             ("game_tcp", "Обход TCP для игр", False,
              "Game filter TCP: обход TCP-трафика игр на портах 1024-65535 (только адреса из ipset и списка игр)."),
+            ("auto_repick", "Сам чинить при сбоях", True,
+             "Каждые 10 минут и при смене сети проверять Discord и YouTube. Если они дважды подряд "
+             "не открываются — автоматически подобрать стратегию заново."),
+            ("telegram", "Telegram (экспериментально)", False,
+             "Добавить подсети Telegram в обход. Помогает не всем провайдерам: если Telegram "
+             "заблокирован по IP, zapret бессилен — нужен прокси."),
         ]):
             c = QCheckBox(text)
             c.setToolTip(tip)
@@ -462,6 +473,30 @@ class MainWindow(QWidget):
         self.refresh()
         return self.runner.running
 
+    def _health(self):
+        """Background check of key services; two failed checks in a row -> re-pick automatically."""
+        if self._health_running or self.busy or not self.runner.running:
+            return
+        self._health_running = True
+
+        def done(res):
+            self._health_running = False
+            if not res or self.busy:
+                return
+            core = [v for k, v in res.items() if k in ("Discord", "YouTube", "Скорость YouTube")]
+            if all(core):
+                self._health_fails = 0
+                return
+            self._health_fails += 1
+            bad = ", ".join(k for k, v in res.items() if not v)
+            self.log(f"проверка: не работает {bad} ({self._health_fails}/2)")
+            self._next_health = time.time() + 60  # re-check soon
+            if self._health_fails >= 2 and self.settings.get("auto_repick", True):
+                self._health_fails = 0
+                self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. Подбираю стратегию заново…")
+                self.autopick()
+        self._run(lambda log: tester.quick_check(), done)
+
     def _tick(self):
         """Detect winws dying on its own (antivirus, driver conflict)."""
         if self._expect_running and not self.busy and not self.runner.running:
@@ -469,6 +504,15 @@ class MainWindow(QWidget):
             self.error = "Обход неожиданно остановился. Проверьте антивирус и вкладку «Диагностика»."
             self.log("winws завершился сам")
             self.tray.showMessage("ZapretAuto", self.error)
+        now = time.time()
+        net = tester.egress_adapter() if int(now) % 10 < 2 else self._net  # cheap: ~every 10 s
+        if self._net is not None and net != self._net:
+            self.log(f"сеть изменилась ({self._net} → {net}), проверю доступ")
+            self._next_health = now + 20
+        self._net = net
+        if now >= self._next_health:
+            self._next_health = now + 600
+            self._health()
         self.refresh()
 
     def _run(self, fn, done, line=None):
@@ -529,6 +573,10 @@ class MainWindow(QWidget):
             self.set_autostart(v)
         elif key == "game_watch":
             self.start_watcher() if v else self.stop_watcher()
+        elif key == "telegram":
+            from app import lists
+            self._run(lambda log: lists.set_telegram(v, log),
+                      lambda _: self.start_runner() if self.runner.running and not self.busy else None)
         elif key in ("game_tcp", "game_udp") and self.runner.running and not self.busy:
             self.start_runner()
 
@@ -557,9 +605,12 @@ class MainWindow(QWidget):
             return
         vpn = tester.vpn_active()
         if vpn:
-            QMessageBox.warning(self, "VPN", f"Активен VPN ({vpn}). Отключите его: результаты подбора были бы неверны.")
-            self.log(f"автоподбор отменён: VPN {vpn}")
-            return
+            from app import vpn as vpnmod
+            if not vpnmod.bind_ip():
+                QMessageBox.warning(self, "VPN", f"Активен VPN ({vpn}), и проверить сеть мимо него не получается. "
+                                    "Отключите VPN на время подбора.")
+                return
+            self.log(f"VPN {vpn} включён — подбор пойдёт мимо него")
         self._expect_running = False
         self.runner.stop()
         self.busy = True

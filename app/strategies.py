@@ -55,8 +55,10 @@ class Strategy:
             if i:
                 out.append("--new")
             args = [sub(a).replace('"', "") for a in p.args]
+            args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-vpn.txt'}")  # never touch VPN tunnels
             if "ipset-all" in p.group:  # route game ipset through every ipset profile (game ports + 80/443)
                 args.insert(1, f"--ipset={paths.LISTS / 'ipset-games.txt'}")
+                args.insert(1, f"--ipset={paths.LISTS / 'ipset-telegram.txt'}")
             out += args
         left = sorted({v for a in out for v in re.findall(r"%[\w~]+%", a)})
         if left:

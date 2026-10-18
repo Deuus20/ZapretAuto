@@ -32,8 +32,33 @@ class Target:
     def is_stun(self) -> bool:
         return self.url.startswith("stun://")
 
+    @property
+    def is_speed(self) -> bool:
+        return self.url.startswith("speed://")
 
-VPN_RE = re.compile(r"vpn|wireguard|amnezia|outline|nekoray|hiddify|^(wg|tun|tap)\d*$|\b(tun|tap)\b", re.I)
+
+from .vpn import VPN_RE  # noqa: E402
+
+BIND: str | None = None  # source IP of a physical adapter when testing around a full-tunnel VPN
+
+
+class _SrcAdapter(requests.adapters.HTTPAdapter):
+    def __init__(self, src: str):
+        self.src = src
+        super().__init__()
+
+    def init_poolmanager(self, *a, **kw):
+        kw["source_address"] = (self.src, 0)
+        return super().init_poolmanager(*a, **kw)
+
+
+def _get(url: str, **kw):
+    """requests.get that leaves through BIND's adapter when set (Windows strong-host routing)."""
+    s = requests.Session()
+    if BIND:
+        s.mount("https://", _SrcAdapter(BIND))
+        s.mount("http://", _SrcAdapter(BIND))
+    return s.get(url, **kw)
 
 
 def egress_adapter() -> str | None:
@@ -60,6 +85,10 @@ def load_targets() -> list[Target]:
         if m:
             out.append(Target(*m.groups()))
     out += STUN_TARGETS
+    out.append(Target("YouTubeSpeed", "speed://youtube", "tcp:443:list-google"))
+    if load_settings().get("telegram"):
+        out.append(Target("TelegramWeb", "https://web.telegram.org"))
+        out.append(Target("TelegramDC2", "tcp://149.154.167.50:443"))
     return out
 
 
@@ -80,6 +109,8 @@ def probe_stun(t: Target, timeout: float = 2.0, tries: int = 2) -> float | None:
         req = struct.pack("!HHI", 0x0001, 0, 0x2112A442) + tid
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                if BIND:
+                    s.bind((BIND, 0))
                 s.settimeout(timeout)
                 addr = (socket.gethostbyname(host), int(port))
                 t0 = time.perf_counter()
@@ -117,13 +148,51 @@ def target_group(t: Target) -> str:
 BLOCK_PAGE = re.compile(r"warning\.rt\.ru|blocked|zapret-info|rkn\.gov|eais", re.I)
 
 
+SPEED_MIN = 250 * 1024    # B/s below which YouTube counts as throttled
+SPEED_BYTES = 1536 * 1024
+
+
+def probe_speed(t: Target) -> float | None:
+    """Download the ~1 MB YouTube front page completely: catches DPI that freezes a session after the
+    first kilobytes. Seconds taken, None if it stalls or is slower than SPEED_MIN."""
+    t0 = time.perf_counter()
+    got = 0
+    try:
+        with _get("https://www.youtube.com/", stream=True, timeout=TIMEOUT,
+                          proxies={"http": None, "https": None}, headers={"User-Agent": "Mozilla/5.0"}) as r:
+            for chunk in r.iter_content(1 << 15):
+                got += len(chunk)
+                if got >= SPEED_BYTES or time.perf_counter() - t0 > 15:
+                    break
+    except requests.RequestException:
+        return None
+    dt = time.perf_counter() - t0
+    return dt if got >= 400 * 1024 and got / dt >= SPEED_MIN else None
+
+
+def probe_tcp(t: Target) -> float | None:
+    import socket
+    host, port = t.url[6:].rsplit(":", 1)
+    t0 = time.perf_counter()
+    try:
+        with socket.create_connection((host, int(port)), timeout=TIMEOUT,
+                                      source_address=(BIND, 0) if BIND else None):
+            return time.perf_counter() - t0
+    except OSError:
+        return None
+
+
 def probe(t: Target) -> float | None:
     """Seconds to read READ_BYTES (or full body), None on failure."""
     if t.is_stun:
         return probe_stun(t)
+    if t.is_speed:
+        return probe_speed(t)
+    if t.url.startswith("tcp://"):
+        return probe_tcp(t)
     t0 = time.perf_counter()
     try:
-        with requests.get(t.url, timeout=TIMEOUT, stream=True, proxies={"http": None, "https": None},
+        with _get(t.url, timeout=TIMEOUT, stream=True, proxies={"http": None, "https": None},
                           headers={"User-Agent": "Mozilla/5.0"}) as r:
             if r.status_code == 451 or BLOCK_PAGE.search(r.url):  # ISP stub page
                 return None
@@ -159,14 +228,18 @@ def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float
         runner.stop()
 
 
-QUICK = {"Discord": "DiscordMain", "YouTube": "YouTubeWeb", "Голос Discord": "STUN_Google19302"}
+QUICK = {"Discord": "DiscordMain", "YouTube": "YouTubeWeb", "Скорость YouTube": "YouTubeSpeed",
+         "Голос Discord": "STUN_Google19302", "Telegram": "TelegramWeb"}
 
 
 def quick_check() -> dict[str, bool]:
     """Check key services through the currently running bypass (does not touch winws)."""
+    global BIND
+    from . import vpn as vpnmod
+    BIND = vpnmod.bind_ip() if vpn_active() else None  # check the direct path, not the VPN
     ts = [t for t in load_targets() if t.key in QUICK.values()]
     res = probe_all(ts)
-    return {name: res.get(key) is not None for name, key in QUICK.items()}
+    return {name: res.get(key) is not None for name, key in QUICK.items() if key in res}
 
 
 def auto_pick(log=print) -> dict:
@@ -176,10 +249,16 @@ def auto_pick(log=print) -> dict:
     all_s = strategies.load_all()
     groups = {t.key: target_group(t) for t in targets}
 
+    global BIND
+    BIND = None
     if vpn := vpn_active():
-        log(f"Включён VPN «{vpn}»: весь трафик идёт через него, проверка бессмысленна. "
-            "Отключите VPN или настройте раздельное туннелирование.")
-        return {}
+        from . import vpn as vpnmod
+        BIND = vpnmod.bind_ip()
+        if not BIND:
+            log(f"Включён VPN «{vpn}», а обойти его для проверки не удалось. "
+                "Отключите VPN или настройте раздельное туннелирование.")
+            return {}
+        log(f"Включён VPN «{vpn}» — проверяю мимо него, через адаптер {BIND}.")
     results = {"_baseline": probe_all(targets)}
     n = len(targets)
     base_ok = score(results["_baseline"])[0]

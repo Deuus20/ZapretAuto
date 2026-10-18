@@ -5,7 +5,7 @@ import threading
 
 import psutil
 
-from . import paths
+from . import paths, vpn
 from .strategies import Strategy
 
 CREATE_NO_WINDOW = 0x08000000
@@ -40,6 +40,10 @@ class Runner:
         with self._lock:
             self.stop()
             paths.sync_lists()
+            try:
+                vpn.write_exclude()
+            except Exception:  # noqa: BLE001
+                pass
             self.proc = subprocess.Popen(
                 s.argv(game_tcp, game_udp), cwd=paths.BIN, creationflags=CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,  # an undrained PIPE would block winws
