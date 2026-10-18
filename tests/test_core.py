@@ -142,3 +142,24 @@ def test_merge_votes_and_validation():
     for bad in (_body(asn="AS1; rm"), _body(score=5), _body(choice={"base": "x$(y)", "picks": {}}), "no json"):
         with pytest.raises(ValueError):
             m.parse(bad)
+
+
+# ---- logs / stats
+def test_report_redacts_user_name():
+    from app import logs
+    assert logs._redact(r"C:\Users\Ivan\AppData\x") == r"C:\Users\<user>\AppData\x"
+    assert logs._redact("c:/users/Ivan/x") == "c:/users/<user>/x"
+
+
+def test_stats_uptime_and_checks(tmp_path, monkeypatch):
+    from app import stats
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    t = [1000.0]
+    monkeypatch.setattr(stats.time, "time", lambda: t[0] + 86400 * 100)
+    stats.record("start")
+    t[0] += 3600
+    stats.record("check", ok=True)
+    stats.record("check", ok=False)
+    stats.record("stop")
+    s = stats.summary(7)
+    assert s["uptime_h"] == 1.0 and s["checks"] == 2 and s["ok_pct"] == 50
