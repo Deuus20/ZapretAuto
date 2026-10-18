@@ -1004,7 +1004,7 @@ class MainWindow(QWidget):
         rows = [(k, v) for k, v in games.items() if k not in ign]
         self.games_empty.setVisible(not rows)
         self.games_empty.setText(
-            "Пока игр не найдено. Запустите игру — она появится здесь сама." if self.watcher else
+            "Пока игр не найдено. Запустите игру — она появится здесь сама." if self.settings.get("game_watch") else
             "Включите «Следить за играми» в настройках — запущенные игры появятся здесь сами.")
         self.table.setVisible(bool(rows))
         self.table.setRowCount(len(rows))
