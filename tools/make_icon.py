@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 app = QApplication(sys.argv)
 from PIL import Image  # noqa: E402
 
-from app.gui.window import app_icon  # noqa: E402
+from app.gui.style import app_icon  # noqa: E402
 
 png = ROOT / "assets" / "icon-256.png"
 app_icon("#3b82f6").pixmap(256, 256).save(str(png))
