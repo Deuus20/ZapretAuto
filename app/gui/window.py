@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QHBoxLayout, 
                                QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
-from app import strategies, tester
+from app import diag, lists, strategies, tester
 from app.runner import Runner
 
 try:
@@ -60,6 +60,7 @@ class Bridge(QObject):
     log = Signal(str)
     games_changed = Signal()
     update_checked = Signal(object, bool)
+    diag_done = Signal(object)
 
 
 class MainWindow(QWidget):
@@ -76,6 +77,7 @@ class MainWindow(QWidget):
         self.bridge.log.connect(self.log)
         self.bridge.games_changed.connect(self.on_games_changed)
         self.bridge.update_checked.connect(self.on_update_checked)
+        self.bridge.diag_done.connect(self.on_diag_done)
         self.settings = tester.load_settings()
         self._build()
         self._tray()
@@ -131,8 +133,11 @@ class MainWindow(QWidget):
         b1.clicked.connect(self.ignore_game)
         b2 = QPushButton("Добавить вручную exe")
         b2.clicked.connect(self.add_game)
+        b3 = QPushButton("Сбросить IP игры")
+        b3.clicked.connect(self.reset_game)
         r.addWidget(b1)
         r.addWidget(b2)
+        r.addWidget(b3)
         gl.addLayout(r)
         self.tabs.addTab(g, "Игры")
         u = QWidget()
@@ -149,6 +154,35 @@ class MainWindow(QWidget):
         ul.addLayout(r)
         ul.addStretch()
         self.tabs.addTab(u, "Обновления")
+        d = QWidget()
+        dl = QVBoxLayout(d)
+        self.btn_diag = QPushButton("Проверить")
+        self.btn_diag.clicked.connect(self.run_diag)
+        dl.addWidget(self.btn_diag)
+        self.diag_table = QTableWidget(0, 3)
+        self.diag_table.setHorizontalHeaderLabels(["проверка", "детали", ""])
+        self.diag_table.horizontalHeader().setStretchLastSection(True)
+        self.diag_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        dl.addWidget(self.diag_table)
+        self.tabs.addTab(d, "Диагностика")
+        ls = QWidget()
+        ll = QVBoxLayout(ls)
+        self.list_combo = QComboBox()
+        self.list_combo.addItems(list(lists.user_list_paths()))
+        self.list_combo.currentIndexChanged.connect(self.load_list)
+        ll.addWidget(self.list_combo)
+        self.list_edit = QPlainTextEdit()
+        ll.addWidget(self.list_edit, 1)
+        r = QHBoxLayout()
+        b = QPushButton("Сохранить")
+        b.clicked.connect(self.save_list)
+        self.btn_ipset = QPushButton("Обновить ipset с GitHub")
+        self.btn_ipset.clicked.connect(self.update_ipset)
+        r.addWidget(b)
+        r.addWidget(self.btn_ipset)
+        ll.addLayout(r)
+        self.tabs.addTab(ls, "Списки")
+        self.load_list()
         ver = "недоступно"
         if updater:
             try:
@@ -161,6 +195,58 @@ class MainWindow(QWidget):
             self.btn_update.setEnabled(False)
         if not gamewatch:
             self.cb["game_watch"].setEnabled(False)
+
+    # ---------- diagnostics / lists ----------
+    def run_diag(self):
+        self.btn_diag.setEnabled(False)
+        self.btn_diag.setText("Проверка...")
+        self._diag_w = Worker(lambda log: diag.run_checks())
+        self._diag_w.done.connect(self.bridge.diag_done.emit)
+        self._diag_w.start()
+
+    def on_diag_done(self, res):
+        self.btn_diag.setEnabled(True)
+        self.btn_diag.setText("Проверить")
+        t = self.diag_table
+        t.setRowCount(0)
+        col = {"ok": "#2ecc71", "warn": "#f39c12", "err": "#e74c3c"}
+        for r in res or []:
+            i = t.rowCount()
+            t.insertRow(i)
+            a = QTableWidgetItem(r["label"])
+            a.setForeground(QColor(col.get(r["level"], "#888")))
+            t.setItem(i, 0, a)
+            t.setItem(i, 1, QTableWidgetItem(r["detail"]))
+            if r.get("fix"):
+                b = QPushButton("Исправить")
+                b.clicked.connect(lambda _=False, f=r["fix"]: self.apply_fix(f))
+                t.setCellWidget(i, 2, b)
+        t.resizeColumnToContents(0)
+
+    def apply_fix(self, fix):
+        self.log(f"исправление {fix}:\n{diag.apply_fix(fix)}")
+        self.run_diag()
+
+    def load_list(self, *_):
+        p = lists.user_list_paths()[self.list_combo.currentText()]
+        try:
+            self.list_edit.setPlainText(p.read_text(encoding="utf-8"))
+        except OSError:
+            self.list_edit.setPlainText("")
+
+    def save_list(self):
+        p = lists.user_list_paths()[self.list_combo.currentText()]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(self.list_edit.toPlainText(), encoding="utf-8")
+        self.log(f"сохранён {p.name}")
+
+    def update_ipset(self):
+        self.btn_ipset.setEnabled(False)
+        w = Worker(lambda log: lists.update_ipset(log))
+        w.line.connect(self.bridge.log.emit)
+        w.done.connect(lambda ok: self.btn_ipset.setEnabled(True))
+        self._ipset_w = w
+        w.start()
 
     def _tray(self):
         self.tray = QSystemTrayIcon(circle(COLORS["off"]), self)
@@ -338,6 +424,15 @@ class MainWindow(QWidget):
             return
         exe = self.table.item(r, 0).text()
         self.save(games_ignore=sorted(set(self.settings.get("games_ignore", [])) | {exe}))
+        self.fill_games()
+
+    def reset_game(self):
+        r = self.table.currentRow()
+        if r < 0 or not self.watcher:
+            return
+        exe = self.table.item(r, 0).text()
+        self.watcher.reset_game(exe)
+        self.log(f"IP игры сброшены: {exe}")
         self.fill_games()
 
     def add_game(self):
