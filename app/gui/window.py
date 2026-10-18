@@ -231,7 +231,7 @@ class MainWindow(QWidget):
         self.btn_check_access = QPushButton("Проверить доступ")
         self.btn_check_access.setToolTip("Проверить, открываются ли Discord, YouTube и голосовой чат прямо сейчас")
         self.btn_check_access.setCursor(Qt.PointingHandCursor)
-        self.btn_check_access.clicked.connect(self.check_access)
+        self.btn_check_access.clicked.connect(lambda: self.check_access())
         brow = QHBoxLayout()
         brow.addWidget(self.btn_check_access)
         self.btn_site = QPushButton("Сайт не открывается…")
@@ -509,9 +509,11 @@ class MainWindow(QWidget):
         a2.triggered.connect(self.autopick)
         a3 = QAction("Открыть", m)
         a3.triggered.connect(self.show_window)
+        a5 = QAction("Проверить доступ", m)
+        a5.triggered.connect(lambda: self.check_access(notify=True))
         a4 = QAction("Выход", m)
         a4.triggered.connect(self.quit)
-        for a in (self.act_toggle, a2, a3, a4):
+        for a in (self.act_toggle, a5, a2, a3, a4):
             m.addAction(a)
         self._menu = m
         self.tray.setContextMenu(m)
@@ -813,7 +815,7 @@ class MainWindow(QWidget):
         w.start()
         return w
 
-    def check_access(self):
+    def check_access(self, notify: bool = False):
         self.substatus.setText("Проверяю доступ…")
         self.btn_check_access.setEnabled(False)
 
@@ -827,6 +829,8 @@ class MainWindow(QWidget):
             self.log("проверка доступа: " + txt)
             self.substatus.setText("Всё работает" if all(res.values()) else
                                    "Если что-то ✗ — нажмите «Подобрать лучшую стратегию»")
+            if notify:  # asked from the tray menu: answer there too
+                self.tray.showMessage("ZapretAuto", txt)
         self._run(lambda log: tester.quick_check(), done)
 
     def _game_udp_wanted(self) -> bool:
