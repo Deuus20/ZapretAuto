@@ -716,7 +716,7 @@ class MainWindow(QWidget):
                                   settings_snapshot.get("auto_hostlist", True))
                 import time as _t
                 _t.sleep(1.5)
-            if tester.probe(t) is not None:
+            if any(tester.probe(t) is not None for _ in range(3)):  # first tries through DPI can be reset
                 return f"Готово: {dom} добавлен в обход и открывается."
             ip_ok = tester.probe(tester.Target("ip", f"tcp://{dom}:443")) is not None
             if added:
