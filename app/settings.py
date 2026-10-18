@@ -24,7 +24,7 @@ def load_settings() -> dict:
         if _cache and _cache[0] == m:
             return dict(_cache[1])
         try:
-            d = json.loads(p.read_text(encoding="utf-8"))
+            d = json.loads(p.read_text(encoding="utf-8-sig"))  # tolerate BOM (Notepad, PowerShell)
             if not isinstance(d, dict):
                 raise ValueError("not a dict")
         except (OSError, ValueError):

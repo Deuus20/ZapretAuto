@@ -353,6 +353,12 @@ class MainWindow(QWidget):
         r.addWidget(b2)
         r.addWidget(b3)
         gl.addLayout(r)
+        self.btn_gamepick = QPushButton("Подобрать стратегию для этой игры", objectName="primary")
+        self.btn_gamepick.setToolTip("Если игра не входит в онлайн («Вход в систему…»): программа сама запускает игру "
+                                     "с разными стратегиями и оставляет ту, с которой вход проходит, а Discord и "
+                                     "YouTube работают. Занимает до 15 минут, игру в это время не трогайте.")
+        self.btn_gamepick.clicked.connect(self.pick_for_game)
+        gl.addWidget(self.btn_gamepick)
         self.tabs.addTab(g, "Игры")
         u = QWidget()
         ul = QVBoxLayout(u)
@@ -587,7 +593,8 @@ class MainWindow(QWidget):
                                        else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
         self.tray.setToolTip(f"ZapretAuto — {title}")
         self.btn_toggle.setAccessibleName(title)
-        for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site):
+        for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site,
+                  self.btn_gamepick):
             w.setEnabled(not self.busy)
         self.btn_toggle.setProperty("state", state)
         self.btn_toggle.setIcon(power_icon({"on": "#22c55e", "busy": "#f59e0b"}.get(state, "#9aa3b5")))
@@ -995,6 +1002,37 @@ class MainWindow(QWidget):
         exe = self.table.item(r, 0).text()
         self.save(games_ignore=sorted(set(self.settings.get("games_ignore", [])) | {exe}))
         self.fill_games()
+
+    def pick_for_game(self):
+        r = self.table.currentRow()
+        games = self.watcher.games() if self.watcher else {}
+        exe = self.table.item(r, 0).text() if r >= 0 else None
+        path = (games.get(exe) or {}).get("path") or (self.settings.get("games", {}).get(exe) or {}).get("path")
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, "Выберите exe игры", "", "Программы (*.exe)")
+            if not path:
+                return
+        if QMessageBox.question(self, "Подбор для игры",
+                                f"{Path(path).name}\n\nПрограмма будет сама запускать и закрывать игру с разными "
+                                "стратегиями (до 15 минут). Не трогайте игру, пока идёт подбор.\n\n"
+                                "Начать?") != QMessageBox.Yes:
+            return
+        from app import gamepick
+        self._expect_running = False
+        self.busy, self.busy_text, self.error = True, "Подбираю стратегию для игры…", ""
+        self.refresh()
+        self.tabs.setCurrentIndex(0)
+
+        def done(res):
+            self.busy = False
+            self.settings = tester.load_settings()
+            if res:
+                self.start_runner()
+                self.tray.showMessage("ZapretAuto", "Стратегия для игры подобрана — можно играть.")
+            else:
+                self.error = "Для этой игры подходящей стратегии не нашлось — попробуйте VPN."
+            self.refresh()
+        self.worker = self._run(lambda log: gamepick.pick_for_game(path, self.runner, log), done)
 
     def reset_game(self):
         r = self.table.currentRow()
