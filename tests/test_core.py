@@ -170,3 +170,9 @@ def test_settings_with_bom(tmp_path, monkeypatch):
     settings._cache = None
     (tmp_path / "settings.json").write_text('{"a": 1}', encoding="utf-8-sig")
     assert settings.load_settings() == {"a": 1}
+
+
+def test_launchers_and_web_ports_are_not_game_traffic():
+    assert not gamewatch.classify(r"C:\Steam\steamapps\common\Wardogs\WardogsLauncher-Shipping.exe", {})
+    assert gamewatch.classify(r"C:\Steam\steamapps\common\Wardogs\WardogsClient-Win64-Shipping.exe", {})
+    assert {80, 443} <= gamewatch.SKIP_PORTS
