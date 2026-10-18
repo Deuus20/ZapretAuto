@@ -913,11 +913,17 @@ class MainWindow(QWidget):
         self.substatus.setText("Обычно 3–5 минут. Обход на это время выключен.")
         self.tabs.setCurrentIndex(0)
 
+        t_start = time.time()
+
         def line(t):
             self.log(t)
             m = re.match(r"\[(\d+)/(\d+)\]", t)
             if m:
-                self.substatus.setText(f"Проверено стратегий: {m.group(1)} из {m.group(2)}")
+                done, total = int(m.group(1)), int(m.group(2))
+                # remaining strategies + ~8 final re-tests, at the pace measured so far
+                left = (time.time() - t_start) / done * (total - done + 8)
+                eta = f", осталось около {max(1, round(left / 60))} мин" if done >= 2 else ""
+                self.substatus.setText(f"Проверено стратегий: {done} из {total}{eta}")
                 self.progress.setRange(0, int(m.group(2)) + 4)
                 self.progress.setValue(int(m.group(1)))
             elif t.startswith("Финальная"):
@@ -1063,7 +1069,10 @@ class MainWindow(QWidget):
             else:
                 self.error = "Для этой игры подходящей стратегии не нашлось — попробуйте VPN."
             self.refresh()
-        self.worker = self._run(lambda log: gamepick.pick_for_game(path, self.runner, log), done)
+        def line(t):
+            self.log(t)
+            self.substatus.setText(t if len(t) < 120 else t[:117] + "…")  # current step in the header
+        self.worker = self._run(lambda log: gamepick.pick_for_game(path, self.runner, log), done, line)
 
     def reset_game(self):
         r = self.table.currentRow()
