@@ -15,6 +15,7 @@ from .runner import Runner
 READ_BYTES = 32 * 1024  # DPI often freezes TLS sessions after ~16 KB
 TIMEOUT = 4
 ROUNDS = 2
+KEEP_MARGIN = 2  # finals: a new strategy must beat the current one by MORE than this many passed probes
 WARMUP = 1.5
 
 
@@ -341,15 +342,31 @@ def auto_pick(log=print, use_shared: bool | None = None) -> dict:
     mixed = strategies.mix("mix", {g: tested[n] for g, n in picks.items()}, best)
     # single runs are noisy: re-test finalists several times and sum successes
     finalists = sorted(tested.values(), key=lambda s: score(results[s.name]), reverse=True)[:3] + [mixed]
+    cur_s = None
+    if current:  # the working strategy competes too: switching has a cost, so it must be clearly beaten
+        by = {s.name: s for s in all_s}
+        try:
+            cur_s = (strategies.mix("current", {g: by[x] for g, x in current["picks"].items()}, by[current["base"]])
+                     if current.get("picks") else strategies.mix("current", {}, by[current["base"]]))
+            finalists.append(cur_s)
+        except KeyError:  # strategy vanished after a zapret update
+            cur_s = None
     totals = {}
     log("Финальная проверка лучших вариантов…")
     for s in finalists:
         runs = [r for r in (test_strategy(runner, s, targets) for _ in range(ROUNDS)) if r]
         totals[s.name] = (sum(score(r)[0] for r in runs), sum(score(r)[1] for r in runs))
         results[f"final:{s.name}"] = runs
-        log(f"  {'комбинация' if s.name == 'mix' else s.name}: {totals[s.name][0]} из {n * ROUNDS}")
+        label = {"mix": "комбинация", "current": "текущая"}.get(s.name, s.name)
+        log(f"  {label}: {totals[s.name][0]} из {n * ROUNDS}")
     win = max(totals, key=totals.get)
-    choice = {"base": best.name, "picks": picks} if win == "mix" else {"base": win, "picks": {}}
+    if cur_s and win != "current" and totals[win][0] - totals["current"][0] <= KEEP_MARGIN:
+        log(f"Новые варианты не лучше текущей стратегии заметно (не больше чем на {KEEP_MARGIN}) — оставляю текущую.")
+        win = "current"
+    if win == "current":
+        choice = current
+    else:
+        choice = {"base": best.name, "picks": picks} if win == "mix" else {"base": win, "picks": {}}
     paths.DATA.mkdir(exist_ok=True)
     (paths.DATA / "results.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
     save_settings(strategy=choice, last_pick={"score": totals[win][0], "total": len(targets) * ROUNDS})

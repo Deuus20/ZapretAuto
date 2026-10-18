@@ -321,3 +321,17 @@ def test_quick_check_majority(tmp_path, monkeypatch):
     monkeypatch.setattr(tester.time, "sleep", lambda s: None)
     r = tester.quick_check(light=True)
     assert r == {"Discord": True, "YouTube": False, "Голос Discord": True}
+
+
+def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
+    tester = _fake_pick_env(monkeypatch, tmp_path, baseline_ok=3)
+    settings.save_settings(strategy={"base": "ALT11", "picks": {}})
+    keys = [f"T{i}" for i in range(10)]
+
+    def fake_test(runner, s, targets, warmup=0):  # EXP passes 1 more probe than everyone else: noise level
+        ok = 9 if s.name == "EXP" else 8
+        return {k: (0.1 if i < ok else None) for i, k in enumerate(keys)}
+    monkeypatch.setattr(tester, "test_strategy", fake_test)
+    logs = []
+    assert tester.auto_pick(logs.append, use_shared=False) == {"base": "ALT11", "picks": {}}
+    assert any("оставляю текущую" in m for m in logs)
