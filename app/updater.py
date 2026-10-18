@@ -11,7 +11,7 @@ import requests
 from . import paths
 
 REPO = "Flowseal/zapret-discord-youtube"
-APP_REPO = "OWNER/ZapretAuto"  # our releases with ZapretAuto-Setup.exe
+APP_REPO = "yuav2/ZapretAuto"  # our releases with ZapretAuto-Setup.exe
 
 
 def current_version(vendor: Path = paths.VENDOR) -> str:
