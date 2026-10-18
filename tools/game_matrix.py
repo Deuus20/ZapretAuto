@@ -29,7 +29,8 @@ by = {s.name: s for s in strategies.load_all()}
 
 def kill():
     for p in psutil.process_iter(["name"]):
-        if (p.info["name"] or "").lower().startswith(PREFIX):
+        n = (p.info["name"] or "").lower()
+        if n.startswith(PREFIX) or n == "zapretauto.exe":  # the app would restart winws and spoil the test
             try:
                 p.kill()
             except psutil.Error:
