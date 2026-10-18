@@ -19,7 +19,19 @@ def _pick_data() -> Path:
     except OSError:
         d = Path(os.environ.get("PROGRAMDATA") or "C:/ProgramData") / "ZapretAuto" / "data"
         d.mkdir(parents=True, exist_ok=True)
+        _lock_down(d.parent)
         return d
+
+
+def _lock_down(d: Path) -> None:
+    """ProgramData is user-writable by default: allow writes only for Administrators and SYSTEM."""
+    import subprocess
+    try:
+        subprocess.run(["icacls", str(d), "/inheritance:r", "/grant:r", "*S-1-5-32-544:(OI)(CI)F",
+                        "*S-1-5-18:(OI)(CI)F", "*S-1-5-32-545:(OI)(CI)RX"],
+                       capture_output=True, timeout=10, creationflags=0x08000000)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 DATA = _pick_data()

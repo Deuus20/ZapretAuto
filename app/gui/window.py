@@ -61,10 +61,13 @@ STYLE = """
 QWidget { background: #15171c; color: #e6e8ee; font-family: "Segoe UI"; font-size: 10pt; }
 QFrame#card { background: #1e2129; border-radius: 14px; }
 QLabel#title { font-size: 17pt; font-weight: 600; background: transparent; }
-QLabel#sub { color: #9aa3b5; background: transparent; }
+QLabel#sub { color: #b4bccb; background: transparent; }
 QPushButton { background: #262a34; border: 1px solid #323744; border-radius: 8px; padding: 7px 14px; }
 QPushButton:hover { background: #2e3340; }
-QPushButton:disabled { color: #6b7280; }
+QPushButton:disabled { color: #8b93a3; }
+QPushButton:focus, QCheckBox:focus, QComboBox:focus { outline: none; border: 1px solid #3b82f6; }
+QPushButton#link { background: transparent; border: none; color: #60a5fa; padding: 2px 0; }
+QPushButton#link:hover { color: #93c5fd; }
 QPushButton#primary { background: #3b82f6; border: none; color: white; font-weight: 600; }
 QPushButton#primary:hover { background: #4b8ff8; }
 QPushButton#primary:disabled { background: #2a3550; color: #8090b0; }
@@ -206,31 +209,49 @@ class MainWindow(QWidget):
         grid.setHorizontalSpacing(24)
         s = self.settings
         self.cb = {}
-        for i, (key, text, default, tip) in enumerate([
+        adv = QWidget()
+        agrid = QGridLayout(adv)
+        agrid.setContentsMargins(0, 0, 0, 0)
+        agrid.setHorizontalSpacing(24)
+        n_main = n_adv = 0
+        for key, text, default, tip, advanced in [
             ("game_watch", "Следить за играми", False,
              "Находить запущенные игры, собирать их серверы и включать для них обход. "
-             "Если с обходом соединение стало хуже, IP убирается."),
-            ("auto_update", "Автообновление", True,
-             "При запуске проверять обновления zapret и ZapretAuto и ставить их автоматически."),
-            ("autostart", "Запускать вместе с Windows", False,
-             "Запускать ZapretAuto при входе в Windows (задача планировщика с правами администратора)."),
-            ("game_udp", "Обход UDP для игр", False,
-             "Game filter UDP: обход UDP-трафика игр на портах 1024-65535. Включается сам, когда найдена игра."),
-            ("game_tcp", "Обход TCP для игр", False,
-             "Game filter TCP: обход TCP-трафика игр на портах 1024-65535 (только адреса из ipset и списка игр)."),
+             "Если с обходом соединение стало хуже, IP убирается.", False),
             ("auto_repick", "Сам чинить при сбоях", True,
              "Каждые 10 минут и при смене сети проверять Discord и YouTube. Если они дважды подряд "
-             "не открываются — автоматически подобрать стратегию заново."),
+             "не открываются — автоматически подобрать стратегию заново.", False),
+            ("auto_update", "Автообновление", True,
+             "При запуске проверять обновления zapret и ZapretAuto и ставить их автоматически.", False),
+            ("autostart", "Запускать вместе с Windows", False,
+             "Запускать ZapretAuto при входе в Windows (задача планировщика с правами администратора).", False),
+            ("game_udp", "Обход UDP для игр", False,
+             "Game filter UDP: обход UDP-трафика игр на портах 1024-65535. Включается сам, когда найдена игра.",
+             True),
+            ("game_tcp", "Обход TCP для игр", False,
+             "Game filter TCP: обход TCP-трафика игр на портах 1024-65535 (только адреса из ipset и списка игр).",
+             True),
             ("telegram", "Telegram (экспериментально)", False,
              "Добавить подсети Telegram в обход. Помогает не всем провайдерам: если Telegram "
-             "заблокирован по IP, zapret бессилен — нужен прокси."),
-        ]):
+             "заблокирован по IP, zapret бессилен — нужен прокси.", True),
+        ]:
             c = QCheckBox(text)
             c.setToolTip(tip)
             c.setChecked(bool(s.get(key, default)))
             c.toggled.connect(lambda v, k=key: self.on_check(k, v))
             self.cb[key] = c
-            grid.addWidget(c, i // 2, i % 2)
+            if advanced:
+                agrid.addWidget(c, n_adv // 2, n_adv % 2)
+                n_adv += 1
+            else:
+                grid.addWidget(c, n_main // 2, n_main % 2)
+                n_main += 1
+        self.btn_adv = QPushButton(objectName="link")
+        self.btn_adv.setCursor(Qt.PointingHandCursor)
+        self.btn_adv.clicked.connect(lambda: self.set_advanced(not adv.isVisible()))
+        grid.addWidget(self.btn_adv, (n_main + 1) // 2, 0, 1, 2, Qt.AlignLeft)
+        grid.addWidget(adv, (n_main + 1) // 2 + 1, 0, 1, 2)
+        self.adv_box = adv
         lay.addWidget(box)
         self.box_settings = box
         self.tabs = QTabWidget()
@@ -240,7 +261,7 @@ class MainWindow(QWidget):
         g = QWidget()
         gl = QVBoxLayout(g)
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["exe", "IP", "ping", "активна"])
+        self.table.setHorizontalHeaderLabels(["Игра", "Адресов", "Пинг, мс", "Запущена"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -265,7 +286,7 @@ class MainWindow(QWidget):
         self.lbl_ver = QLabel()
         ul.addWidget(self.lbl_ver)
         r = QHBoxLayout()
-        self.btn_check = QPushButton("Проверить")
+        self.btn_check = QPushButton("Проверить обновления")
         self.btn_check.setToolTip("Проверить, есть ли новые версии zapret и ZapretAuto")
         self.btn_check.clicked.connect(self.check_update)
         self.btn_update = QPushButton("Обновить")
@@ -278,12 +299,12 @@ class MainWindow(QWidget):
         self.tabs.addTab(u, "Обновления")
         d = QWidget()
         dl = QVBoxLayout(d)
-        self.btn_diag = QPushButton("Проверить")
+        self.btn_diag = QPushButton("Найти проблемы")
         self.btn_diag.setToolTip("Найти частые причины, по которым обход не работает")
         self.btn_diag.clicked.connect(self.run_diag)
         dl.addWidget(self.btn_diag)
         self.diag_table = QTableWidget(0, 3)
-        self.diag_table.setHorizontalHeaderLabels(["проверка", "детали", ""])
+        self.diag_table.setHorizontalHeaderLabels(["Проверка", "Результат", ""])
         self.diag_table.horizontalHeader().setStretchLastSection(True)
         self.diag_table.setEditTriggers(QTableWidget.NoEditTriggers)
         dl.addWidget(self.diag_table)
@@ -306,7 +327,9 @@ class MainWindow(QWidget):
         r.addWidget(self.btn_ipset)
         ll.addLayout(r)
         self.tabs.addTab(ls, "Списки")
+        self.tab_lists = self.tabs.indexOf(ls)
         self.load_list()
+        self.set_advanced(bool(self.settings.get("show_advanced")), save=False)
         ver = "недоступно"
         if updater:
             try:
@@ -472,6 +495,14 @@ class MainWindow(QWidget):
             self.error = "Не удалось запустить обход. Откройте вкладку «Диагностика» → «Проверить»."
         self.refresh()
         return self.runner.running
+
+    def set_advanced(self, on: bool, save: bool = True):
+        """Show/hide expert settings and the raw lists editor."""
+        self.adv_box.setVisible(on)
+        self.tabs.setTabVisible(self.tab_lists, on)
+        self.btn_adv.setText("Дополнительно ▾" if on else "Дополнительно ▸")
+        if save:
+            self.save(show_advanced=on)
 
     def _health(self):
         """Background check of key services; two failed checks in a row -> re-pick automatically."""
