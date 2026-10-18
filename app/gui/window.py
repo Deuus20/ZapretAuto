@@ -612,7 +612,7 @@ class MainWindow(QWidget):
             self.refresh()
             return False
         try:
-            self.runner.start(s, self.settings.get("game_tcp", False),
+            self.runner.start(s, self.settings.get("game_tcp", False) or self._game_udp_wanted(),
                               self.settings.get("game_udp", False) or self._game_udp_wanted(),
                               self.settings.get("auto_hostlist", True))
             self.log(f"запущено: {s.name}")
@@ -681,7 +681,7 @@ class MainWindow(QWidget):
             added = lists.add_user_domain(dom)
             s = tester.chosen_strategy()
             if s and self.runner.running:
-                self.runner.start(s, settings_snapshot.get("game_tcp", False),
+                self.runner.start(s, settings_snapshot.get("game_tcp", False) or self._game_udp_wanted(),
                                   settings_snapshot.get("game_udp", False) or self._game_udp_wanted(),
                                   settings_snapshot.get("auto_hostlist", True))
                 import time as _t
@@ -811,6 +811,7 @@ class MainWindow(QWidget):
         self._run(lambda log: tester.quick_check(), done)
 
     def _game_udp_wanted(self) -> bool:
+        """A game was found: enable the game filter for TCP and UDP (some games log in over TCP high ports)."""
         return bool(self.watcher and any(g.get("ips") for g in self.watcher.games().values()))
 
     def toggle(self):
