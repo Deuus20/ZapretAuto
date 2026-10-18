@@ -259,6 +259,9 @@ def auto_pick(log=print) -> dict:
                 "Отключите VPN или настройте раздельное туннелирование.")
             return {}
         log(f"Включён VPN «{vpn}» — проверяю мимо него, через адаптер {BIND}.")
+    shared = _try_shared(runner, targets, log)
+    if shared:
+        return shared
     results = {"_baseline": probe_all(targets)}
     n = len(targets)
     base_ok = score(results["_baseline"])[0]
@@ -298,9 +301,41 @@ def auto_pick(log=print) -> dict:
     choice = {"base": best.name, "picks": picks} if win == "mix" else {"base": win, "picks": {}}
     paths.DATA.mkdir(exist_ok=True)
     (paths.DATA / "results.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
-    save_settings(strategy=choice)
+    save_settings(strategy=choice, last_pick={"score": totals[win][0], "total": len(targets) * ROUNDS})
     log(f"Готово. Выбрано: {'комбинация стратегий' if choice['picks'] else choice['base']}")
     return choice
+
+
+def _try_shared(runner: Runner, targets, log) -> dict | None:
+    """Use a combination proven by other users of the same ISP if it passes here too (~30 s)."""
+    from . import sharedb, updater
+    try:
+        who = sharedb.isp()
+        if not who:
+            return None
+        ver = updater.current_version()
+        c = sharedb.suggestion(who[0], ver)
+        if not c:
+            log(f"Провайдер {who[1]} ({who[0]}): в общей базе пока нет данных — полный подбор.")
+            return None
+        by = {s.name: s for s in strategies.load_all()}
+        if c["base"] not in by or any(n not in by for n in c.get("picks", {}).values()):
+            return None
+        s = strategies.mix("mix", {g: by[n] for g, n in c["picks"].items()}, by[c["base"]]) if c.get("picks") \
+            else by[c["base"]]
+        log(f"Провайдер {who[1]}: проверяю комбинацию из общей базы…")
+        runs = [r for r in (test_strategy(runner, s, targets) for _ in range(ROUNDS)) if r]
+        ok = sum(score(r)[0] for r in runs)
+        total = len(targets) * ROUNDS
+        log(f"  результат: {ok} из {total}")
+        if ok >= 0.85 * total:
+            save_settings(strategy=c, last_pick={"score": ok, "total": total, "shared": True})
+            log("Готово: взята проверенная комбинация для вашего провайдера.")
+            return c
+        log("Комбинация из базы здесь работает хуже — запускаю полный подбор.")
+    except Exception as e:  # noqa: BLE001
+        log(f"общая база недоступна: {e}")
+    return None
 
 
 def chosen_strategy() -> strategies.Strategy | None:

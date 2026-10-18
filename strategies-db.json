@@ -1,0 +1,34 @@
+{
+ "AS25513": {
+  "1.10.3": {
+   "isp": "PJSC Moscow city telephone network",
+   "reports": [
+    {
+     "choice": {
+      "base": "ALT12",
+      "picks": {
+       "tcp:443:list-google": "FAKE TLS AUTO",
+       "tcp:80,443,8443:ipset-all": "ALT7",
+       "tcp:80,443:list-general": "ALT12",
+       "udp:19294-19344:discord,stun": "SIMPLE FAKE ALT2",
+       "udp:other": "ALT4"
+      }
+     },
+     "score": 23,
+     "total": 28
+    }
+   ],
+   "choice": {
+    "base": "ALT12",
+    "picks": {
+     "tcp:443:list-google": "FAKE TLS AUTO",
+     "tcp:80,443,8443:ipset-all": "ALT7",
+     "tcp:80,443:list-general": "ALT12",
+     "udp:19294-19344:discord,stun": "SIMPLE FAKE ALT2",
+     "udp:other": "ALT4"
+    }
+   },
+   "votes": 1
+  }
+ }
+}

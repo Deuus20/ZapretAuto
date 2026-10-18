@@ -35,6 +35,9 @@ def update_ipset(log=print) -> bool:
     dst.write_text("\n".join(lines) + "\n", encoding="utf-8")
     # keep sync_lists from reverting it to the vendor copy
     (paths.LISTS / "ipset-all.txt.custom").write_text("updated from GitHub\n", encoding="utf-8")
+    import time
+    from .settings import save_settings
+    save_settings(ipset_updated=time.time())
     log(f"ipset: обновлено, записей: {len(lines)}")
     return True
 
