@@ -176,3 +176,13 @@ def test_launchers_and_web_ports_are_not_game_traffic():
     assert not gamewatch.classify(r"C:\Steam\steamapps\common\Wardogs\WardogsLauncher-Shipping.exe", {})
     assert gamewatch.classify(r"C:\Steam\steamapps\common\Wardogs\WardogsClient-Win64-Shipping.exe", {})
     assert {80, 443} <= gamewatch.SKIP_PORTS
+
+
+def test_gamepick_majority_rating(monkeypatch):
+    from app import gamepick
+    seq = iter([True, False, True, True])
+    monkeypatch.setattr(gamepick, "_attempt", lambda *a: (next(seq), 0, 0))
+    assert gamepick._rate("g", "x", lambda: False, 3) == 2  # stops after 2 of 3 successes
+    seq2 = iter([False, False, True])
+    monkeypatch.setattr(gamepick, "_attempt", lambda *a: (next(seq2), 0, 0))
+    assert gamepick._rate("g", "x", lambda: False, 3) == 0  # stops after 2 failures
