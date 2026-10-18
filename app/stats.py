@@ -23,7 +23,7 @@ def _load() -> list:
 
 
 def record(kind: str, **data) -> None:
-    """kind: check (ok: bool) | repick (reason) | crash | start | stop | ipset."""
+    """kind: check (ok: bool) | repick (reason) | crash | start | stop | ipset | switch (to)."""
     with _lock:
         ev = [e for e in _load() if e.get("t", 0) > time.time() - KEEP]
         ev.append({"t": time.time(), "k": kind, **data})
@@ -53,4 +53,5 @@ def summary(days: int = 7) -> dict:
     return {"days": days, "checks": len(checks), "ok_pct": round(100 * ok / len(checks)) if checks else None,
             "repicks": len(repicks), "last_repick": max((e["t"] for e in repicks), default=None),
             "crashes": sum(1 for e in ev if e["k"] == "crash"),
-            "ipset": sum(1 for e in ev if e["k"] == "ipset"), "uptime_h": round(up / 3600, 1)}
+            "ipset": sum(1 for e in ev if e["k"] == "ipset"), "uptime_h": round(up / 3600, 1),
+            "switches": [(e["t"], e.get("to", "?")) for e in ev if e["k"] == "switch"]}

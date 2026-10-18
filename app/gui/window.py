@@ -668,7 +668,9 @@ class MainWindow(QWidget):
             f"<p>Фоновых проверок: <b>{s['checks']}</b>, успешных: <b>{pct}</b></p>"
             f"<p>Программа сама чинила обход: <b>{s['repicks']}</b> раз (последний: {last})</p>"
             f"<p>Неожиданных остановок winws: <b>{s['crashes']}</b></p>"
-            f"<p>Обновлений списка ipset: <b>{s['ipset']}</b></p>")
+            f"<p>Обновлений списка ipset: <b>{s['ipset']}</b></p>"
+            + ("<p>Смены стратегии: " + ", ".join(f"{time.strftime('%d.%m %H:%M', time.localtime(t))} → {n}"
+                                                for t, n in s["switches"][-5:]) + "</p>" if s["switches"] else ""))
 
     def set_advanced(self, on: bool, save: bool = True):
         """Show/hide expert settings and the raw lists editor."""
@@ -971,7 +973,11 @@ class MainWindow(QWidget):
 
     def _autopick_done(self, res):
         self.busy = False
+        before = (self.settings.get("strategy") or {})
         self.settings = tester.load_settings()
+        after = self.settings.get("strategy") or {}
+        if res and after != before:
+            stats.record("switch", to=after.get("base", "?") + (" + микс" if after.get("picks") else ""))
         self.log("автоподбор завершён" if res else "автоподбор не дал результата")
         if not res:
             self.error = "Подбор не удался — подробности во вкладке «Лог»."
