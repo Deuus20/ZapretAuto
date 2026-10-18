@@ -109,3 +109,21 @@ powershell -File build.ps1                   # тесты + exe + установ
 - [bol-van/zapret](https://github.com/bol-van/zapret) — движок обхода DPI
 - [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) — стратегии и списки
 - [WinDivert](https://github.com/basil00/WinDivert) — перехват пакетов в Windows
+
+## In English
+
+ZapretAuto is a Windows tray app that keeps Discord, YouTube and online games working through Russian DPI
+blocking. It wraps [zapret](https://github.com/bol-van/zapret) (winws + WinDivert) and the
+[Flowseal](https://github.com/Flowseal/zapret-discord-youtube) strategy pack and automates everything around them:
+
+- **Auto-pick**: tests all strategies with a Chrome TLS fingerprint against Discord/YouTube/voice targets,
+  mixes the best profile per target group, re-tests finalists and only replaces a working strategy when clearly beaten.
+- **Self-healing**: background access checks, automatic re-pick on failures (never mid-game), winws crash restart,
+  sleep/resume handling, auto-learned blocked domains (`--hostlist-auto`).
+- **Games**: detects running games (incl. Steam networking/UDP via WinDivert flow capture), bypasses their match
+  servers, per-game strategy profiles found by launching the game and counting servers that actually answered.
+- **Updates**: zapret and the app itself update from GitHub releases (SHA-256 verified); releases are built and
+  self-tested by GitHub Actions.
+- **Shared ISP database**: proven picks per ASN, crowd-sourced through issues and merged by a GitHub Action.
+
+The UI is Russian. Install: download `ZapretAuto-Setup.exe` from [Releases](https://github.com/yuav2/ZapretAuto/releases/latest).
