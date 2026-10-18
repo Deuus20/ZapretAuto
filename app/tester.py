@@ -283,7 +283,7 @@ def quick_check(light: bool = False) -> dict[str, bool]:
     return out
 
 
-def auto_pick(log=print, use_shared: bool | None = None) -> dict:
+def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> dict:
     """Test every strategy, mix the best profile per group, save to data/settings.json."""
     runner, targets = Runner(), load_targets()
     paths.sync_lists()
@@ -319,6 +319,9 @@ def auto_pick(log=print, use_shared: bool | None = None) -> dict:
             "Текущая стратегия сохранена; подберите заново днём, если что-то перестанет работать.")
         return current
     for i, s in enumerate(all_s, 1):
+        if stop():
+            log("Подбор отменён.")
+            return {}
         r = test_strategy(runner, s, targets)
         results[s.name] = r
         log(f"[{i}/{len(all_s)}] {s.name}: " + ("не запустилась" if r is None else f"{score(r)[0]} из {n}"))
@@ -354,6 +357,9 @@ def auto_pick(log=print, use_shared: bool | None = None) -> dict:
     totals = {}
     log("Финальная проверка лучших вариантов…")
     for s in finalists:
+        if stop():
+            log("Подбор отменён.")
+            return {}
         runs = [r for r in (test_strategy(runner, s, targets) for _ in range(ROUNDS)) if r]
         totals[s.name] = (sum(score(r)[0] for r in runs), sum(score(r)[1] for r in runs))
         results[f"final:{s.name}"] = runs
