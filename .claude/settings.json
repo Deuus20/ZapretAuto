@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git status*)", "PowerShell(git diff*)", "PowerShell(git log*)", "PowerShell(git add*)", "PowerShell(git commit*)",
+      "PowerShell(python *)", "PowerShell(py *)", "PowerShell(pip *)", "PowerShell(.venv\\Scripts\\*)",
+      "PowerShell(ls*)", "PowerShell(Get-ChildItem*)", "PowerShell(Test-Path*)"
+    ],
+    "deny": [
+      "Read(./vendor/zapret/bin/**)",
+      "Read(./vendor/zapret/lists/ipset-all.txt.backup)",
+      "Read(./vendor/zapret/service.bat)",
+      "Read(./vendor/zapret/utils/test zapret.ps1)",
+      "Read(./.venv/**)",
+      "Read(./build/**)",
+      "Read(./dist/**)"
+    ]
+  }
+}
