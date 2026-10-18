@@ -18,6 +18,10 @@ def main() -> int:
             params = f'"{Path(__file__).resolve()}" {args}'
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, str(ROOT), 1)
         return 0
+    try:  # own taskbar identity: Windows then shows our window icon instead of a cached exe icon
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ZapretAuto.App")
+    except (AttributeError, OSError):
+        pass
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
     from PySide6.QtWidgets import QApplication
     app = QApplication(sys.argv)

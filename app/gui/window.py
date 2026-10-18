@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHeaderView, QHBoxLayout, QInputDialog, QLabel,
                                QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
@@ -116,7 +116,9 @@ QComboBox QAbstractItemView { background: #1e2129; selection-background-color: #
 QTabWidget::pane { border: 1px solid #2a2f3a; border-radius: 8px; top: -1px; }
 QTabBar::tab { background: transparent; padding: 7px 14px; color: #9aa3b5; border-bottom: 2px solid transparent; }
 QTabBar::tab:selected { color: #e6e8ee; border-bottom: 2px solid #3b82f6; }
-QPlainTextEdit, QTableWidget, QListWidget { background: #1b1e25; border: none; border-radius: 8px; font-family: Consolas; }
+QPlainTextEdit, QTableWidget, QListWidget { background: #1b1e25; border: none; border-radius: 8px; }
+QPlainTextEdit { font-family: Consolas; }
+QTableWidget { gridline-color: #262a34; }
 QHeaderView::section { background: #1e2129; color: #9aa3b5; border: none; padding: 5px; }
 QWidget#chipsrow { background: transparent; }
 QLabel#chip { border-radius: 10px; padding: 2px 9px; font-size: 9pt; }
@@ -384,7 +386,12 @@ class MainWindow(QWidget):
         dl.addLayout(drow)
         self.diag_table = QTableWidget(0, 3)
         self.diag_table.setHorizontalHeaderLabels(["Проверка", "Результат", ""])
-        self.diag_table.horizontalHeader().setStretchLastSection(True)
+        hh = self.diag_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.diag_table.verticalHeader().hide()
+        self.diag_table.setWordWrap(True)
         self.diag_table.setEditTriggers(QTableWidget.NoEditTriggers)
         dl.addWidget(self.diag_table)
         self.tabs.addTab(d, "Диагностика")
@@ -448,7 +455,7 @@ class MainWindow(QWidget):
         self._last_diag = res
         t = self.diag_table
         t.setRowCount(0)
-        col = {"ok": "#2ecc71", "warn": "#f39c12", "err": "#e74c3c"}
+        col = {"ok": "#4ade80", "warn": "#fbbf24", "err": "#f87171"}
         for r in res or []:
             i = t.rowCount()
             t.insertRow(i)
@@ -460,7 +467,7 @@ class MainWindow(QWidget):
                 b = QPushButton("Исправить")
                 b.clicked.connect(lambda _=False, f=r["fix"]: self.apply_fix(f))
                 t.setCellWidget(i, 2, b)
-        t.resizeColumnToContents(0)
+        t.resizeRowsToContents()
 
     def apply_fix(self, fix):
         self.log(f"исправление {fix}:\n{diag.apply_fix(fix)}")
@@ -814,6 +821,7 @@ class MainWindow(QWidget):
             self._expect_running = False
             self.runner.stop()
             stats.record("stop")
+            self.set_chips({})
             self.log("остановлено")
             self.refresh()
         elif not self.start_runner() and not self.settings.get("strategy"):

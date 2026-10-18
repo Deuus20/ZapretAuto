@@ -1,0 +1,31 @@
+name: Что-то не работает
+description: Сообщить о проблеме с ZapretAuto
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Сначала попробуйте вкладку «Диагностика» → «Найти проблемы» и [решение проблем](https://github.com/yuav2/ZapretAuto/blob/main/docs/troubleshooting.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: Что не работает
+      placeholder: Например — не подключается голосовой чат Discord, YouTube грузит, но видео стоит
+    validations:
+      required: true
+  - type: input
+    id: isp
+    attributes:
+      label: Провайдер и город
+      placeholder: МГТС, Москва
+  - type: input
+    id: version
+    attributes:
+      label: Версия ZapretAuto
+      description: Вкладка «Обновления»
+      placeholder: 1.0.4
+  - type: textarea
+    id: report
+    attributes:
+      label: Отчёт об ошибке
+      description: Диагностика → «Сохранить отчёт об ошибке…» — перетащите zip сюда
