@@ -14,6 +14,7 @@ DB = Path(__file__).resolve().parent.parent / "strategies-db.json"
 NAME = re.compile(r"^[A-Za-z0-9 ]{1,40}$")
 GROUP = re.compile(r"^[a-z]{3}:[0-9a-z,*:+-]{1,160}$")
 MAX_REPORTS = 50
+MIN_APP = (1, 0, 8)  # earlier apps probed with a Python TLS fingerprint: their picks do not reflect browsers/Discord
 
 
 def parse(body: str) -> dict:
@@ -35,18 +36,30 @@ def parse(body: str) -> dict:
     score, total = int(r.get("score", -1)), int(r.get("total", 0))
     if not (0 < total <= 1000 and 0 <= score <= total) or score / total < 0.6:
         raise ValueError("score too low or invalid")
-    return {"asn": r["asn"], "isp": str(r.get("isp", ""))[:80], "zapret": r["zapret"],
+    app = str(r.get("app", "0"))
+    if not re.fullmatch(r"v?\d+(\.\d+)*", app):
+        raise ValueError("bad app version")
+    return {"asn": r["asn"], "isp": str(r.get("isp", ""))[:80], "zapret": r["zapret"], "app": app.lstrip("v"),
             "choice": {"base": c["base"], "picks": dict(sorted(picks.items()))}, "score": score, "total": total}
+
+
+def _ver(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3]) or (0,)
 
 
 def merge(db: dict, rep: dict) -> dict:
     e = db.setdefault(rep["asn"], {}).setdefault(rep["zapret"], {"isp": rep["isp"], "reports": []})
     e["isp"] = rep["isp"] or e["isp"]
-    e["reports"] = (e["reports"] + [{k: rep[k] for k in ("choice", "score", "total")}])[-MAX_REPORTS:]
+    e["reports"] = (e["reports"] + [{k: rep[k] for k in ("choice", "score", "total", "app")}])[-MAX_REPORTS:]
     stats: dict[str, list] = {}
     for r in e["reports"]:
+        if _ver(r.get("app", "0")) < MIN_APP:
+            continue
         key = json.dumps(r["choice"], sort_keys=True)
         stats.setdefault(key, []).append(r["score"] / r["total"])
+    if not stats:
+        e.pop("choice", None)
+        return db
     best = max(stats, key=lambda k: (len(stats[k]), sum(stats[k]) / len(stats[k])))
     e["choice"] = json.loads(best)
     e["votes"] = len(stats[best])
