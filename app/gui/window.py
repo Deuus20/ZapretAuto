@@ -628,7 +628,8 @@ class MainWindow(QWidget):
             self._expect_running = True
         except Exception as e:  # noqa: BLE001
             self.log(f"ошибка запуска: {e}")
-            self.error = "Не удалось запустить обход. Откройте вкладку «Диагностика» → «Проверить»."
+            self.error = "Не удалось запустить обход. Откройте вкладку «Диагностика» → «Найти проблемы»."
+            self._explain_failure()
         self.refresh()
         return self.runner.running
 
@@ -664,6 +665,16 @@ class MainWindow(QWidget):
         self.btn_adv.setText("Дополнительно ▾" if on else "Дополнительно ▸")
         if save:
             self.save(show_advanced=on)
+
+    def _explain_failure(self):
+        """Run diagnostics in the background and put the concrete cause into the status line."""
+        def done(cause):
+            if cause:
+                self.error = "Обход не работает. " + cause
+                self.log("причина: " + cause)
+                self.tray.showMessage("ZapretAuto", self.error)
+                self.refresh()
+        self._run(lambda log: diag.first_problem(), done)
 
     def _game_running(self) -> bool:
         return bool(self.watcher and any(g.get("active") for g in self.watcher.games().values()))
@@ -766,6 +777,7 @@ class MainWindow(QWidget):
                 self.error = "Обход постоянно падает. Проверьте антивирус и вкладку «Диагностика»."
                 self.log("winws падает слишком часто — автоперезапуск остановлен")
                 self.tray.showMessage("ZapretAuto", self.error)
+                self._explain_failure()
         if self._repick_pending and not self.busy and not self._game_running():
             self._repick_pending = False
             self.log("игра закрыта — чиню обход")

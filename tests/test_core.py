@@ -224,3 +224,10 @@ def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
         assert time.time() - w._games["game.exe"]["started"] < gamewatch.LOGIN_GRACE
     finally:
         w.stop()
+
+
+def test_diag_reports_missing_bypass_files(tmp_path, monkeypatch):
+    from app import diag
+    (tmp_path / "winws.exe").write_text("x")
+    monkeypatch.setattr(paths, "BIN", tmp_path)
+    assert set(diag.missing_files()) == {"WinDivert.dll", "WinDivert64.sys", "cygwin1.dll"}
