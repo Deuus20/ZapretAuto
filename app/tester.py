@@ -84,6 +84,9 @@ def load_targets() -> list[Target]:
         m = re.match(r'\s*(\w+)\s*=\s*"(https?://[^"]+)"', line)
         if m:
             out.append(Target(*m.groups()))
+    # collateral checks: hosts in ipset ranges (Fastly) that work without bypass. A strategy that breaks them
+    # (e.g. game launchers on Fastly/Cloudflare) loses points instead of silently winning the ipset group.
+    out += [Target("FastlyPyPI", "https://pypi.org"), Target("FastlyPython", "https://www.python.org")]
     out += STUN_TARGETS
     out.append(Target("YouTubeSpeed", "speed://youtube", "tcp:443:list-google"))
     if load_settings().get("telegram"):
