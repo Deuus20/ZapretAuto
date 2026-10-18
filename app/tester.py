@@ -168,6 +168,8 @@ def probe_stun(t: Target, timeout: float = 2.0, tries: int = 2) -> float | None:
 
 def _domains(name: str) -> set[str]:
     p = paths.LISTS / name
+    if not p.exists():  # before the first sync_lists(): fall back to the upstream copy
+        p = paths.VENDOR / "lists" / name
     return {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")} if p.exists() else set()
 
 
