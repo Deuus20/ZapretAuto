@@ -1,0 +1,1 @@
+{"permissions":{"allow":["Bash","PowerShell","Read","Edit","Write","Glob","Grep","WebSearch","WebFetch","Agent","Skill","NotebookEdit","Monitor","ScheduleWakeup","CronCreate","TaskStop","SendMessage"]}}
