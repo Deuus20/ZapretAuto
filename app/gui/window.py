@@ -3,9 +3,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QHBoxLayout, QInputDialog, QLabel,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
                                QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
@@ -39,6 +39,54 @@ def circle(color: str) -> QIcon:
     return QIcon(pm)
 
 
+def power_icon(color: str, size: int = 44) -> QIcon:
+    """Classic power symbol: open arc + vertical bar."""
+    from PySide6.QtGui import QPen
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor(color), size * 0.1, Qt.SolidLine, Qt.RoundCap)
+    p.setPen(pen)
+    m = size * 0.16
+    p.drawArc(int(m), int(m), int(size - 2 * m), int(size - 2 * m), 120 * 16, 300 * 16)
+    p.drawLine(int(size / 2), int(size * 0.08), int(size / 2), int(size * 0.45))
+    p.end()
+    return QIcon(pm)
+
+
+STYLE = """
+QWidget { background: #15171c; color: #e6e8ee; font-family: "Segoe UI"; font-size: 10pt; }
+QFrame#card { background: #1e2129; border-radius: 14px; }
+QLabel#title { font-size: 17pt; font-weight: 600; background: transparent; }
+QLabel#sub { color: #9aa3b5; background: transparent; }
+QPushButton { background: #262a34; border: 1px solid #323744; border-radius: 8px; padding: 7px 14px; }
+QPushButton:hover { background: #2e3340; }
+QPushButton:disabled { color: #6b7280; }
+QPushButton#primary { background: #3b82f6; border: none; color: white; font-weight: 600; }
+QPushButton#primary:hover { background: #4b8ff8; }
+QPushButton#primary:disabled { background: #2a3550; color: #8090b0; }
+QPushButton#power { border-radius: 48px; font-size: 34pt; border: 3px solid #4b5263; background: #262a34; color: #9aa3b5; }
+QPushButton#power[state="on"] { border-color: #22c55e; color: #22c55e; background: #16261d; }
+QPushButton#power[state="busy"] { border-color: #f59e0b; color: #f59e0b; background: #2a2314; }
+QGroupBox { border: 1px solid #2a2f3a; border-radius: 10px; margin-top: 10px; padding: 12px 10px 8px 10px; }
+QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; color: #9aa3b5; }
+QCheckBox { spacing: 8px; background: transparent; padding: 3px 0; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 2px solid #4b5263; border-radius: 5px; background: #1b1e25; }
+QCheckBox::indicator:hover { border-color: #3b82f6; }
+QCheckBox::indicator:checked { background: #3b82f6; border-color: #3b82f6; }
+QComboBox { background: #262a34; border: 1px solid #323744; border-radius: 8px; padding: 6px 10px; }
+QComboBox::drop-down { border: none; width: 26px; }
+QComboBox QAbstractItemView { background: #1e2129; selection-background-color: #3b82f6; }
+QTabWidget::pane { border: 1px solid #2a2f3a; border-radius: 8px; top: -1px; }
+QTabBar::tab { background: transparent; padding: 7px 14px; color: #9aa3b5; border-bottom: 2px solid transparent; }
+QTabBar::tab:selected { color: #e6e8ee; border-bottom: 2px solid #3b82f6; }
+QPlainTextEdit, QTableWidget, QListWidget { background: #1b1e25; border: none; border-radius: 8px; font-family: Consolas; }
+QHeaderView::section { background: #1e2129; color: #9aa3b5; border: none; padding: 5px; }
+QToolTip { background: #262a34; color: #e6e8ee; border: 1px solid #3b82f6; padding: 6px; }
+"""
+
+
 class Worker(QThread):
     """Run fn(log) off the UI thread; result via `done`."""
     line = Signal(str)
@@ -68,7 +116,7 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ZapretAuto")
-        self.resize(640, 520)
+        self.resize(700, 680)
         self.runner = Runner()
         self.watcher = None
         self.worker: Worker | None = None
@@ -87,37 +135,78 @@ class MainWindow(QWidget):
 
     # ---------- UI ----------
     def _build(self):
+        QApplication.instance().setStyle("Fusion")
+        QApplication.instance().setStyleSheet(STYLE)
         lay = QVBoxLayout(self)
-        self.status = QLabel()
-        self.status.setWordWrap(True)
-        self.status.setStyleSheet("font-size:14px;font-weight:bold")
-        lay.addWidget(self.status)
-        row = QHBoxLayout()
-        self.btn_toggle = QPushButton("Старт")
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+
+        # header: big power button + status
+        head = QFrame(objectName="card")
+        hl = QHBoxLayout(head)
+        hl.setContentsMargins(16, 16, 16, 16)
+        hl.setSpacing(18)
+        self.btn_toggle = QPushButton(objectName="power")
+        self.btn_toggle.setIconSize(QSize(44, 44))
+        self.btn_toggle.setFixedSize(96, 96)
+        self.btn_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle.setToolTip("Включить или выключить обход блокировок")
         self.btn_toggle.clicked.connect(self.toggle)
-        self.btn_auto = QPushButton("Автоподбор")
-        self.btn_auto.clicked.connect(self.autopick)
-        row.addWidget(self.btn_toggle)
-        row.addWidget(self.btn_auto)
-        lay.addLayout(row)
+        hl.addWidget(self.btn_toggle)
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        self.status = QLabel(objectName="title")
+        self.substatus = QLabel(objectName="sub")
+        self.substatus.setWordWrap(True)
+        col.addStretch()
+        col.addWidget(self.status)
+        col.addWidget(self.substatus)
+        col.addStretch()
+        hl.addLayout(col, 1)
+        lay.addWidget(head)
+
+        # strategy row
         row = QHBoxLayout()
-        row.addWidget(QLabel("Стратегия:"))
+        self.btn_auto = QPushButton("Подобрать лучшую стратегию", objectName="primary")
+        self.btn_auto.setCursor(Qt.PointingHandCursor)
+        self.btn_auto.setToolTip("Проверить все стратегии на Discord, YouTube и голосовом трафике "
+                                 "и собрать лучшую комбинацию. Занимает 3-5 минут.")
+        self.btn_auto.clicked.connect(self.autopick)
+        row.addWidget(self.btn_auto)
         self.combo = QComboBox()
+        self.combo.setToolTip("«Авто» — подобранная комбинация. Можно выбрать стратегию вручную.")
         self.combo.addItem(AUTO)
         self.combo.addItems([s.name for s in strategies.load_all()])
         self.combo.activated.connect(self.on_combo)
         row.addWidget(self.combo, 1)
         lay.addLayout(row)
+
+        # settings
+        box = QGroupBox("Настройки")
+        grid = QGridLayout(box)
+        grid.setHorizontalSpacing(24)
         s = self.settings
         self.cb = {}
-        for key, text, default in [("game_tcp", "Game filter TCP", False), ("game_udp", "Game filter UDP", False),
-                                   ("auto_update", "Автообновление", True), ("autostart", "Автозапуск с Windows", False),
-                                   ("game_watch", "Следить за играми", False)]:
+        for i, (key, text, default, tip) in enumerate([
+            ("game_watch", "Следить за играми", False,
+             "Находить запущенные игры, собирать их серверы и включать для них обход. "
+             "Если с обходом соединение стало хуже, IP убирается."),
+            ("auto_update", "Автообновление", True,
+             "При запуске проверять обновления zapret и ZapretAuto и ставить их автоматически."),
+            ("autostart", "Запускать вместе с Windows", False,
+             "Запускать ZapretAuto при входе в Windows (задача планировщика с правами администратора)."),
+            ("game_udp", "Обход UDP для игр", False,
+             "Game filter UDP: обход UDP-трафика игр на портах 1024-65535. Включается сам, когда найдена игра."),
+            ("game_tcp", "Обход TCP для игр", False,
+             "Game filter TCP: обход TCP-трафика игр на портах 1024-65535 (только адреса из ipset и списка игр)."),
+        ]):
             c = QCheckBox(text)
+            c.setToolTip(tip)
             c.setChecked(bool(s.get(key, default)))
             c.toggled.connect(lambda v, k=key: self.on_check(k, v))
             self.cb[key] = c
-            lay.addWidget(c)
+            grid.addWidget(c, i // 2, i % 2)
+        lay.addWidget(box)
         self.tabs = QTabWidget()
         lay.addWidget(self.tabs, 1)
         self.logbox = QPlainTextEdit(readOnly=True)
@@ -132,10 +221,13 @@ class MainWindow(QWidget):
         gl.addWidget(self.table)
         r = QHBoxLayout()
         b1 = QPushButton("Игнорировать")
+        b1.setToolTip("Больше не считать выбранную программу игрой")
         b1.clicked.connect(self.ignore_game)
-        b2 = QPushButton("Добавить вручную exe")
+        b2 = QPushButton("Добавить игру (exe)…")
+        b2.setToolTip("Выбрать exe игры вручную, если она не нашлась сама")
         b2.clicked.connect(self.add_game)
         b3 = QPushButton("Сбросить IP игры")
+        b3.setToolTip("Убрать все собранные адреса выбранной игры из обхода")
         b3.clicked.connect(self.reset_game)
         r.addWidget(b1)
         r.addWidget(b2)
@@ -148,8 +240,10 @@ class MainWindow(QWidget):
         ul.addWidget(self.lbl_ver)
         r = QHBoxLayout()
         self.btn_check = QPushButton("Проверить")
+        self.btn_check.setToolTip("Проверить, есть ли новые версии zapret и ZapretAuto")
         self.btn_check.clicked.connect(self.check_update)
         self.btn_update = QPushButton("Обновить")
+        self.btn_update.setToolTip("Скачать и установить новую версию zapret")
         self.btn_update.clicked.connect(lambda: self.do_update(False))
         r.addWidget(self.btn_check)
         r.addWidget(self.btn_update)
@@ -159,6 +253,7 @@ class MainWindow(QWidget):
         d = QWidget()
         dl = QVBoxLayout(d)
         self.btn_diag = QPushButton("Проверить")
+        self.btn_diag.setToolTip("Найти частые причины, по которым обход не работает")
         self.btn_diag.clicked.connect(self.run_diag)
         dl.addWidget(self.btn_diag)
         self.diag_table = QTableWidget(0, 3)
@@ -179,6 +274,7 @@ class MainWindow(QWidget):
         b = QPushButton("Сохранить")
         b.clicked.connect(self.save_list)
         self.btn_ipset = QPushButton("Обновить ipset с GitHub")
+        self.btn_ipset.setToolTip("Скачать свежий список IP-диапазонов (Cloudflare и др.) для обхода")
         self.btn_ipset.clicked.connect(self.update_ipset)
         r.addWidget(b)
         r.addWidget(self.btn_ipset)
@@ -296,8 +392,13 @@ class MainWindow(QWidget):
         state = "busy" if self.busy else ("on" if run else "off")
         self.tray.setIcon(circle(COLORS[state]))
         self.setWindowIcon(circle(COLORS[state]))
-        self.status.setText(f"{'Работает' if run else 'Остановлено'}{' (подбор…)' if self.busy else ''} | Стратегия: {self.describe()}")
-        self.btn_toggle.setText("Стоп" if run else "Старт")
+        self.status.setText("Подбираю стратегию…" if self.busy else ("Обход включён" if run else "Обход выключен"))
+        self.substatus.setText(f"Стратегия: {self.describe()}" if run or self.busy
+                               else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
+        self.btn_toggle.setProperty("state", state)
+        self.btn_toggle.setIcon(power_icon({"on": "#22c55e", "busy": "#f59e0b"}.get(state, "#9aa3b5")))
+        self.btn_toggle.style().unpolish(self.btn_toggle)
+        self.btn_toggle.style().polish(self.btn_toggle)
         self.act_toggle.setText("Выключить" if run else "Включить")
         self.btn_auto.setEnabled(not self.busy)
         c = self.settings.get("strategy")
@@ -442,9 +543,9 @@ class MainWindow(QWidget):
         self.fill_games()
 
     def add_game(self):
-        exe, ok = QInputDialog.getText(self, "Игра", "Имя exe (например game.exe):")
-        if ok and exe.strip():
-            exe = exe.strip()
+        path, _ = QFileDialog.getOpenFileName(self, "Выберите exe игры", "", "Программы (*.exe)")
+        if path:
+            exe = path.replace("/", "\\")
             self.save(games_force=sorted(set(self.settings.get("games_force", [])) | {exe}))
             if self.watcher and hasattr(self.watcher, "add_manual"):
                 self.watcher.add_manual(exe)
