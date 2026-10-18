@@ -60,6 +60,7 @@ class Bridge(QObject):
     log = Signal(str)
     games_changed = Signal()
     update_checked = Signal(object, bool)
+    app_checked = Signal(object, bool)
     diag_done = Signal(object)
 
 
@@ -77,6 +78,7 @@ class MainWindow(QWidget):
         self.bridge.log.connect(self.log)
         self.bridge.games_changed.connect(self.on_games_changed)
         self.bridge.update_checked.connect(self.on_update_checked)
+        self.bridge.app_checked.connect(self.on_app_checked)
         self.bridge.diag_done.connect(self.on_diag_done)
         self.settings = tester.load_settings()
         self._build()
@@ -189,7 +191,8 @@ class MainWindow(QWidget):
                 ver = updater.current_version()
             except Exception:  # noqa: BLE001
                 pass
-        self.lbl_ver.setText(f"Версия zapret: {ver}")
+        from app import __version__
+        self.lbl_ver.setText(f"ZapretAuto {__version__} | zapret {ver}")
         if not updater:
             self.btn_check.setEnabled(False)
             self.btn_update.setEnabled(False)
@@ -452,6 +455,20 @@ class MainWindow(QWidget):
         if updater:
             self.log("проверка обновлений…")
             updater.check_async(lambda tag, newer: self.bridge.update_checked.emit(tag, newer))
+            if hasattr(updater, "app_check_async"):
+                updater.app_check_async(lambda tag, newer: self.bridge.app_checked.emit(tag, newer))
+
+    def on_app_checked(self, tag, newer):
+        if not newer:
+            return
+        self.log(f"доступна новая версия ZapretAuto: {tag}")
+        if self.settings.get("auto_update", True) or QMessageBox.question(
+                self, "ZapretAuto", f"Установить ZapretAuto {tag}?") == QMessageBox.Yes:
+            self.app_worker = Worker(lambda log: updater.app_update(log))
+            self.app_worker.line.connect(self.log)
+            # installer replaces files and restarts the app
+            self.app_worker.done.connect(lambda ok: self.quit() if ok is True else self.log("самообновление не выполнено"))
+            self.app_worker.start()
 
     def on_update_checked(self, tag, newer):
         self.log(f"последняя версия: {tag}" + (" (есть обновление)" if newer else " (актуально)" if tag else " (не удалось проверить)"))

@@ -1,6 +1,9 @@
+﻿#ifndef AppVer
+#define AppVer "1.0.0"
+#endif
 [Setup]
 AppName=ZapretAuto
-AppVersion=1.0
+AppVersion={#AppVer}
 AppPublisher=ZapretAuto
 DefaultDirName={autopf}\ZapretAuto
 DefaultGroupName=ZapretAuto
@@ -37,6 +40,7 @@ Name: "{autodesktop}\ZapretAuto"; Filename: "{app}\ZapretAuto.exe"; Tasks: deskt
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}'"""; Flags: runhidden; Tasks: defexcl
 Filename: "{app}\ZapretAuto.exe"; Description: "{cm:LaunchProgram,ZapretAuto}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\ZapretAuto.exe"; Flags: nowait; Check: IsSelfUpdate
 
 [UninstallRun]
 Filename: "taskkill.exe"; Parameters: "/F /IM ZapretAuto.exe"; Flags: runhidden; RunOnceId: "KillApp"
@@ -49,3 +53,9 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Com
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\vendor"
+
+[Code]
+function IsSelfUpdate: Boolean;
+begin
+  Result := ExpandConstant('{param:UPDATE|0}') = '1';
+end;

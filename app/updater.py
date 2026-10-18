@@ -11,6 +11,7 @@ import requests
 from . import paths
 
 REPO = "Flowseal/zapret-discord-youtube"
+APP_REPO = "OWNER/ZapretAuto"  # our releases with ZapretAuto-Setup.exe
 
 
 def current_version(vendor: Path = paths.VENDOR) -> str:
@@ -104,6 +105,50 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
             shutil.rmtree(old, ignore_errors=True)
     log(f"Updated to {tag}")
     return True
+
+
+def app_release() -> tuple[str, str]:
+    """(tag, Setup.exe url) of the latest ZapretAuto release."""
+    r = requests.get(f"https://api.github.com/repos/{APP_REPO}/releases/latest",
+                     headers={"Accept": "application/vnd.github+json"}, timeout=15)
+    r.raise_for_status()
+    j = r.json()
+    for a in j.get("assets", []):
+        if a.get("name", "").lower().endswith("setup.exe"):
+            return j["tag_name"], a["browser_download_url"]
+    raise RuntimeError("no Setup.exe asset in latest app release")
+
+
+def app_update(log=print) -> bool:
+    """Download the new installer and run it silently; it restarts the app. Caller must quit right after."""
+    import subprocess, tempfile
+    from . import __version__
+    tag, url = app_release()
+    if not is_newer(tag, __version__):
+        return False
+    exe = Path(tempfile.gettempdir()) / "ZapretAuto-Setup.exe"
+    log(f"скачиваю ZapretAuto {tag}")
+    with requests.get(url, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        with open(exe, "wb") as f:
+            for chunk in r.iter_content(1 << 16):
+                f.write(chunk)
+    subprocess.Popen([str(exe), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/UPDATE=1"],
+                     creationflags=0x00000008)  # DETACHED_PROCESS
+    return True
+
+
+def app_check_async(callback) -> None:
+    """callback(tag|None, newer) for the app itself."""
+    def work():
+        from . import __version__
+        try:
+            tag, _ = app_release()
+            callback(tag, is_newer(tag, __version__))
+        except Exception:
+            callback(None, False)
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 def check_async(callback) -> None:

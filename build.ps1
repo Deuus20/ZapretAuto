@@ -1,3 +1,4 @@
+$ver = (Select-String -Path app\__init__.py -Pattern '"(.+)"').Matches[0].Groups[1].Value
 # Build dist\ZapretAuto\ZapretAuto.exe (onedir, admin manifest), prune Qt, bundle vendor/, make installer
 $ErrorActionPreference = 'Continue'
 & .venv\Scripts\pyinstaller --noconfirm --clean --windowed --uac-admin --name ZapretAuto `
@@ -16,4 +17,4 @@ foreach ($p in 'translations', 'plugins\platforminputcontexts', 'plugins\platfor
 Copy-Item vendor dist\ZapretAuto\vendor -Recurse -Force
 "built: dist\ZapretAuto\ZapretAuto.exe"
 $iscc = @("$env:ProgramFiles\Inno Setup 6\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($iscc) { & $iscc /Qp installer.iss; "installer: dist\ZapretAuto-Setup.exe" } else { "Inno Setup not found, skipping installer" }
+if ($iscc) { & $iscc /Qp "/DAppVer=$ver" installer.iss; "installer: dist\ZapretAuto-Setup.exe" } else { "Inno Setup not found, skipping installer" }
