@@ -42,7 +42,7 @@ Name: "{autodesktop}\ZapretAuto"; Filename: "{app}\ZapretAuto.exe"; Tasks: deskt
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}'"""; Flags: runhidden; Tasks: defexcl
 Filename: "{app}\ZapretAuto.exe"; Description: "{cm:LaunchProgram,ZapretAuto}"; Flags: nowait postinstall skipifsilent shellexec
 Filename: "{app}\ZapretAuto.exe"; Flags: nowait shellexec; Check: IsSelfUpdate
-Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden  ; refresh Explorer icon cache
+Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden
 
 [UninstallRun]
 Filename: "taskkill.exe"; Parameters: "/F /IM ZapretAuto.exe"; Flags: runhidden; RunOnceId: "KillApp"
