@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -194,3 +195,32 @@ def test_merge_ignores_old_app_reports():
     assert "choice" not in db["AS25513"]["1.10.3"]
     db = m.merge(db, m.parse(_body(app="1.0.8", choice={"base": "SIMPLE FAKE ALT", "picks": {}}, score=34, total=36)))
     assert db["AS25513"]["1.10.3"]["choice"]["base"] == "SIMPLE FAKE ALT"
+
+
+def test_gamewatch_v1_ips_reset_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(games={"g.exe": {"path": "x", "ips": ["1.2.3.4"]}})
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        assert w.games()["g.exe"]["ips"] == set()
+        assert settings.load_settings()["games_schema"] == 2
+    finally:
+        w.stop()
+
+
+def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        monkeypatch.setattr(w, "_proc", lambda pid: ("game.exe", r"C:\Steam\steamapps\common\G\game.exe"))
+        monkeypatch.setattr(w, "_pool", type("P", (), {"submit": lambda *a, **k: None, "shutdown": lambda *a, **k: None})())
+        w._process([(1, "9.9.9.9", 443, 6), (1, "9.9.9.10", 27015, 17)])
+        g = w.games()["game.exe"]
+        assert g["ips"] == {"9.9.9.10"}  # 443 skipped, game port kept
+        assert time.time() - w._games["game.exe"]["started"] < gamewatch.LOGIN_GRACE
+    finally:
+        w.stop()
