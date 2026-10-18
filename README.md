@@ -14,7 +14,7 @@ Windows 10/11 x64, нужны права администратора (драй�
 
 <p align="center"><img src="docs/img/main-on.png" width="520" alt="Главное окно ZapretAuto"></p>
 
-**Документация:** [Установка по шагам](docs/install.md) · [Руководство](docs/guide.md) ·
+**Документация:** [Установка по шагам](docs/install.md) · [История изменений](CHANGELOG.md) · [Руководство](docs/guide.md) ·
 [Решение проблем](docs/troubleshooting.md) · [Приватность](docs/privacy.md) · [Как это устроено](docs/how-it-works.md)
 
 ## Установка
