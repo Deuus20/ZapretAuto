@@ -21,7 +21,7 @@ try:
 except Exception:  # noqa: BLE001
     gamewatch = None
 
-ROOT = Path(__file__).resolve().parents[2]
+from app.paths import ROOT
 TASK = "ZapretAuto"
 AUTO = "Авто (микс)"
 COLORS = {"on": "#2ecc71", "off": "#8a8a8a", "busy": "#f39c12"}
