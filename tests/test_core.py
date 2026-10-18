@@ -410,3 +410,36 @@ def test_gui_timed_pause(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()  # destroy Qt objects before the interpreter exits (else a crash at shutdown)
         app.processEvents()
+
+
+def test_gui_game_ips_do_not_restart_winws(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        w.settings["ipset_updated"] = time.time()
+        w.tray.showMessage = lambda *a, **k: None
+        restarts = []
+        monkeypatch.setattr(type(w.runner), "running", property(lambda self: True))
+        monkeypatch.setattr(w, "start_runner", lambda: restarts.append(1))
+        games = {"g.exe": {"ips": {"1.2.3.4"}, "active": True, "started": time.time() - 999}}
+        w.watcher = type("W", (), {"games": lambda self: games})()
+        w._run_flags = (True, True)            # game filter already on: new IPs need no restart
+        w.on_games_changed()
+        assert restarts == []
+        w._run_flags = (False, False)          # first game: filter must be switched on
+        w.on_games_changed()
+        assert restarts == [1]
+    finally:
+        w.watcher = None
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
