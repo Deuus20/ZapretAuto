@@ -646,9 +646,9 @@ class MainWindow(QWidget):
             self.refresh()
             return False
         try:
-            self.runner.start(s, self.settings.get("game_tcp", False) or self._game_udp_wanted(),
-                              self.settings.get("game_udp", False) or self._game_udp_wanted(),
-                              self.settings.get("auto_hostlist", True))
+            flags = self._game_flags()
+            self.runner.start(s, *flags, self.settings.get("auto_hostlist", True))
+            self._run_flags = flags
             self.log(f"запущено: {s.name}")
             stats.record("start")
             self.error = ""
@@ -745,8 +745,7 @@ class MainWindow(QWidget):
             added = lists.add_user_domain(dom)
             s = tester.chosen_strategy()
             if s and self.runner.running:
-                self.runner.start(s, settings_snapshot.get("game_tcp", False) or self._game_udp_wanted(),
-                                  settings_snapshot.get("game_udp", False) or self._game_udp_wanted(),
+                self.runner.start(s, *self._game_flags(),
                                   settings_snapshot.get("auto_hostlist", True))
                 import time as _t
                 _t.sleep(1.5)
@@ -1099,10 +1098,30 @@ class MainWindow(QWidget):
             self.watcher = None
             self.log("слежение за играми выключено")
 
+    def _game_flags(self) -> tuple[bool, bool]:
+        wanted = self._game_udp_wanted()
+        return (self.settings.get("game_tcp", False) or wanted, self.settings.get("game_udp", False) or wanted)
+
+    def _apply_game_flags(self):
+        """Restart winws to switch the game filter on, but not while a game is logging in."""
+        if not self.runner.running or self.busy or self._game_flags() == getattr(self, "_run_flags", None):
+            return
+        from app.gamewatch import LOGIN_GRACE
+        games = self.watcher.games() if self.watcher else {}
+        wait = max([LOGIN_GRACE - (time.time() - g.get("started", 0)) for g in games.values() if g.get("active")]
+                   or [0])
+        if wait > 0:
+            QTimer.singleShot(int(wait * 1000) + 500, self._apply_game_flags)
+            return
+        self.start_runner()
+
     def on_games_changed(self):
         self.fill_games()
         if self.runner.running and not self.busy:
-            self.start_runner()  # restart with game filters
+            # winws re-reads the changed ipset-games.txt by itself; restart only when the game filter ports
+            # have to be switched on (first game) — restarts would drop live match connections
+            if self._game_flags() != getattr(self, "_run_flags", None):
+                self._apply_game_flags()
             games = self.watcher.games() if self.watcher else {}
             known = set(self.settings.get("games_notified", []))
             new = [exe for exe, g in games.items() if g.get("ips") and exe not in known]

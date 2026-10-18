@@ -42,8 +42,8 @@ UDP_NON_GAME_EXES = {
     "nekoray.exe", "v2rayn.exe", "xray.exe", "sing-box.exe", "hiddify.exe", "claude.exe", "node.exe",
 }
 UDP_GAME_MIN_IPS = 3
-DEBOUNCE = 30.0          # s of quiet after the last new IP before rewriting the ipset
-MIN_RESTART_GAP = 60.0   # s between winws restarts caused by game IPs
+DEBOUNCE = 5.0           # s of quiet after the last new IP before rewriting the ipset
+MIN_RESTART_GAP = 5.0    # s between ipset rewrites (winws reloads the file itself, no restart needed)
 MAX_IPS_PER_GAME = 256
 PID_TTL = 30.0           # s; Windows reuses PIDs, so cached exe names expire  # distinct public UDP peers before an unknown exe is treated as a game
 SYSTEM_DIRS = ("\\windows\\", "\\microsoft\\edge\\", "\\google\\chrome\\", "\\windowsapps\\microsoft.",
@@ -194,7 +194,7 @@ class GameWatcher(threading.Thread):
     def games(self) -> dict[str, dict]:
         with self._lock:
             return {k: {"path": v["path"], "ips": set(v["ips"]), "active": v["active"],
-                        "ping_ms": v["ping_ms"]} for k, v in self._games.items()}
+                        "ping_ms": v["ping_ms"], "started": v.get("started", 0)} for k, v in self._games.items()}
 
     def remove_ip(self, exe: str, ip: str) -> None:
         """Drop one IP from a game, rewrite the ipset and apply."""
@@ -470,11 +470,8 @@ class GameWatcher(threading.Thread):
                     ev = self._poll_psutil()
                 self._process(ev)
                 now = time.time()
-                with self._lock:
-                    logging_in = any(g.get("active") and now - g.get("started", 0) < LOGIN_GRACE
-                                     for g in self._games.values())
                 if (self._pending_since and now - self._pending_since >= DEBOUNCE
-                        and now - self._last_restart >= MIN_RESTART_GAP and not logging_in):
+                        and now - self._last_restart >= MIN_RESTART_GAP):
                     self._pending_since = None
                     self._flush()
             except Exception as e:
