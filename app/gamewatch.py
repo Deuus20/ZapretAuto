@@ -4,6 +4,7 @@ import ipaddress
 import re
 import statistics
 import subprocess
+import socket
 import threading
 import time
 from collections import defaultdict
@@ -29,6 +30,15 @@ NON_GAME_EXES = {
     "gamingservicesnet.exe", "xboxpcapp.exe", "crashpad_handler.exe", "unitycrashhandler64.exe",
     "unitycrashhandler32.exe", "easyanticheat_eos_setup.exe", "vc_redist.x64.exe", "dxsetup.exe",
 }
+# apps with lots of UDP to public IPs that are not games
+UDP_NON_GAME_EXES = {
+    "qbittorrent.exe", "utorrent.exe", "bittorrent.exe", "transmission-qt.exe", "deluge.exe", "tixati.exe",
+    "zoom.exe", "skype.exe", "whatsapp.exe", "viber.exe", "ms-teams.exe", "anydesk.exe", "teamviewer.exe",
+    "rustdesk.exe", "parsecd.exe", "obs64.exe", "nvcontainer.exe", "amneziavpn.exe", "amneziavpn-service.exe",
+    "wireguard.exe", "openvpn.exe", "radmin_vpn.exe", "rvcontrolsvc.exe", "hamachi-2.exe", "zerotier-one_x64.exe",
+    "nekoray.exe", "v2rayn.exe", "xray.exe", "sing-box.exe", "hiddify.exe", "claude.exe", "node.exe",
+}
+UDP_GAME_MIN_IPS = 3  # distinct public UDP peers before an unknown exe is treated as a game
 SYSTEM_DIRS = ("\\windows\\", "\\microsoft\\edge\\", "\\google\\chrome\\", "\\windowsapps\\microsoft.",
                "\\windowsapps\\microsoftcorporationii.", "\\windowsapps\\spotifyab.",
                "\\windowsapps\\5319275a.", "\\windowsapps\\telegram")
@@ -44,8 +54,10 @@ def classify(path: str | None, settings: dict | None = None) -> bool:
     exe = p.rsplit("\\", 1)[-1]
     if exe in {x.lower() for x in s.get("games_ignore", [])}:
         return False
-    if exe in {x.lower() for x in s.get("games_force", [])}:
-        return True
+    if exe in {x.lower().replace("/", "\\").rsplit("\\", 1)[-1] for x in s.get("games_force", [])}:
+        return True  # entries may be exe names or full paths
+    if exe in {x.lower() for x in s.get("games", {})}:
+        return True  # detected earlier (e.g. by UDP heuristic)
     if exe in NON_GAME_EXES:
         return False
     if any(d in p for d in SYSTEM_DIRS):
@@ -126,6 +138,7 @@ class GameWatcher(threading.Thread):
         self._stop_ev = threading.Event()
         self._lock = threading.Lock()
         self._games: dict[str, dict] = {}
+        self._udp_hits: dict[str, set[str]] = {}
         self._events: list[tuple[int, str, int]] = []
         self._ev_lock = threading.Lock()
         self._handle = None
@@ -261,15 +274,15 @@ class GameWatcher(threading.Thread):
                 continue
             self.flow_count += 1
             with self._ev_lock:
-                self._events.append((a.ProcessId, ip, a.RemotePort))
+                self._events.append((a.ProcessId, ip, a.RemotePort, a.Protocol))
                 del self._events[:-5000]
 
-    def _poll_psutil(self) -> list[tuple[int, str, int]]:
+    def _poll_psutil(self) -> list[tuple[int, str, int, int]]:
         out = []
         try:
             for c in psutil.net_connections("inet"):
                 if c.raddr and c.pid and c.family.name == "AF_INET":
-                    out.append((c.pid, c.raddr.ip, c.raddr.port))
+                    out.append((c.pid, c.raddr.ip, c.raddr.port, 17 if c.type == socket.SOCK_DGRAM else 6))
         except Exception as e:
             self.log(f"gamewatch: psutil failed: {e}")
         return out
@@ -306,16 +319,31 @@ class GameWatcher(threading.Thread):
                     g["ping_ms"] = min(vals) if vals else None
         self._pinging.discard(ip)
 
-    def _process(self, events: list[tuple[int, str, int]]) -> None:
+    def _udp_game(self, exe: str, path: str, ip: str, port: int, proto: int, settings: dict) -> bool:
+        """Heuristic for games outside known launcher dirs: UDP to several public peers on high ports."""
+        p = (path or "").lower()
+        if (proto != 17 or port < 1024 or exe in NON_GAME_EXES or exe in UDP_NON_GAME_EXES
+                or any(d in p for d in SYSTEM_DIRS)
+                or exe in {x.lower() for x in settings.get("games_ignore", [])}):
+            return False
+        hits = self._udp_hits.setdefault(exe, set())
+        hits.add(ip)
+        if len(hits) >= UDP_GAME_MIN_IPS:
+            if exe not in self._games:
+                self.log(f"игра определена по UDP-трафику: {exe}")
+            return True
+        return False
+
+    def _process(self, events: list[tuple[int, str, int, int]]) -> None:
         settings = load_settings()
         seen_active: set[str] = set()
         new_ip = False
         banned = set(settings.get("games_bad_ips", []))
-        for pid, ip, port in events:
+        for pid, ip, port, proto in events:
             if port in SKIP_PORTS or not public_ipv4(ip) or ip in banned:
                 continue
             exe, path = self._proc(pid)
-            if not exe or not classify(path, settings):
+            if not exe or not (classify(path, settings) or self._udp_game(exe, path, ip, port, proto, settings)):
                 continue
             seen_active.add(exe)
             with self._lock:
@@ -383,11 +411,15 @@ class GameWatcher(threading.Thread):
             self.log("gamewatch: WinDivert flow capture active")
         else:
             self.log("gamewatch: fallback to psutil.net_connections (TCP/connected UDP only)")
+        tick = 0
         while not self._stop_ev.wait(self.interval):
             try:
                 if use_divert:
                     with self._ev_lock:
                         ev, self._events = self._events, []
+                    if tick % 5 == 0:  # flow layer sees only new flows: also pick up already-open connections
+                        ev += self._poll_psutil()
+                    tick += 1
                 else:
                     ev = self._poll_psutil()
                 self._process(ev)
