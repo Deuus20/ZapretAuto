@@ -35,6 +35,23 @@ def _procs() -> set[str]:
     return {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
 
 
+BYPASS_FILES = ("winws.exe", "WinDivert.dll", "WinDivert64.sys", "cygwin1.dll")
+
+
+def missing_files() -> list[str]:
+    """Bypass binaries that are gone (antivirus quarantine is the usual reason)."""
+    return [f for f in BYPASS_FILES if not (paths.BIN / f).is_file()]
+
+
+def first_problem() -> str | None:
+    """Short human-readable cause for a bypass that won't start, or None."""
+    for r in run_checks():
+        if r["level"] == "err" or (r["level"] == "warn" and r["label"] in ("Конфликтующие службы", "Служба zapret",
+                                                                            "Остаточный WinDivert")):
+            return f"{r['label']}: {r['detail']}"
+    return None
+
+
 def run_checks() -> list[dict]:
     res = []
     procs = _procs()
@@ -51,8 +68,10 @@ def run_checks() -> list[dict]:
     else:
         res.append(_item("TCP timestamps", "warn", "не удалось определить", "tcp_timestamps"))
 
-    sys_ok = (paths.BIN / "WinDivert64.sys").is_file()
-    res.append(_item("WinDivert64.sys", "ok" if sys_ok else "err", str(paths.BIN) if sys_ok else "файл не найден в bin/"))
+    missing = missing_files()
+    res.append(_item("Файлы обхода", "err" if missing else "ok",
+                     ("нет: " + ", ".join(missing) + " — скорее всего, их удалил антивирус. Добавьте папку программы "
+                      "в исключения и переустановите ZapretAuto") if missing else "winws.exe, WinDivert на месте"))
 
     bad = []
     for n in CONFLICT:
