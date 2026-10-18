@@ -5,7 +5,7 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QPointF, QRectF, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
                                QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSystemTrayIcon,
@@ -51,9 +51,9 @@ def app_icon(color: str = "#3b82f6") -> QIcon:
         pen = QPen(QColor("#ffffff"), max(1.5, w * .085), Qt.SolidLine, Qt.RoundCap)
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
-        r = w * .22
-        p.drawArc(int(w * .5 - r), int(w * .5 - r), int(2 * r), int(2 * r), 125 * 16, 290 * 16)
-        p.drawLine(int(w * .5), int(w * .24), int(w * .5), int(w * .5))
+        r, cx, cy = w * .22, w * .5, w * .52  # float geometry: int() rounding shifted it left at 16-32 px
+        p.drawArc(QRectF(cx - r, cy - r, 2 * r, 2 * r), 125 * 16, 290 * 16)
+        p.drawLine(QPointF(cx, cy - r * 1.18), QPointF(cx, cy - r * .05))
         p.end()
         icon.addPixmap(pm)
     return icon
