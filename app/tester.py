@@ -255,8 +255,10 @@ def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float
         runner.stop()
 
 
-QUICK = {"Discord": "DiscordMain", "YouTube": "YouTubeWeb", "Скорость YouTube": "YouTubeSpeed",
-         "Голос Discord": "STUN_Google19302", "Telegram": "TelegramWeb"}
+# service -> probes; a service counts as working when most of its probes pass (single probes through DPI are noisy)
+QUICK = {"Discord": ("DiscordMain", "DiscordGateway", "DiscordCDN"),
+         "YouTube": ("YouTubeWeb", "YouTubeImage", "YouTubeVideoRedirect"),
+         "Скорость YouTube": ("YouTubeSpeed",), "Голос Discord": ("STUN_Google19302",), "Telegram": ("TelegramWeb",)}
 
 
 def quick_check(light: bool = False) -> dict[str, bool]:
@@ -265,13 +267,19 @@ def quick_check(light: bool = False) -> dict[str, bool]:
     global BIND
     from . import vpn as vpnmod
     BIND = vpnmod.bind_ip() if vpn_active() else None  # check the direct path, not the VPN
-    ts = [t for t in load_targets() if t.key in QUICK.values() and not (light and t.is_speed)]
+    keys = {k for ks in QUICK.values() for k in ks}
+    ts = [t for t in load_targets() if t.key in keys and not (light and t.is_speed)]
     res = probe_all(ts)
     retry = [t for t in ts if res.get(t.key) is None]
     if retry:  # single probes through DPI are noisy: confirm failures once
         time.sleep(3)
         res.update({k: v for k, v in probe_all(retry).items() if v is not None})
-    return {name: res.get(key) is not None for name, key in QUICK.items() if key in res}
+    out = {}
+    for name, ks in QUICK.items():
+        got = [res[k] is not None for k in ks if k in res]
+        if got:
+            out[name] = sum(got) * 2 > len(got) or (len(got) == 1 and got[0])
+    return out
 
 
 def auto_pick(log=print, use_shared: bool | None = None) -> dict:
