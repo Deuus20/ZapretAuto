@@ -8,7 +8,27 @@ os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
 
 
+def selftest() -> int:
+    """`ZapretAuto.exe --selftest`: no GUI, no admin; checks the frozen build can load its parts."""
+    out = []
+    try:
+        from app import strategies, tester
+        out.append(f"strategies: {len(strategies.load_all())}")
+        import importlib.util
+        out.append("curl_cffi: ok" if importlib.util.find_spec("curl_cffi") else "curl_cffi: MISSING")
+        st, _, n = tester.fetch("https://github.com", 4096, 10)
+        out.append(f"fetch github: {st} {n}B")
+        code = 0 if all("MISSING" not in x for x in out) else 1
+    except Exception as e:  # noqa: BLE001
+        out.append(f"error: {e!r}")
+        code = 1
+    (ROOT / "selftest.txt").write_text("\n".join(out) + "\n", encoding="utf-8")
+    return code
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
     from app.runner import is_admin
     if not is_admin():
         args = " ".join(f'"{a}"' for a in sys.argv[1:])
