@@ -406,6 +406,9 @@ class MainWindow(QWidget):
         self.fill_games()
         if self.runner.running:
             self.start_runner()  # restart with game filters
+            msg = "Добавлены IP игры. Если игра не подключается — перезапустите её."
+            self.log(msg)
+            self.tray.showMessage("ZapretAuto", msg)
 
     def fill_games(self):
         games = self.watcher.games() if self.watcher else {}
