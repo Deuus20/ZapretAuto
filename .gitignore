@@ -3,3 +3,6 @@
 /dist/
 /data/
 __pycache__/
+/build/
+/dist/
+*.spec
