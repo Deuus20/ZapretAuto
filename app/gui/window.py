@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, 
                                QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
-from app import diag, lists, strategies, tester
+from app import diag, lists, logs, stats, strategies, tester
 from app.runner import Runner
 
 try:
@@ -145,6 +145,7 @@ class MainWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(2000)
+        logs._on_crash = lambda msg: self.bridge.log.emit(f"внутренняя ошибка: {msg} (подробности в журнале)")
         self._health_fails = 0
         self._health_running = False
         self._net = None
@@ -302,13 +303,30 @@ class MainWindow(QWidget):
         self.btn_diag = QPushButton("Найти проблемы")
         self.btn_diag.setToolTip("Найти частые причины, по которым обход не работает")
         self.btn_diag.clicked.connect(self.run_diag)
-        dl.addWidget(self.btn_diag)
+        drow = QHBoxLayout()
+        drow.addWidget(self.btn_diag)
+        self.btn_report = QPushButton("Сохранить отчёт об ошибке…")
+        self.btn_report.setToolTip("Собрать журнал, диагностику и настройки в zip, чтобы отправить разработчику. "
+                                   "Имя пользователя Windows в отчёте скрыто.")
+        self.btn_report.clicked.connect(self.save_report)
+        drow.addWidget(self.btn_report)
+        drow.addStretch()
+        dl.addLayout(drow)
         self.diag_table = QTableWidget(0, 3)
         self.diag_table.setHorizontalHeaderLabels(["Проверка", "Результат", ""])
         self.diag_table.horizontalHeader().setStretchLastSection(True)
         self.diag_table.setEditTriggers(QTableWidget.NoEditTriggers)
         dl.addWidget(self.diag_table)
         self.tabs.addTab(d, "Диагностика")
+        st = QWidget()
+        stl = QVBoxLayout(st)
+        self.lbl_stats = QLabel()
+        self.lbl_stats.setWordWrap(True)
+        self.lbl_stats.setTextFormat(Qt.RichText)
+        stl.addWidget(self.lbl_stats)
+        stl.addStretch()
+        self.tabs.addTab(st, "Статистика")
+        self.tabs.currentChanged.connect(lambda i: self.fill_stats() if self.tabs.widget(i) is st else None)
         ls = QWidget()
         ll = QVBoxLayout(ls)
         self.list_combo = QComboBox()
@@ -356,7 +374,8 @@ class MainWindow(QWidget):
 
     def on_diag_done(self, res):
         self.btn_diag.setEnabled(True)
-        self.btn_diag.setText("Проверить")
+        self.btn_diag.setText("Найти проблемы")
+        self._last_diag = res
         t = self.diag_table
         t.setRowCount(0)
         col = {"ok": "#2ecc71", "warn": "#f39c12", "err": "#e74c3c"}
@@ -418,7 +437,8 @@ class MainWindow(QWidget):
 
     # ---------- helpers ----------
     def log(self, text: str):
-        self.logbox.appendPlainText(text)
+        self.logbox.appendPlainText(time.strftime("%H:%M:%S ") + text)
+        logs.log.info(text)
 
     def show_window(self):
         self.show()
@@ -488,6 +508,7 @@ class MainWindow(QWidget):
             self.runner.start(s, self.settings.get("game_tcp", False),
                               self.settings.get("game_udp", False) or self._game_udp_wanted())
             self.log(f"запущено: {s.name}")
+            stats.record("start")
             self.error = ""
             self._expect_running = True
         except Exception as e:  # noqa: BLE001
@@ -495,6 +516,31 @@ class MainWindow(QWidget):
             self.error = "Не удалось запустить обход. Откройте вкладку «Диагностика» → «Проверить»."
         self.refresh()
         return self.runner.running
+
+    def save_report(self):
+        default = str(Path.home() / "Desktop" / f"ZapretAuto-report-{time.strftime('%Y%m%d-%H%M')}.zip")
+        path, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default, "Zip (*.zip)")
+        if not path:
+            return
+        diag_rows = getattr(self, "_last_diag", None)
+
+        def done(p):
+            if p:
+                self.log(f"отчёт сохранён: {p}")
+                QMessageBox.information(self, "ZapretAuto", f"Отчёт сохранён:\n{p}\n\nОтправьте этот файл разработчику.")
+        self._run(lambda log: logs.make_report(Path(path), diag_rows), done)
+
+    def fill_stats(self):
+        s = stats.summary(7)
+        last = time.strftime("%d.%m %H:%M", time.localtime(s["last_repick"])) if s["last_repick"] else "не было"
+        pct = f"{s['ok_pct']}%" if s["ok_pct"] is not None else "ещё нет данных"
+        self.lbl_stats.setText(
+            f"<h3>За последние {s['days']} дней</h3>"
+            f"<p>Обход работал: <b>{s['uptime_h']} ч</b></p>"
+            f"<p>Фоновых проверок: <b>{s['checks']}</b>, успешных: <b>{pct}</b></p>"
+            f"<p>Программа сама чинила обход: <b>{s['repicks']}</b> раз (последний: {last})</p>"
+            f"<p>Неожиданных остановок winws: <b>{s['crashes']}</b></p>"
+            f"<p>Обновлений списка ipset: <b>{s['ipset']}</b></p>")
 
     def set_advanced(self, on: bool, save: bool = True):
         """Show/hide expert settings and the raw lists editor."""
@@ -515,6 +561,7 @@ class MainWindow(QWidget):
             if not res or self.busy:
                 return
             core = [v for k, v in res.items() if k in ("Discord", "YouTube", "Скорость YouTube")]
+            stats.record("check", ok=all(core))
             if all(core):
                 self._health_fails = 0
                 return
@@ -524,6 +571,7 @@ class MainWindow(QWidget):
             self._next_health = time.time() + 60  # re-check soon
             if self._health_fails >= 2 and self.settings.get("auto_repick", True):
                 self._health_fails = 0
+                stats.record("repick", reason=bad)
                 self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. Подбираю стратегию заново…")
                 self.autopick()
         self._run(lambda log: tester.quick_check(), done)
@@ -532,6 +580,7 @@ class MainWindow(QWidget):
         """Detect winws dying on its own (antivirus, driver conflict)."""
         if self._expect_running and not self.busy and not self.runner.running:
             self._expect_running = False
+            stats.record("crash")
             self.error = "Обход неожиданно остановился. Проверьте антивирус и вкладку «Диагностика»."
             self.log("winws завершился сам")
             self.tray.showMessage("ZapretAuto", self.error)
@@ -546,8 +595,12 @@ class MainWindow(QWidget):
             self._ipset_try = now  # weekly; retry hourly on failure
             from app import lists
             self.log("еженедельное обновление ipset…")
-            self._run(lambda log: lists.update_ipset(log),
-                      lambda ok: self.start_runner() if ok and self.runner.running and not self.busy else None)
+            def ipset_done(ok):
+                if ok:
+                    stats.record("ipset")
+                    if self.runner.running and not self.busy:
+                        self.start_runner()
+            self._run(lambda log: lists.update_ipset(log), ipset_done)
         if now >= self._next_health:
             self._next_health = now + 600
             self._health()
@@ -588,6 +641,7 @@ class MainWindow(QWidget):
         if self.runner.running:
             self._expect_running = False
             self.runner.stop()
+            stats.record("stop")
             self.log("остановлено")
             self.refresh()
         elif not self.start_runner() and not self.settings.get("strategy"):
@@ -620,7 +674,8 @@ class MainWindow(QWidget):
 
     def set_autostart(self, on: bool):
         if on:
-            tr = f'"{sys.executable}"' if getattr(sys, "frozen", False) else f'"{sys.executable}" "{ROOT / "main.py"}"'
+            tr = (f'"{sys.executable}" --tray' if getattr(sys, "frozen", False)
+                  else f'"{sys.executable}" "{ROOT / "main.py"}" --tray')
             cmd = ["schtasks", "/Create", "/F", "/TN", TASK, "/TR", tr, "/RL", "HIGHEST", "/SC", "ONLOGON"]
         else:
             cmd = ["schtasks", "/Delete", "/F", "/TN", TASK]
@@ -827,6 +882,8 @@ class MainWindow(QWidget):
 
     # ---------- lifecycle ----------
     def startup(self, autostart=True):
+        if self.settings.get("autostart"):
+            self.set_autostart(True)  # refresh the task (adds --tray for older installs)
         if not autostart:
             self.log("ZAPRET_NO_AUTOSTART: автозапуск отключён")
             return
