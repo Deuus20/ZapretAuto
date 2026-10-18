@@ -286,7 +286,10 @@ def auto_pick(log=print) -> dict:
     for g in set(groups.values()):
         keys = [k for k, v in groups.items() if v == g]
         winner = max(tested.values(), key=lambda s: score({k: results[s.name][k] for k in keys}))
-        picks[g] = winner.name
+        w_ok = score({k: results[winner.name][k] for k in keys})[0]
+        b_ok = score({k: results[best.name][k] for k in keys})[0]
+        if w_ok > b_ok:  # single runs are noisy: swap a profile only for a real gain on that group
+            picks[g] = winner.name
     mixed = strategies.mix("mix", {g: tested[n] for g, n in picks.items()}, best)
     # single runs are noisy: re-test finalists several times and sum successes
     finalists = sorted(tested.values(), key=lambda s: score(results[s.name]), reverse=True)[:3] + [mixed]

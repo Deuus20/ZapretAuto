@@ -24,6 +24,9 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 ## Tools
 - `python tools/shot.py <out.png> [maxW]`: screenshot (use maxW 1024 to save tokens), then Read the png.
 
+## Tests
+- `.venv\Scripts\python -m pytest -q` (offline, ~1 s); build.ps1 runs them first.
+
 ## Token rules
 - Don't read vendor/bin, big lists, service.bat or `test zapret.ps1` (denied). Grep them if needed.
 - Read only the file ranges you need. Batch shell commands. Short replies.

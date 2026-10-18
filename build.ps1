@@ -1,6 +1,8 @@
 $ver = (Select-String -Path app\__init__.py -Pattern '"(.+)"').Matches[0].Groups[1].Value
 # Build dist\ZapretAuto\ZapretAuto.exe (onedir, admin manifest), prune Qt, bundle vendor/, make installer
 $ErrorActionPreference = 'Continue'
+& .venv\Scripts\python -m pytest -q tests
+if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
 & .venv\Scripts\pyinstaller --noconfirm --clean --windowed --uac-admin --name ZapretAuto `
   --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.Qt3DCore --exclude-module PySide6.QtQuick `
   --exclude-module PySide6.QtQml --exclude-module PySide6.QtPdf --exclude-module PySide6.QtSvg `
