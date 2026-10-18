@@ -58,6 +58,9 @@ class Strategy:
             if "ipset-all" in p.group:  # route game ipset through every ipset profile (game ports + 80/443)
                 args.insert(1, f"--ipset={paths.LISTS / 'ipset-games.txt'}")
             out += args
+        left = sorted({v for a in out for v in re.findall(r"%[\w~]+%", a)})
+        if left:
+            raise ValueError(f"{self.name}: unknown variables {left}")
         return out
 
 
@@ -86,8 +89,20 @@ def parse_bat(path: Path) -> Strategy:
     return Strategy(name, wf_tcp, wf_udp, profiles)
 
 
-def load_all() -> list[Strategy]:
-    return [parse_bat(p) for p in sorted(paths.VENDOR.glob("general*.bat"))]
+def load_all(log=None) -> list[Strategy]:
+    """All parseable strategies; a broken .bat (upstream format change) is skipped, not fatal."""
+    out = []
+    for p in sorted(paths.VENDOR.glob("general*.bat")):
+        try:
+            s = parse_bat(p)
+            if not s.profiles or not any(a.startswith("--filter-") for pr in s.profiles for a in pr.args):
+                raise ValueError("no profiles")
+            s.argv()  # validates variable substitution
+            out.append(s)
+        except Exception as e:  # noqa: BLE001
+            if log:
+                log(f"стратегия {p.name} пропущена: {e}")
+    return out
 
 
 def mix(name: str, picks: dict[str, Strategy], base: Strategy) -> Strategy:

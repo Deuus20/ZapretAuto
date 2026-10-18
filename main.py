@@ -29,10 +29,16 @@ def main() -> int:
         return 0
     QLocalServer.removeServer("ZapretAuto")
     server = QLocalServer()
+    server.setSocketOptions(QLocalServer.UserAccessOption)  # only this user may poke the instance
     server.listen("ZapretAuto")
+    try:
+        from app import updater
+        updater.recover_vendor()  # finish/undo an interrupted zapret update
+    except Exception:  # noqa: BLE001
+        pass
     from app.gui.window import MainWindow
     w = MainWindow()
-    server.newConnection.connect(lambda: (server.nextPendingConnection(), w.show_window()))
+    server.newConnection.connect(lambda: (server.nextPendingConnection().disconnectFromServer(), w.show_window()))
     w.show_window()
     w.startup(autostart=not os.environ.get("ZAPRET_NO_AUTOSTART"))
     return app.exec()

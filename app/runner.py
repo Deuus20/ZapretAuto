@@ -1,6 +1,9 @@
 """Start/stop winws.exe (single instance)."""
 import ctypes
 import subprocess
+import threading
+
+import psutil
 
 from . import paths
 from .strategies import Strategy
@@ -15,31 +18,47 @@ def is_admin() -> bool:
         return False
 
 
+def _stray_winws() -> bool:
+    try:
+        return any((p.info["name"] or "").lower() == "winws.exe" for p in psutil.process_iter(["name"]))
+    except psutil.Error:
+        return True
+
+
 class Runner:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
         self.current: Strategy | None = None
+        self._lock = threading.RLock()
 
     @property
     def running(self) -> bool:
-        return self.proc is not None and self.proc.poll() is None
+        p = self.proc
+        return p is not None and p.poll() is None
 
     def start(self, s: Strategy, game_tcp: bool = False, game_udp: bool = False) -> None:
-        self.stop()
-        paths.sync_lists()
-        self.proc = subprocess.Popen(
-            s.argv(game_tcp, game_udp), cwd=paths.BIN, creationflags=CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        )
-        self.current = s
+        with self._lock:
+            self.stop()
+            paths.sync_lists()
+            self.proc = subprocess.Popen(
+                s.argv(game_tcp, game_udp), cwd=paths.BIN, creationflags=CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,  # an undrained PIPE would block winws
+            )
+            self.current = s
 
     def stop(self) -> None:
-        if self.running:
-            self.proc.terminate()
-            try:
-                self.proc.wait(5)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-        # also kill instances started by upstream .bat files
-        subprocess.run(["taskkill", "/F", "/IM", "winws.exe"], capture_output=True, creationflags=CREATE_NO_WINDOW)
-        self.proc = self.current = None
+        with self._lock:
+            p = self.proc
+            if p is not None and p.poll() is None:
+                p.terminate()
+                try:
+                    p.wait(5)
+                except subprocess.TimeoutExpired:
+                    p.kill()
+            if _stray_winws():  # instances started by upstream .bat files or a previous run
+                try:
+                    subprocess.run(["taskkill", "/F", "/IM", "winws.exe"], capture_output=True,
+                                   creationflags=CREATE_NO_WINDOW, timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+            self.proc = self.current = None

@@ -1,10 +1,12 @@
 """Update vendor/zapret from GitHub releases. Never touches paths.DATA."""
+import os
 import re
 import shutil
 import tempfile
 import threading
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 
@@ -58,8 +60,65 @@ def _find_root(base: Path) -> Path | None:
     return None
 
 
+MAX_DOWNLOAD = 200 * 1024 * 1024
+TAG_RE = re.compile(r"^v?\d+(\.\d+)*[a-z]?$", re.I)
+ALLOWED_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
+                 "githubusercontent.com")
+
+
+def _check_url(url: str) -> None:
+    host = urlparse(url).hostname or ""
+    if urlparse(url).scheme != "https" or not any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS):
+        raise RuntimeError(f"unexpected download host: {host}")
+
+
+def _download(url: str, dest: Path, log=print) -> None:
+    """Download to dest.part with size cap and Content-Length check, then rename."""
+    _check_url(url)
+    part = dest.with_suffix(dest.suffix + ".part")
+    with requests.get(url, stream=True, timeout=(15, 60)) as r:
+        r.raise_for_status()
+        _check_url(r.url)  # after redirects
+        expected = int(r.headers.get("Content-Length") or 0)
+        got = 0
+        with open(part, "wb") as f:
+            for chunk in r.iter_content(1 << 16):
+                got += len(chunk)
+                if got > MAX_DOWNLOAD:
+                    raise RuntimeError("download too large")
+                f.write(chunk)
+    if expected and got != expected:
+        part.unlink(missing_ok=True)
+        raise RuntimeError(f"incomplete download ({got} of {expected} bytes)")
+    os.replace(part, dest)
+
+
+def _safe_extract(z: zipfile.ZipFile, dest: Path) -> None:
+    total = 0
+    root = dest.resolve()
+    for m in z.infolist():
+        total += m.file_size
+        if total > MAX_DOWNLOAD * 3:
+            raise RuntimeError("archive too large")
+        target = (dest / m.filename).resolve()
+        if root not in target.parents and target != root:
+            raise RuntimeError(f"unsafe path in archive: {m.filename}")
+    z.extractall(dest)
+
+
+def recover_vendor(vendor: Path = paths.VENDOR) -> None:
+    """Undo an update interrupted between renaming the old vendor dir and moving the new one in."""
+    old = vendor.with_name(vendor.name + ".old")
+    if old.exists() and not (vendor / "bin" / "winws.exe").exists():
+        if vendor.exists():
+            shutil.rmtree(vendor, ignore_errors=True)
+        old.rename(vendor)
+
+
 def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=False) -> bool:
     tag, url = latest_release()
+    if not TAG_RE.match(tag):
+        raise RuntimeError(f"bad release tag: {tag!r}")
     cur = current_version(vendor)
     if not force and not is_newer(tag, cur):
         log(f"Up to date ({cur})")
@@ -70,19 +129,15 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
         td = Path(td)
         zpath = td / "release.zip"
         log("Downloading...")
-        with requests.get(url, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(zpath, "wb") as f:
-                for chunk in r.iter_content(1 << 16):
-                    f.write(chunk)
+        _download(url, zpath, log)
         ex = td / "x"
         with zipfile.ZipFile(zpath) as z:
-            z.extractall(ex)
+            _safe_extract(z, ex)
         root = _find_root(ex)
         if root is None:
             raise RuntimeError("bin/winws.exe not found in archive")
-        if not list(root.glob("general*.bat")):
-            raise RuntimeError("no general*.bat in archive")
+        if not list(root.glob("general*.bat")) or not (root / "lists").is_dir():
+            raise RuntimeError("no general*.bat or lists/ in archive")
         if before_replace:
             before_replace()
         old = vendor.with_name(vendor.name + ".old")
@@ -107,32 +162,41 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
     return True
 
 
-def app_release() -> tuple[str, str]:
-    """(tag, Setup.exe url) of the latest ZapretAuto release."""
+def app_release() -> tuple[str, str, str | None]:
+    """(tag, Setup.exe url, .sha256 url or None) of the latest ZapretAuto release."""
     r = requests.get(f"https://api.github.com/repos/{APP_REPO}/releases/latest",
                      headers={"Accept": "application/vnd.github+json"}, timeout=15)
     r.raise_for_status()
     j = r.json()
-    for a in j.get("assets", []):
-        if a.get("name", "").lower().endswith("setup.exe"):
-            return j["tag_name"], a["browser_download_url"]
-    raise RuntimeError("no Setup.exe asset in latest app release")
+    assets = {a.get("name", "").lower(): a["browser_download_url"] for a in j.get("assets", [])}
+    setup = next((u for n, u in assets.items() if n.endswith("setup.exe")), None)
+    if not setup:
+        raise RuntimeError("no Setup.exe asset in latest app release")
+    sha = next((u for n, u in assets.items() if n.endswith("setup.exe.sha256")), None)
+    return j["tag_name"], setup, sha
 
 
 def app_update(log=print) -> bool:
-    """Download the new installer and run it silently; it restarts the app. Caller must quit right after."""
-    import subprocess, tempfile
+    """Download the new installer, verify it and run it silently; it restarts the app. Caller quits after."""
+    import hashlib
+    import subprocess
     from . import __version__
-    tag, url = app_release()
-    if not is_newer(tag, __version__):
+    tag, url, sha_url = app_release()
+    if not TAG_RE.match(tag) or not is_newer(tag, __version__):
         return False
-    exe = Path(tempfile.gettempdir()) / "ZapretAuto-Setup.exe"
+    if not sha_url:
+        raise RuntimeError("в релизе нет файла .sha256 — обновление не проверить")
+    d = Path(tempfile.mkdtemp(prefix="zapretauto_upd_"))  # private dir: no TOCTOU via shared %TEMP% name
+    exe = d / "ZapretAuto-Setup.exe"
     log(f"скачиваю ZapretAuto {tag}")
-    with requests.get(url, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        with open(exe, "wb") as f:
-            for chunk in r.iter_content(1 << 16):
-                f.write(chunk)
+    _download(url, exe, log)
+    _check_url(sha_url)
+    want = requests.get(sha_url, timeout=15).text.split()[0].strip().lower()
+    have = hashlib.sha256(exe.read_bytes()).hexdigest()
+    if have != want:
+        shutil.rmtree(d, ignore_errors=True)
+        raise RuntimeError("контрольная сумма установщика не совпала")
+    log("установщик проверен, запускаю обновление…")
     subprocess.Popen([str(exe), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/UPDATE=1"],
                      creationflags=0x00000008)  # DETACHED_PROCESS
     return True
@@ -143,7 +207,7 @@ def app_check_async(callback) -> None:
     def work():
         from . import __version__
         try:
-            tag, _ = app_release()
+            tag, _, _ = app_release()
             callback(tag, is_newer(tag, __version__))
         except Exception:
             callback(None, False)
