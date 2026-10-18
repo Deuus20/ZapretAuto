@@ -32,8 +32,22 @@
      "score": 23,
      "total": 28,
      "app": "1.0.3"
+    },
+    {
+     "choice": {
+      "base": "SIMPLE FAKE ALT",
+      "picks": {}
+     },
+     "score": 34,
+     "total": 36,
+     "app": "1.0.8"
     }
-   ]
+   ],
+   "choice": {
+    "base": "SIMPLE FAKE ALT",
+    "picks": {}
+   },
+   "votes": 1
   }
  }
 }
