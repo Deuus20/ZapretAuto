@@ -12,7 +12,7 @@ from pathlib import Path
 
 import psutil
 
-from . import strategies, tester
+from . import strategies, tester, winkeys
 from .runner import Runner
 from .settings import load_settings, save_settings
 
@@ -116,6 +116,7 @@ def pick_for_game(exe_path: str, runner: Runner, log=print, stop=lambda: False) 
         os.startfile(cmd) if cmd.startswith("steam://") else subprocess.Popen([cmd], cwd=str(Path(cmd).parent))
         t0, best = time.time(), 0
         while time.time() - t0 < WAIT and not stop():
+            winkeys.press_any_key(stem)  # many games wait for "press any key" before logging in
             best = max(best, _servers(stem))
             if best >= LOGIN_SERVERS:
                 break

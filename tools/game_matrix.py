@@ -13,6 +13,7 @@ import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import strategies  # noqa: E402
+from app import winkeys  # noqa: E402
 from app.runner import Runner  # noqa: E402
 
 APPID, PREFIX, ROUNDS, OUT = sys.argv[1], sys.argv[2].lower(), int(sys.argv[3]), Path(sys.argv[4])
@@ -69,6 +70,7 @@ for rnd in range(ROUNDS):
         os.startfile(f"steam://rungameid/{APPID}")
         t0, best = time.time(), 0
         while time.time() - t0 < WAIT:
+            winkeys.press_any_key(PREFIX)  # the game waits for "press any key" before logging in
             best = max(best, servers())
             if best >= LOGIN_SERVERS:
                 break

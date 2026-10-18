@@ -52,6 +52,37 @@ class _SrcAdapter(requests.adapters.HTTPAdapter):
         return super().init_poolmanager(*a, **kw)
 
 
+def fetch(url: str, max_bytes: int, deadline: float) -> tuple[int, str, int]:
+    """Download up to max_bytes; returns (status, final_url, bytes). Uses a Chrome TLS fingerprint
+    (curl_cffi) when available: DPI and strategies react to the ClientHello, and browsers/Discord send
+    Chrome's, not Python's. Raises on network failure."""
+    t0 = time.perf_counter()
+    try:
+        from curl_cffi import requests as cr
+    except ImportError:
+        cr = None
+    if cr is not None:
+        kw = {"interface": BIND} if BIND else {}
+        r = cr.get(url, impersonate="chrome", timeout=TIMEOUT, stream=True, proxies={}, **kw)
+        try:
+            got = 0
+            for chunk in r.iter_content():
+                got += len(chunk)
+                if got >= max_bytes or time.perf_counter() - t0 > deadline:
+                    break
+            return r.status_code, str(r.url), got
+        finally:
+            r.close()
+    with _get(url, timeout=TIMEOUT, stream=True, proxies={"http": None, "https": None},
+              headers={"User-Agent": "Mozilla/5.0"}) as r:
+        got = 0
+        for chunk in r.iter_content(1 << 14):
+            got += len(chunk)
+            if got >= max_bytes or time.perf_counter() - t0 > deadline:
+                break
+        return r.status_code, r.url, got
+
+
 def _get(url: str, **kw):
     """requests.get that leaves through BIND's adapter when set (Windows strong-host routing)."""
     s = requests.Session()
@@ -164,15 +195,9 @@ def probe_speed(t: Target) -> float | None:
     """Download the ~1 MB YouTube front page completely: catches DPI that freezes a session after the
     first kilobytes. Seconds taken, None if it stalls or is slower than SPEED_MIN."""
     t0 = time.perf_counter()
-    got = 0
     try:
-        with _get("https://www.youtube.com/", stream=True, timeout=TIMEOUT,
-                          proxies={"http": None, "https": None}, headers={"User-Agent": "Mozilla/5.0"}) as r:
-            for chunk in r.iter_content(1 << 15):
-                got += len(chunk)
-                if got >= SPEED_BYTES or time.perf_counter() - t0 > 15:
-                    break
-    except requests.RequestException:
+        _, _, got = fetch("https://www.youtube.com/", SPEED_BYTES, 15)
+    except Exception:  # noqa: BLE001
         return None
     dt = time.perf_counter() - t0
     return dt if got >= 400 * 1024 and got / dt >= SPEED_MIN else None
@@ -200,18 +225,12 @@ def probe(t: Target) -> float | None:
         return probe_tcp(t)
     t0 = time.perf_counter()
     try:
-        with _get(t.url, timeout=TIMEOUT, stream=True, proxies={"http": None, "https": None},
-                          headers={"User-Agent": "Mozilla/5.0"}) as r:
-            if r.status_code == 451 or BLOCK_PAGE.search(r.url):  # ISP stub page
-                return None
-            got = 0
-            for chunk in r.iter_content(4096):
-                got += len(chunk)
-                if got >= READ_BYTES or time.perf_counter() - t0 > TIMEOUT * 2:
-                    break
-        return time.perf_counter() - t0
-    except requests.RequestException:
+        status, final, _ = fetch(t.url, READ_BYTES, TIMEOUT * 2)
+    except Exception:  # noqa: BLE001  (requests / curl_cffi network errors)
         return None
+    if status == 451 or BLOCK_PAGE.search(final):  # ISP stub page
+        return None
+    return time.perf_counter() - t0
 
 
 def probe_all(targets: list[Target]) -> dict[str, float | None]:
