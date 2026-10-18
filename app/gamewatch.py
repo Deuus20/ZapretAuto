@@ -2,6 +2,7 @@
 import ctypes
 import ipaddress
 import re
+import statistics
 import subprocess
 import threading
 import time
@@ -95,6 +96,29 @@ def _group(ips: set[str]) -> set[str]:
     return out
 
 
+def tcp_latency(ip: str, port: int, timeout: float = 2.0, n: int = 3) -> float | None:
+    """Median TCP connect time in ms over n tries; None if no try succeeded."""
+    import socket
+    vals = []
+    for _ in range(n):
+        t0 = time.perf_counter()
+        try:
+            with socket.create_connection((ip, port), timeout=timeout):
+                vals.append((time.perf_counter() - t0) * 1000)
+        except OSError:
+            pass
+    return statistics.median(vals) if len(vals) >= (n // 2 + 1) else None
+
+
+def is_degraded(before: float | None, after: float | None) -> bool:
+    """True if TCP connect got worse after desync. No baseline = no judgement."""
+    if before is None:
+        return False
+    if after is None:
+        return True
+    return after > before * 1.5 and after - before > 30
+
+
 class GameWatcher(threading.Thread):
     def __init__(self, on_change: Callable[[], None], log: Callable[[str], None] = print, interval: float = 3.0):
         super().__init__(daemon=True, name="GameWatcher")
@@ -112,6 +136,11 @@ class GameWatcher(threading.Thread):
         self._pid_cache: dict[int, tuple[str | None, str | None]] = {}
         self._pinging: set[str] = set()
         self._ping: dict[str, float | None] = {}
+        self._base: dict[str, tuple[int, float, str]] = {}  # ip -> (port, ms, exe) baseline before desync
+        self._measuring: set[str] = set()
+        self._checked: dict = {}
+        self.rollback_delay = 15.0
+        self.measure = tcp_latency
         for exe, g in load_settings().get("games", {}).items():
             self._games[exe] = {"path": g.get("path", ""), "ips": set(g.get("ips", [])),
                                 "active": False, "ping_ms": None}
@@ -135,6 +164,67 @@ class GameWatcher(threading.Thread):
         with self._lock:
             return {k: {"path": v["path"], "ips": set(v["ips"]), "active": v["active"],
                         "ping_ms": v["ping_ms"]} for k, v in self._games.items()}
+
+    def remove_ip(self, exe: str, ip: str) -> None:
+        """Drop one IP from a game, rewrite the ipset and apply."""
+        with self._lock:
+            g = self._games.get(exe)
+            if not g or ip not in g["ips"]:
+                return
+            g["ips"].discard(ip)
+            self._base.pop(ip, None)
+        self._persist_settings()
+        self._flush()
+
+    def reset_game(self, exe: str) -> None:
+        """Drop all learned IPs of a game."""
+        with self._lock:
+            g = self._games.get(exe)
+            if not g:
+                return
+            for ip in g["ips"]:
+                self._base.pop(ip, None)
+            g["ips"].clear()
+        self._persist_settings()
+        self._flush()
+
+    def _measure_base(self, ip: str, port: int, exe: str) -> None:
+        try:
+            ms = self.measure(ip, port)
+            if ms is not None:
+                self._base[ip] = (port, ms, exe)
+        finally:
+            self._measuring.discard(ip)
+
+    def _schedule_rollback(self) -> None:
+        todo = {ip: v for ip, v in self._base.items() if ip not in self._checked}
+        if todo:
+            self._checked.update(todo)
+            threading.Thread(target=self._rollback_check, args=(todo,), daemon=True).start()
+
+    def _rollback_check(self, todo: dict[str, tuple[int, float, str]]) -> None:
+        if self._stop_ev.wait(self.rollback_delay):
+            return
+        bad = []
+        for ip, (port, before, exe) in todo.items():
+            with self._lock:
+                if ip not in self._games.get(exe, {}).get("ips", ()):
+                    continue
+            after = self.measure(ip, port)
+            if is_degraded(before, after):
+                bad.append((ip, exe))
+        if not bad:
+            return
+        s = load_settings()
+        banned = set(s.get("games_bad_ips", []))
+        with self._lock:
+            for ip, exe in bad:
+                banned.add(ip)
+                self._games[exe]["ips"].discard(ip)
+                self.log(f"откат IP {ip} для {exe}")
+        save_settings(games_bad_ips=sorted(banned))
+        self._persist_settings()
+        self._flush()
 
     # ---- flow capture
     def _open_divert(self) -> bool:
@@ -220,8 +310,9 @@ class GameWatcher(threading.Thread):
         settings = load_settings()
         seen_active: set[str] = set()
         new_ip = False
+        banned = set(settings.get("games_bad_ips", []))
         for pid, ip, port in events:
-            if port in SKIP_PORTS or not public_ipv4(ip):
+            if port in SKIP_PORTS or not public_ipv4(ip) or ip in banned:
                 continue
             exe, path = self._proc(pid)
             if not exe or not classify(path, settings):
@@ -233,6 +324,9 @@ class GameWatcher(threading.Thread):
                 if ip not in g["ips"]:
                     g["ips"].add(ip)
                     new_ip = True
+                    if ip not in self._base and ip not in self._measuring and ip not in self._checked:
+                        self._measuring.add(ip)
+                        threading.Thread(target=self._measure_base, args=(ip, port, exe), daemon=True).start()
             if ip not in self._ping and ip not in self._pinging:
                 self._pinging.add(ip)
                 threading.Thread(target=self._ping_ip, args=(ip,), daemon=True).start()
@@ -280,6 +374,7 @@ class GameWatcher(threading.Thread):
             self.on_change()
         except Exception as e:
             self.log(f"gamewatch: on_change error: {e}")
+        self._schedule_rollback()
 
     def run(self) -> None:
         use_divert = self._open_divert()

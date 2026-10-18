@@ -21,6 +21,8 @@ def sync_lists() -> None:
     LISTS.mkdir(parents=True, exist_ok=True)
     for f in (VENDOR / "lists").iterdir():
         if f.is_file() and f.name not in USER_LISTS:
+            if f.name == "ipset-all.txt" and (LISTS / "ipset-all.txt.custom").exists():
+                continue
             shutil.copy2(f, LISTS / f.name)
     for name, default in USER_LISTS.items():
         p = LISTS / name

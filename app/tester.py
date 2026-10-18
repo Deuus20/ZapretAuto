@@ -20,10 +20,15 @@ ROUNDS = 3
 class Target:
     key: str
     url: str
+    group: str | None = None  # fixed group (UDP targets); None = derive from lists
 
     @property
     def host(self) -> str:
-        return re.sub(r"^https?://([^/]+).*", r"\1", self.url)
+        return re.sub(r"^[a-z]+://([^/:]+).*", r"\1", self.url)
+
+    @property
+    def is_stun(self) -> bool:
+        return self.url.startswith("stun://")
 
 
 VPN_RE = re.compile(r"vpn|wireguard|wg|amnezia|tun|tap|outline|nekoray|hiddify", re.I)
@@ -49,7 +54,41 @@ def load_targets() -> list[Target]:
         m = re.match(r'\s*(\w+)\s*=\s*"(https?://[^"]+)"', line)
         if m:
             out.append(Target(*m.groups()))
+    out += STUN_TARGETS
     return out
+
+
+STUN_TARGETS = [
+    Target("STUN_Google19302", "stun://stun.l.google.com:19302", "udp:19294-19344:discord,stun"),
+    Target("STUN_Cloudflare3478", "stun://stun.cloudflare.com:3478", "udp:other"),
+]
+
+
+def probe_stun(t: Target, timeout: float = 2.0, tries: int = 2) -> float | None:
+    """RFC5389 Binding Request over UDP; RTT seconds or None."""
+    import os
+    import socket
+    import struct
+    host, _, port = t.url[len("stun://"):].partition(":")
+    for _ in range(tries):
+        tid = os.urandom(12)
+        req = struct.pack("!HHI", 0x0001, 0, 0x2112A442) + tid
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.settimeout(timeout)
+                addr = (socket.gethostbyname(host), int(port))
+                t0 = time.perf_counter()
+                s.sendto(req, addr)
+                while (left := timeout - (time.perf_counter() - t0)) > 0:
+                    s.settimeout(left)
+                    data, _a = s.recvfrom(2048)
+                    if len(data) >= 20:
+                        typ, _ln, cookie = struct.unpack("!HHI", data[:8])
+                        if typ == 0x0101 and cookie == 0x2112A442 and data[8:20] == tid:
+                            return time.perf_counter() - t0
+        except OSError:
+            pass
+    return None
 
 
 def _domains(name: str) -> set[str]:
@@ -58,7 +97,9 @@ def _domains(name: str) -> set[str]:
 
 
 def target_group(t: Target) -> str:
-    """TCP profile group that handles this target's host."""
+    """Profile group that handles this target's host."""
+    if t.group:
+        return t.group
     def hit(ds):
         return any(t.host == d or t.host.endswith("." + d) for d in ds)
     if hit(_domains("list-google.txt")):
@@ -70,6 +111,8 @@ def target_group(t: Target) -> str:
 
 def probe(t: Target) -> float | None:
     """Seconds to read READ_BYTES (or full body), None on failure."""
+    if t.is_stun:
+        return probe_stun(t)
     t0 = time.perf_counter()
     try:
         with requests.get(t.url, timeout=TIMEOUT, stream=True, proxies={"http": None, "https": None},
