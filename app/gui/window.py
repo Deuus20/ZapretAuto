@@ -497,16 +497,18 @@ class MainWindow(QWidget):
     def save_list(self):
         p = lists.user_list_paths()[self.list_combo.currentText()]
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(self.list_edit.toPlainText(), encoding="utf-8")
+        text = self.list_edit.toPlainText()
+        if not any(l.strip() and not l.strip().startswith("#") for l in text.splitlines()):
+            # winws refuses empty lists (and re-reads them live): keep a harmless placeholder entry
+            text = text.rstrip() + ("\n" if text.strip() else "") + (
+                "203.0.113.113/32" if p.name.startswith("ipset") else "domain.example.abc") + "\n"
+            self.list_edit.setPlainText(text)
+        p.write_text(text, encoding="utf-8")
         self.log(f"сохранён {p.name}")
 
     def update_ipset(self):
         self.btn_ipset.setEnabled(False)
-        w = Worker(lambda log: lists.update_ipset(log))
-        w.line.connect(self.bridge.log.emit)
-        w.done.connect(lambda ok: self.btn_ipset.setEnabled(True))
-        self._ipset_w = w
-        w.start()
+        self._run(lambda log: lists.update_ipset(log), lambda ok: self.btn_ipset.setEnabled(True))
 
     def _tray(self):
         self.tray = QSystemTrayIcon(app_icon(COLORS["off"]), self)
