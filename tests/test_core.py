@@ -258,3 +258,24 @@ def test_gui_smoke(tmp_path, monkeypatch):
     finally:
         w.tray.hide()
         w._timer.stop()
+
+
+def test_gamepick_saves_profile_not_global(tmp_path, monkeypatch):
+    from app import gamepick
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    settings._cache = None
+    settings.save_settings(strategy={"base": "ALT12", "picks": {}})
+    monkeypatch.setattr(gamepick, "_attempt", lambda *a: (True, 9, 1.0))
+    monkeypatch.setattr(gamepick, "_kill", lambda stem: None)
+    monkeypatch.setattr(gamepick, "FlowCounter", lambda stem: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(gamepick, "candidates", lambda: [{"base": "ALT11", "picks": {}}])
+    monkeypatch.setattr(gamepick.tester, "quick_check", lambda: {"Discord": True, "YouTube": True})
+
+    class R:
+        def start(self, *a, **k): pass
+        def stop(self): pass
+    c = gamepick.pick_for_game(r"C:\G\game-Win64.exe", R(), log=lambda m: None, tries=1)
+    st = settings.load_settings()
+    assert c == {"base": "ALT11", "picks": {}}
+    assert st["strategy"]["base"] == "ALT12"  # global untouched
+    assert st["game_profiles"]["game-win64.exe"]["base"] == "ALT11"

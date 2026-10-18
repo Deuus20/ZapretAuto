@@ -165,6 +165,7 @@ class MainWindow(QWidget):
         self.watcher = None
         self.worker: Worker | None = None
         self.busy = False
+        self._profile_exe: str | None = None  # game whose own strategy is active
         self.busy_text = ""
         self.error = ""
         self._workers: list = []  # keep QThreads alive until finished
@@ -346,8 +347,8 @@ class MainWindow(QWidget):
         b2 = QPushButton("Добавить игру (exe)…")
         b2.setToolTip("Выбрать exe игры вручную, если она не нашлась сама")
         b2.clicked.connect(self.add_game)
-        b3 = QPushButton("Сбросить IP игры")
-        b3.setToolTip("Убрать все собранные адреса выбранной игры из обхода")
+        b3 = QPushButton("Сбросить игру")
+        b3.setToolTip("Убрать собранные адреса выбранной игры и её собственный профиль стратегии")
         b3.clicked.connect(self.reset_game)
         r.addWidget(b1)
         r.addWidget(b2)
@@ -565,6 +566,8 @@ class MainWindow(QWidget):
                                   "Выход — правый клик по значку → «Выход».")
 
     def describe(self) -> str:
+        if self._profile_exe:
+            return f"профиль игры {self._profile_exe.rsplit('.', 1)[0]}"
         c = self.settings.get("strategy")
         if not c:
             return "не выбрана"
@@ -616,6 +619,13 @@ class MainWindow(QWidget):
         if self.busy:
             return False
         s = tester.chosen_strategy()
+        prof = self.settings.get("game_profiles", {}).get(self._profile_exe or "")
+        if prof:
+            from app import gamepick
+            try:
+                s = gamepick.build(prof)
+            except KeyError:  # strategy vanished after a zapret update
+                pass
         if not s:
             self.error = "Стратегия не выбрана — нажмите «Подобрать лучшую стратегию»."
             self.refresh()
@@ -759,9 +769,33 @@ class MainWindow(QWidget):
                 self.autopick()
         self._run(lambda log: tester.quick_check(), done)
 
+    def _check_profiles(self):
+        """Switch to a game's own strategy while it runs (set by «Подобрать стратегию для этой игры»)."""
+        profiles = self.settings.get("game_profiles", {})
+        if not profiles or self.busy:
+            return
+        import psutil
+        try:
+            running = {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
+        except psutil.Error:
+            return
+        exe = next((e for e in profiles if e in running), None)
+        if exe != self._profile_exe:
+            self._profile_exe = exe
+            if self.runner.running:
+                self.start_runner()
+            msg = (f"Запущена {exe.rsplit('.', 1)[0]} — включён её профиль обхода" if exe
+                   else "Игра закрыта — возвращена общая стратегия")
+            self.log(msg)
+            if exe:
+                self.tray.showMessage("ZapretAuto", msg)
+
     def _tick(self):
         """Detect winws dying on its own (antivirus, driver conflict)."""
         now = time.time()
+        self._ticks = getattr(self, "_ticks", 0) + 1
+        if self._ticks % 5 == 0:  # ~10 s
+            self._check_profiles()
         if now - self._last_tick > 60:  # timer is 2 s: a long gap means sleep/hibernate
             self.log("пробуждение после сна — перезапускаю обход")
             if self._expect_running and not self.busy:
@@ -1084,6 +1118,14 @@ class MainWindow(QWidget):
             return
         exe = self.table.item(r, 0).text()
         self.watcher.reset_game(exe)
+        profiles = dict(self.settings.get("game_profiles", {}))
+        if profiles.pop(exe.lower(), None) is not None:
+            self.save(game_profiles=profiles)
+            self.log(f"профиль стратегии игры удалён: {exe}")
+            if self._profile_exe == exe.lower():
+                self._profile_exe = None
+                if self.runner.running:
+                    self.start_runner()
         self.log(f"IP игры сброшены: {exe}")
         self.fill_games()
 
