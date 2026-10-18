@@ -1,3 +1,4 @@
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -5,7 +6,23 @@ from pathlib import Path
 ROOT = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "zapret"
 BIN = VENDOR / "bin"
-DATA = ROOT / "data"
+
+
+def _pick_data() -> Path:
+    d = ROOT / "data"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        t = d / ".w"
+        t.write_text("1")
+        t.unlink()
+        return d
+    except OSError:
+        d = Path(os.environ.get("PROGRAMDATA") or "C:/ProgramData") / "ZapretAuto" / "data"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+
+DATA = _pick_data()
 LISTS = DATA / "lists"  # runtime lists dir passed to winws (upstream lists + user/game lists)
 
 USER_LISTS = {

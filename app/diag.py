@@ -83,12 +83,19 @@ def run_checks() -> list[dict]:
         n = int(out.strip().splitlines()[-1])
     except Exception:  # noqa: BLE001
         n = -1
+    if n <= 0:  # Windows 10: auto-DoH via registry + DoH-capable DNS server
+        _, auto = _ps(r"(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -EA SilentlyContinue).EnableAutoDoh")
+        _, dns = _ps("(Get-DnsClientServerAddress -AddressFamily IPv4).ServerAddresses -join ' '")
+        if auto.strip() == "2" and any(d in dns for d in ("1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9")):
+            n = 1
+        else:
+            n = max(n, 0)
     if n < 0:
         res.append(_item("Secure DNS (DoH)", "warn", "не удалось определить"))
     elif n == 0:
         res.append(_item("Secure DNS (DoH)", "warn", "не включён — провайдер может подменять DNS"))
     else:
-        res.append(_item("Secure DNS (DoH)", "ok", f"записей с DoH: {n}"))
+        res.append(_item("Secure DNS (DoH)", "ok", "включён"))
 
     try:
         from .tester import vpn_active
