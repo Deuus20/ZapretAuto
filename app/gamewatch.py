@@ -18,7 +18,8 @@ from . import paths
 from .settings import load_settings, save_settings
 
 PLACEHOLDER = "203.0.113.113/32"
-SKIP_PORTS: set[int] = set()  # game logins often use 443 to CDNs: collect them too
+SKIP_PORTS = {80, 443}  # web/CDN traffic (launchers, login APIs) is covered by hostlists/ipset; desyncing it broke launchers
+LOGIN_GRACE = 120.0  # s after a game starts: no winws restarts, so logins are not cut off
 GAME_DIRS = ("steamapps\\common", "\\epic games\\", "\\riot games\\", "\\battle.net\\", "\\ubisoft",
              "\\ea games\\", "\\gog games\\", "\\xboxgames\\", "\\windowsapps\\")
 NON_GAME_EXES = {
@@ -62,9 +63,9 @@ def classify(path: str | None, settings: dict | None = None) -> bool:
         return False
     if exe in {x.lower().replace("/", "\\").rsplit("\\", 1)[-1] for x in s.get("games_force", [])}:
         return True  # entries may be exe names or full paths
-    if exe in {x.lower() for x in s.get("games", {})}:
+    if exe in {x.lower() for x in s.get("games", {})} and "launcher" not in exe:
         return True  # detected earlier (e.g. by UDP heuristic)
-    if exe in NON_GAME_EXES:
+    if exe in NON_GAME_EXES or "launcher" in exe:
         return False
     if any(d in p for d in SYSTEM_DIRS):
         return False
@@ -166,6 +167,10 @@ class GameWatcher(threading.Thread):
         self._checked: dict = {}
         self.rollback_delay = 15.0
         self.measure = tcp_latency
+        st = load_settings()
+        if st.get("games_schema", 1) < 2:  # v1 collected 80/443 CDN addresses too: start over once
+            save_settings(games={k: {"path": v.get("path", ""), "ips": []} for k, v in st.get("games", {}).items()},
+                          games_schema=2)
         for exe, g in load_settings().get("games", {}).items():
             self._games[exe] = {"path": g.get("path", ""), "ips": set(g.get("ips", [])),
                                 "active": False, "ping_ms": None}
@@ -369,6 +374,7 @@ class GameWatcher(threading.Thread):
             seen_active.add(exe)
             with self._lock:
                 g = self._games.setdefault(exe, {"path": path, "ips": set(), "active": True, "ping_ms": None})
+                g.setdefault("started", time.time())
                 g["path"] = path
                 if port in (80, 443):
                     if ip not in self._other_port:
@@ -389,6 +395,8 @@ class GameWatcher(threading.Thread):
             names = None
             for exe, g in self._games.items():
                 if exe in seen_active:
+                    if not g["active"]:
+                        g["started"] = time.time()  # (re)launched: give its login LOGIN_GRACE without restarts
                     g["active"] = True
                 elif g["active"]:
                     if names is None:  # one process scan per tick, only when needed
@@ -462,8 +470,11 @@ class GameWatcher(threading.Thread):
                     ev = self._poll_psutil()
                 self._process(ev)
                 now = time.time()
+                with self._lock:
+                    logging_in = any(g.get("active") and now - g.get("started", 0) < LOGIN_GRACE
+                                     for g in self._games.values())
                 if (self._pending_since and now - self._pending_since >= DEBOUNCE
-                        and now - self._last_restart >= MIN_RESTART_GAP):
+                        and now - self._last_restart >= MIN_RESTART_GAP and not logging_in):
                     self._pending_since = None
                     self._flush()
             except Exception as e:
