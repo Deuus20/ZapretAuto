@@ -177,12 +177,17 @@ def _pick(exe_path, stem, cmd, s, runner, log, stop, tries, need):
         log(f"[{i}/{len(cands)}] {name}: вход {ok} из {tries}; Discord/YouTube: {'✓' if core else '✗'}")
         if core:
             _kill(stem)
-            save_settings(strategy=c, game_tcp=True, game_udp=True)
+            # a per-game profile: ZapretAuto switches to it while the game runs and back afterwards,
+            # so the global strategy (Discord/YouTube) is not changed for the sake of one game
+            profiles = {**load_settings().get("game_profiles", {}), Path(exe_path).name.lower(): c}
+            extra = {} if load_settings().get("strategy") else {"strategy": c}
+            save_settings(game_profiles=profiles, game_tcp=True, game_udp=True, **extra)
             if base_ok >= need:
                 log("Готово. Этой игре обход не нужен — она входит и без него; выбранная стратегия ей не мешает. "
                     "Если вход иногда зависает — это сбои самой игры, просто перезапустите её.")
             else:
-                log("Готово: стратегия подходит и для игры, и для Discord/YouTube. Можно играть.")
+                log("Готово: стратегия подходит и для игры, и для Discord/YouTube. Она будет включаться сама, "
+                    "пока игра запущена. Можно играть.")
             return c
     _kill(stem)
     if base_ok >= need:
