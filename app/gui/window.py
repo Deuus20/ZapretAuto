@@ -921,8 +921,19 @@ class MainWindow(QWidget):
             self.error = "Подбор не удался — подробности во вкладке «Лог»."
         if res:
             self.start_runner()
+            self._offer_autostart()
             self._offer_share()
         self.refresh()
+
+    def _offer_autostart(self):
+        """After the first successful setup: most people want the bypass to come up with Windows."""
+        if self.settings.get("autostart") or self.settings.get("autostart_asked"):
+            return
+        self.save(autostart_asked=True)
+        if QMessageBox.question(self, "ZapretAuto", "Готово! Запускать ZapretAuto вместе с Windows?\n\n"
+                                "Программа будет тихо стартовать в трее, и Discord/YouTube заработают сразу "
+                                "после включения компьютера.") == QMessageBox.Yes:
+            self.cb["autostart"].setChecked(True)  # saves the setting and creates the task
 
     def _offer_share(self):
         lp = self.settings.get("last_pick", {})
@@ -975,9 +986,17 @@ class MainWindow(QWidget):
         self.fill_games()
         if self.runner.running and not self.busy:
             self.start_runner()  # restart with game filters
-            msg = "Добавлены IP игры. Если игра не подключается — перезапустите её."
+            games = self.watcher.games() if self.watcher else {}
+            known = set(self.settings.get("games_notified", []))
+            new = [exe for exe, g in games.items() if g.get("ips") and exe not in known]
+            if new:  # tell once per game; later additions are routine and silent
+                self.save(games_notified=sorted(known | set(new)))
+                names = ", ".join(n.rsplit(".", 1)[0] for n in new)
+                msg = f"Найдена игра: {names}. Обход для её серверов включён."
+                self.tray.showMessage("ZapretAuto", msg)
+            else:
+                msg = "обновлены адреса игровых серверов"
             self.log(msg)
-            self.tray.showMessage("ZapretAuto", msg)
 
     def fill_games(self):
         games = self.watcher.games() if self.watcher else {}
