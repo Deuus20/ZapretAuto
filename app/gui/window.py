@@ -604,7 +604,12 @@ class MainWindow(QWidget):
             if not self.busy:
                 self.substatus.setText(f"Стратегия: {self.describe()}" if run
                                        else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
-        self.tray.setToolTip(f"ZapretAuto — {title}")
+        last = getattr(self, "_last_check", None)
+        tip = f"ZapretAuto — {title}\n{self.describe()}"
+        if last:
+            ok = "всё работает" if last[1] else "есть сбои"
+            tip += f"\nпроверка {time.strftime('%H:%M', time.localtime(last[0]))}: {ok}"
+        self.tray.setToolTip(tip[:127])  # Windows truncates tray tooltips at 127 chars
         self.btn_toggle.setAccessibleName(title)
         for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site,
                   self.btn_gamepick):
@@ -764,6 +769,7 @@ class MainWindow(QWidget):
                 return
             core = [v for k, v in res.items() if k in ("Discord", "YouTube", "Скорость YouTube")]
             stats.record("check", ok=all(core))
+            self._last_check = (time.time(), all(core))
             self.set_chips(res)
             if all(core):
                 self._health_fails = 0
@@ -786,6 +792,7 @@ class MainWindow(QWidget):
                 self.save(last_auto_repick=time.time())
                 stats.record("repick", reason=bad)
                 self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. Подбираю стратегию заново…")
+                self._repair = True
                 self.autopick()
         self._run(lambda log: tester.quick_check(light=True), done)  # no 1 MB speed test every 10 min
 
@@ -1005,6 +1012,10 @@ class MainWindow(QWidget):
             self.error = "Подбор не удался — подробности во вкладке «Лог»."
         if res or self.settings.get("strategy"):
             self.start_runner()  # the pick stopped the bypass: always bring it back (old strategy if pick failed)
+        if getattr(self, "_repair", False):  # this pick was an automatic repair: tell how it ended
+            self._repair = False
+            self.tray.showMessage("ZapretAuto", f"Обход починен: {self.describe()}" if res else
+                                  "Починить автоматически не удалось — откройте окно программы")
         if res:
             self._offer_autostart()
             self._offer_share()
