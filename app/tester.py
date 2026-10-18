@@ -196,7 +196,7 @@ def probe_speed(t: Target) -> float | None:
     first kilobytes. Seconds taken, None if it stalls or is slower than SPEED_MIN."""
     t0 = time.perf_counter()
     try:
-        _, _, got = fetch("https://www.youtube.com/", SPEED_BYTES, 15)
+        _, _, got = fetch("https://www.youtube.com/", SPEED_BYTES, 10)
     except Exception:  # noqa: BLE001
         return None
     dt = time.perf_counter() - t0
@@ -234,7 +234,7 @@ def probe(t: Target) -> float | None:
 
 
 def probe_all(targets: list[Target]) -> dict[str, float | None]:
-    with ThreadPoolExecutor(8) as ex:
+    with ThreadPoolExecutor(max(1, min(len(targets), 24))) as ex:  # all at once: wall time = slowest probe
         return dict(zip((t.key for t in targets), ex.map(probe, targets)))
 
 

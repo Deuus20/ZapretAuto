@@ -231,3 +231,30 @@ def test_diag_reports_missing_bypass_files(tmp_path, monkeypatch):
     (tmp_path / "winws.exe").write_text("x")
     monkeypatch.setattr(paths, "BIN", tmp_path)
     assert set(diag.missing_files()) == {"WinDivert.dll", "WinDivert64.sys", "cygwin1.dll"}
+
+
+def test_gui_smoke(tmp_path, monkeypatch):
+    """Build the main window offscreen and walk its tabs (skipped where PySide6 is absent, e.g. CI)."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        w.set_advanced(True, save=False)
+        for i in range(w.tabs.count()):
+            w.tabs.setCurrentIndex(i)
+        w.fill_games()
+        w.fill_stats()
+        w.set_chips({"Discord": True, "YouTube": False})
+        w.refresh()
+        app.processEvents()
+        assert "Обход" in w.status.text()
+    finally:
+        w.tray.hide()
+        w._timer.stop()
