@@ -1,9 +1,10 @@
 """Tray icon + main window."""
+import re
 import subprocess
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
                                QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSystemTrayIcon,
@@ -121,6 +122,11 @@ class MainWindow(QWidget):
         self.watcher = None
         self.worker: Worker | None = None
         self.busy = False
+        self.busy_text = ""
+        self.error = ""
+        self._workers: list = []  # keep QThreads alive until finished
+        self._expect_running = False
+        self._hint_shown = False
         self._auto_check = False
         self.bridge = Bridge()
         self.bridge.log.connect(self.log)
@@ -132,6 +138,9 @@ class MainWindow(QWidget):
         self._build()
         self._tray()
         self.refresh()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(2000)
 
     # ---------- UI ----------
     def _build(self):
@@ -152,7 +161,7 @@ class MainWindow(QWidget):
         self.btn_toggle.setCursor(Qt.PointingHandCursor)
         self.btn_toggle.setToolTip("Включить или выключить обход блокировок")
         self.btn_toggle.clicked.connect(self.toggle)
-        hl.addWidget(self.btn_toggle)
+        hl.addWidget(self.btn_toggle, 0, Qt.AlignVCenter)
         col = QVBoxLayout()
         col.setSpacing(4)
         self.status = QLabel(objectName="title")
@@ -161,6 +170,11 @@ class MainWindow(QWidget):
         col.addStretch()
         col.addWidget(self.status)
         col.addWidget(self.substatus)
+        self.btn_check_access = QPushButton("Проверить доступ")
+        self.btn_check_access.setToolTip("Проверить, открываются ли Discord, YouTube и голосовой чат прямо сейчас")
+        self.btn_check_access.setCursor(Qt.PointingHandCursor)
+        self.btn_check_access.clicked.connect(self.check_access)
+        col.addWidget(self.btn_check_access, 0, Qt.AlignLeft)
         col.addStretch()
         hl.addLayout(col, 1)
         lay.addWidget(head)
@@ -207,6 +221,7 @@ class MainWindow(QWidget):
             self.cb[key] = c
             grid.addWidget(c, i // 2, i % 2)
         lay.addWidget(box)
+        self.box_settings = box
         self.tabs = QTabWidget()
         lay.addWidget(self.tabs, 1)
         self.logbox = QPlainTextEdit(readOnly=True)
@@ -300,6 +315,8 @@ class MainWindow(QWidget):
         self.btn_diag.setEnabled(False)
         self.btn_diag.setText("Проверка...")
         self._diag_w = Worker(lambda log: diag.run_checks())
+        self._workers.append(self._diag_w)
+        self._diag_w.finished.connect(lambda w=self._diag_w: self._workers.remove(w) if w in self._workers else None)
         self._diag_w.done.connect(self.bridge.diag_done.emit)
         self._diag_w.start()
 
@@ -362,7 +379,7 @@ class MainWindow(QWidget):
             m.addAction(a)
         self._menu = m
         self.tray.setContextMenu(m)
-        self.tray.activated.connect(lambda r: self.show_window() if r == QSystemTrayIcon.DoubleClick else None)
+        self.tray.activated.connect(lambda r: self.show_window() if r in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick) else None)
         self.tray.show()
 
     # ---------- helpers ----------
@@ -378,13 +395,18 @@ class MainWindow(QWidget):
     def closeEvent(self, e):
         e.ignore()
         self.hide()
+        if not self._hint_shown:
+            self._hint_shown = True
+            self.tray.showMessage("ZapretAuto", "Программа свёрнута в трей и продолжает работать. "
+                                  "Выход — правый клик по значку → «Выход».")
 
     def describe(self) -> str:
         c = self.settings.get("strategy")
         if not c:
             return "не выбрана"
         if c.get("picks"):
-            return f"{c['base']} + микс ({', '.join(sorted(set(c['picks'].values())))})"
+            n = len(set(c["picks"].values()) | {c["base"]})
+            return f"авто-комбинация из {n} стратегий"
         return c["base"]
 
     def refresh(self):
@@ -392,9 +414,20 @@ class MainWindow(QWidget):
         state = "busy" if self.busy else ("on" if run else "off")
         self.tray.setIcon(circle(COLORS[state]))
         self.setWindowIcon(circle(COLORS[state]))
-        self.status.setText("Подбираю стратегию…" if self.busy else ("Обход включён" if run else "Обход выключен"))
-        self.substatus.setText(f"Стратегия: {self.describe()}" if run or self.busy
-                               else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
+        title = self.busy_text if self.busy else ("Обход включён" if run else "Обход выключен")
+        self.status.setText(title)
+        if self.error and not self.busy:
+            self.substatus.setText(self.error)
+            self.substatus.setStyleSheet("color:#f87171")
+        else:
+            self.substatus.setStyleSheet("")
+            if not self.busy:
+                self.substatus.setText(f"Стратегия: {self.describe()}" if run
+                                       else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
+        self.tray.setToolTip(f"ZapretAuto — {title}")
+        self.btn_toggle.setAccessibleName(title)
+        for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access):
+            w.setEnabled(not self.busy)
         self.btn_toggle.setProperty("state", state)
         self.btn_toggle.setIcon(power_icon({"on": "#22c55e", "busy": "#f59e0b"}.get(state, "#9aa3b5")))
         self.btn_toggle.style().unpolish(self.btn_toggle)
@@ -410,24 +443,68 @@ class MainWindow(QWidget):
 
     # ---------- runner ----------
     def start_runner(self):
+        if self.busy:
+            return False
         s = tester.chosen_strategy()
         if not s:
-            self.log("стратегия не выбрана")
+            self.error = "Стратегия не выбрана — нажмите «Подобрать лучшую стратегию»."
+            self.refresh()
             return False
         try:
             self.runner.start(s, self.settings.get("game_tcp", False),
                               self.settings.get("game_udp", False) or self._game_udp_wanted())
             self.log(f"запущено: {s.name}")
+            self.error = ""
+            self._expect_running = True
         except Exception as e:  # noqa: BLE001
             self.log(f"ошибка запуска: {e}")
+            self.error = "Не удалось запустить обход. Откройте вкладку «Диагностика» → «Проверить»."
         self.refresh()
         return self.runner.running
+
+    def _tick(self):
+        """Detect winws dying on its own (antivirus, driver conflict)."""
+        if self._expect_running and not self.busy and not self.runner.running:
+            self._expect_running = False
+            self.error = "Обход неожиданно остановился. Проверьте антивирус и вкладку «Диагностика»."
+            self.log("winws завершился сам")
+            self.tray.showMessage("ZapretAuto", self.error)
+        self.refresh()
+
+    def _run(self, fn, done, line=None):
+        """Start a Worker and keep a reference until its thread has finished."""
+        w = Worker(fn)
+        w.line.connect(line or self.log)
+        w.done.connect(done)
+        w.finished.connect(lambda: self._workers.remove(w) if w in self._workers else None)
+        self._workers.append(w)
+        w.start()
+        return w
+
+    def check_access(self):
+        self.substatus.setText("Проверяю доступ…")
+        self.btn_check_access.setEnabled(False)
+
+        def done(res):
+            self.btn_check_access.setEnabled(True)
+            if not res:
+                self.substatus.setText("Не удалось проверить")
+                return
+            txt = "   ".join(f"{k} {'✓' if ok else '✗'}" for k, ok in res.items())
+            self.log("проверка доступа: " + txt)
+            self.substatus.setText(txt + ("" if all(res.values()) else
+                                          "   — если что-то ✗, нажмите «Подобрать лучшую стратегию»"))
+        self._run(lambda log: tester.quick_check(), done)
 
     def _game_udp_wanted(self) -> bool:
         return bool(self.watcher and any(g.get("ips") for g in self.watcher.games().values()))
 
     def toggle(self):
+        if self.busy:
+            return
+        self.error = ""
         if self.runner.running:
+            self._expect_running = False
             self.runner.stop()
             self.log("остановлено")
             self.refresh()
@@ -437,7 +514,9 @@ class MainWindow(QWidget):
     def on_combo(self, i):
         if i == 0:
             if not self.settings.get("strategy", {}).get("picks"):
-                self.log("Авто(микс): запустите автоподбор")
+                QMessageBox.information(self, "ZapretAuto", "Комбинация ещё не подобрана. "
+                                        "Нажмите «Подобрать лучшую стратегию».")
+                self.refresh()
             return
         self.save(strategy={"base": self.combo.itemText(i), "picks": {}})
         if self.runner.running:
@@ -450,7 +529,7 @@ class MainWindow(QWidget):
             self.set_autostart(v)
         elif key == "game_watch":
             self.start_watcher() if v else self.stop_watcher()
-        elif key in ("game_tcp", "game_udp") and self.runner.running:
+        elif key in ("game_tcp", "game_udp") and self.runner.running and not self.busy:
             self.start_runner()
 
     def set_autostart(self, on: bool):
@@ -464,7 +543,13 @@ class MainWindow(QWidget):
 
     # ---------- autopick ----------
     def ask_autopick(self):
-        if QMessageBox.question(self, "ZapretAuto", "Стратегия не выбрана. Запустить автоподбор?") == QMessageBox.Yes:
+        self.show_window()
+        if QMessageBox.question(
+                self, "Первая настройка",
+                "Нужно один раз подобрать стратегию под вашего провайдера.\n\n"
+                "Это займёт 3–5 минут. В это время Discord и YouTube могут ненадолго "
+                "пропадать — это нормально. VPN на время подбора лучше выключить.\n\n"
+                "Начать?") == QMessageBox.Yes:
             self.autopick()
 
     def autopick(self, *_):
@@ -475,19 +560,30 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "VPN", f"Активен VPN ({vpn}). Отключите его: результаты подбора были бы неверны.")
             self.log(f"автоподбор отменён: VPN {vpn}")
             return
+        self._expect_running = False
         self.runner.stop()
         self.busy = True
+        self.busy_text = "Подбираю стратегию…"
+        self.error = ""
         self.refresh()
+        self.substatus.setText("Обычно 3–5 минут. Обход на это время выключен.")
         self.tabs.setCurrentIndex(0)
-        self.worker = Worker(lambda log: tester.auto_pick(log))
-        self.worker.line.connect(self.log)
-        self.worker.done.connect(self._autopick_done)
-        self.worker.start()
+
+        def line(t):
+            self.log(t)
+            m = re.match(r"\[(\d+)/(\d+)\]", t)
+            if m:
+                self.substatus.setText(f"Проверено стратегий: {m.group(1)} из {m.group(2)}")
+            elif t.startswith("Финальная"):
+                self.substatus.setText("Финальная проверка лучших вариантов…")
+        self.worker = self._run(lambda log: tester.auto_pick(log), self._autopick_done, line)
 
     def _autopick_done(self, res):
         self.busy = False
         self.settings = tester.load_settings()
         self.log("автоподбор завершён" if res else "автоподбор не дал результата")
+        if not res:
+            self.error = "Подбор не удался — подробности во вкладке «Лог»."
         if res:
             self.start_runner()
         self.refresh()
@@ -508,7 +604,7 @@ class MainWindow(QWidget):
 
     def on_games_changed(self):
         self.fill_games()
-        if self.runner.running:
+        if self.runner.running and not self.busy:
             self.start_runner()  # restart with game filters
             msg = "Добавлены IP игры. Если игра не подключается — перезапустите её."
             self.log(msg)
@@ -565,11 +661,13 @@ class MainWindow(QWidget):
         self.log(f"доступна новая версия ZapretAuto: {tag}")
         if self.settings.get("auto_update", True) or QMessageBox.question(
                 self, "ZapretAuto", f"Установить ZapretAuto {tag}?") == QMessageBox.Yes:
-            self.app_worker = Worker(lambda log: updater.app_update(log))
-            self.app_worker.line.connect(self.log)
-            # installer replaces files and restarts the app
-            self.app_worker.done.connect(lambda ok: self.quit() if ok is True else self.log("самообновление не выполнено"))
-            self.app_worker.start()
+            def done(ok):
+                if ok is True:  # installer replaces files and restarts the app
+                    self.tray.showMessage("ZapretAuto", f"Устанавливаю версию {tag}, программа перезапустится…")
+                    QTimer.singleShot(1500, self.quit)
+                else:
+                    self.log("самообновление не выполнено")
+            self._run(lambda log: updater.app_update(log), done)
 
     def on_update_checked(self, tag, newer):
         self.log(f"последняя версия: {tag}" + (" (есть обновление)" if newer else " (актуально)" if tag else " (не удалось проверить)"))
@@ -583,11 +681,11 @@ class MainWindow(QWidget):
             return
         was = self.runner.running
         self.busy = True
+        self.busy_text = "Обновляю zapret…"
+        self._expect_running = False
         self.refresh()
-        self.worker = Worker(lambda log: updater.update(log, self.runner.stop))
-        self.worker.line.connect(self.log)
-        self.worker.done.connect(lambda ok: self._update_done(ok, was, auto))
-        self.worker.start()
+        self.worker = self._run(lambda log: updater.update(log, self.runner.stop),
+                                lambda ok: self._update_done(ok, was, auto))
 
     def _update_done(self, ok, was, auto):
         self.busy = False

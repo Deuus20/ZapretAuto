@@ -13,6 +13,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - `tester.py`: run a strategy, probe targets (TLS/HTTP + ping, like utils/targets.txt), score it.
 - `updater.py`: GitHub releases/latest, replace vendor/, keep data/.
 - `gamewatch.py`: psutil poll for new processes with remote endpoints; probe; add IPs to data ipset + game filter.
+- `settings.py`: settings.json with lock, atomic write, mtime cache (tester re-exports load/save).
 - `diag.py`: system checks + fixes. `lists.py`: ipset update from GitHub (marker ipset-all.txt.custom), user list paths.
 - `gui/window.py`: tray + main window; `main.py` entry (elevation, single instance; env ZAPRET_NO_AUTOSTART=1 skips autostart for tests).
 - Settings keys (data/settings.json): strategy{base,picks}, game_tcp, game_udp, auto_update, game_watch, games, games_force, games_ignore.

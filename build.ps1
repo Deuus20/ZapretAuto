@@ -17,4 +17,4 @@ foreach ($p in 'translations', 'plugins\platforminputcontexts', 'plugins\platfor
 Copy-Item vendor dist\ZapretAuto\vendor -Recurse -Force
 "built: dist\ZapretAuto\ZapretAuto.exe"
 $iscc = @("$env:ProgramFiles\Inno Setup 6\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($iscc) { & $iscc /Qp "/DAppVer=$ver" installer.iss; "installer: dist\ZapretAuto-Setup.exe" } else { "Inno Setup not found, skipping installer" }
+if ($iscc) { & $iscc /Qp "/DAppVer=$ver" installer.iss; $h = (Get-FileHash dist\ZapretAuto-Setup.exe -Algorithm SHA256).Hash.ToLower(); "$h  ZapretAuto-Setup.exe" | Out-File -Encoding ascii dist\ZapretAuto-Setup.exe.sha256; "installer: dist\ZapretAuto-Setup.exe (+ .sha256)" } else { "Inno Setup not found, skipping installer" }

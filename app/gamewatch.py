@@ -1,6 +1,7 @@
 """Detect game processes and collect their remote IPs into data/lists/ipset-games.txt."""
 import ctypes
 import ipaddress
+import os
 import re
 import statistics
 import subprocess
@@ -8,12 +9,13 @@ import socket
 import threading
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 import psutil
 
 from . import paths
-from .tester import load_settings, save_settings
+from .settings import load_settings, save_settings
 
 PLACEHOLDER = "203.0.113.113/32"
 SKIP_PORTS: set[int] = set()  # game logins often use 443 to CDNs: collect them too
@@ -38,7 +40,11 @@ UDP_NON_GAME_EXES = {
     "wireguard.exe", "openvpn.exe", "radmin_vpn.exe", "rvcontrolsvc.exe", "hamachi-2.exe", "zerotier-one_x64.exe",
     "nekoray.exe", "v2rayn.exe", "xray.exe", "sing-box.exe", "hiddify.exe", "claude.exe", "node.exe",
 }
-UDP_GAME_MIN_IPS = 3  # distinct public UDP peers before an unknown exe is treated as a game
+UDP_GAME_MIN_IPS = 3
+DEBOUNCE = 30.0          # s of quiet after the last new IP before rewriting the ipset
+MIN_RESTART_GAP = 60.0   # s between winws restarts caused by game IPs
+MAX_IPS_PER_GAME = 256
+PID_TTL = 30.0           # s; Windows reuses PIDs, so cached exe names expire  # distinct public UDP peers before an unknown exe is treated as a game
 SYSTEM_DIRS = ("\\windows\\", "\\microsoft\\edge\\", "\\google\\chrome\\", "\\windowsapps\\microsoft.",
                "\\windowsapps\\microsoftcorporationii.", "\\windowsapps\\spotifyab.",
                "\\windowsapps\\5319275a.", "\\windowsapps\\telegram")
@@ -95,11 +101,12 @@ def _v4(a) -> str | None:
     return str(ipaddress.IPv4Address(v))
 
 
-def _group(ips: set[str]) -> set[str]:
+def _group(ips: set[str], web_only: set[str] = frozenset()) -> set[str]:
+    """Collapse >=4 IPs of one /24 into the /24, except IPs seen only on 80/443 (CDNs: keep exact)."""
     by24 = defaultdict(list)
-    for ip in ips:
+    out = set(ips & web_only)
+    for ip in ips - web_only:
         by24[ip.rsplit(".", 1)[0]].append(ip)
-    out = set()
     for pre, lst in by24.items():
         if len(lst) >= 4:
             out.add(f"{pre}.0/24")
@@ -146,7 +153,12 @@ class GameWatcher(threading.Thread):
         self.flow_count = 0
         self._pending_since: float | None = None
         self._last_written: str | None = None
-        self._pid_cache: dict[int, tuple[str | None, str | None]] = {}
+        self._pid_cache: dict[int, tuple[tuple[str | None, str | None], float]] = {}
+        self._pool = ThreadPoolExecutor(4, thread_name_prefix="gamewatch")
+        self._flush_lock = threading.Lock()
+        self._last_restart = 0.0
+        self._web_only: set[str] = set()   # IPs seen only on ports 80/443
+        self._other_port: set[str] = set()
         self._pinging: set[str] = set()
         self._ping: dict[str, float | None] = {}
         self._base: dict[str, tuple[int, float, str]] = {}  # ip -> (port, ms, exe) baseline before desync
@@ -165,6 +177,7 @@ class GameWatcher(threading.Thread):
     # ---- public
     def stop(self) -> None:
         self._stop_ev.set()
+        self._pool.shutdown(wait=False, cancel_futures=True)
         h, dll = self._handle, self._dll
         if h is not None and dll is not None:
             self._handle = None
@@ -205,14 +218,17 @@ class GameWatcher(threading.Thread):
         try:
             ms = self.measure(ip, port)
             if ms is not None:
-                self._base[ip] = (port, ms, exe)
+                with self._lock:
+                    self._base[ip] = (port, ms, exe)
         finally:
-            self._measuring.discard(ip)
+            with self._lock:
+                self._measuring.discard(ip)
 
     def _schedule_rollback(self) -> None:
-        todo = {ip: v for ip, v in self._base.items() if ip not in self._checked}
-        if todo:
+        with self._lock:
+            todo = {ip: v for ip, v in self._base.items() if ip not in self._checked}
             self._checked.update(todo)
+        if todo:
             threading.Thread(target=self._rollback_check, args=(todo,), daemon=True).start()
 
     def _rollback_check(self, todo: dict[str, tuple[int, float, str]]) -> None:
@@ -289,14 +305,15 @@ class GameWatcher(threading.Thread):
 
     # ---- logic
     def _proc(self, pid: int) -> tuple[str | None, str | None]:
-        if pid in self._pid_cache:
-            return self._pid_cache[pid]
+        hit = self._pid_cache.get(pid)
+        if hit and time.time() - hit[1] < PID_TTL:
+            return hit[0]
         try:
             p = psutil.Process(pid)
             r = (p.name().lower(), p.exe())
         except Exception:
             return (None, None)
-        self._pid_cache[pid] = r
+        self._pid_cache[pid] = (r, time.time())
         if len(self._pid_cache) > 2000:
             self._pid_cache.clear()
         return r
@@ -339,7 +356,11 @@ class GameWatcher(threading.Thread):
         seen_active: set[str] = set()
         new_ip = False
         banned = set(settings.get("games_bad_ips", []))
-        for pid, ip, port, proto in events:
+        if len(self._udp_hits) > 500:
+            self._udp_hits.clear()
+        if len(self._ping) > 5000:
+            self._ping.clear()
+        for pid, ip, port, proto in set(events):
             if port in SKIP_PORTS or not public_ipv4(ip) or ip in banned:
                 continue
             exe, path = self._proc(pid)
@@ -349,28 +370,40 @@ class GameWatcher(threading.Thread):
             with self._lock:
                 g = self._games.setdefault(exe, {"path": path, "ips": set(), "active": True, "ping_ms": None})
                 g["path"] = path
-                if ip not in g["ips"]:
+                if port in (80, 443):
+                    if ip not in self._other_port:
+                        self._web_only.add(ip)
+                else:
+                    self._other_port.add(ip)
+                    self._web_only.discard(ip)
+                if ip not in g["ips"] and len(g["ips"]) < MAX_IPS_PER_GAME:
                     g["ips"].add(ip)
                     new_ip = True
                     if ip not in self._base and ip not in self._measuring and ip not in self._checked:
                         self._measuring.add(ip)
-                        threading.Thread(target=self._measure_base, args=(ip, port, exe), daemon=True).start()
+                        self._pool.submit(self._measure_base, ip, port, exe)
             if ip not in self._ping and ip not in self._pinging:
                 self._pinging.add(ip)
-                threading.Thread(target=self._ping_ip, args=(ip,), daemon=True).start()
+                self._pool.submit(self._ping_ip, ip)
         with self._lock:
+            names = None
             for exe, g in self._games.items():
-                g["active"] = exe in seen_active or (g["active"] and self._alive(exe))
+                if exe in seen_active:
+                    g["active"] = True
+                elif g["active"]:
+                    if names is None:  # one process scan per tick, only when needed
+                        names = self._running_names()
+                    g["active"] = exe in names
         if new_ip:
             self._pending_since = time.time()
             self._persist_settings()
 
     @staticmethod
-    def _alive(exe: str) -> bool:
+    def _running_names() -> set[str]:
         try:
-            return any((p.info["name"] or "").lower() == exe for p in psutil.process_iter(["name"]))
+            return {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
         except Exception:
-            return False
+            return set()
 
     def _persist_settings(self) -> None:
         with self._lock:
@@ -380,7 +413,7 @@ class GameWatcher(threading.Thread):
     def _render(self) -> str:
         with self._lock:
             ips = set().union(*[g["ips"] for g in self._games.values()]) if self._games else set()
-        lines = sorted(_group(ips), key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
+        lines = sorted(_group(ips, self._web_only & ips), key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
         man = paths.DATA / "games_manual.txt"
         if man.exists():
             for ln in man.read_text(encoding="utf-8").splitlines():
@@ -392,12 +425,17 @@ class GameWatcher(threading.Thread):
         return "\n".join(lines) + "\n"
 
     def _flush(self) -> None:
-        text = self._render()
-        if text == self._last_written:
-            return
-        paths.LISTS.mkdir(parents=True, exist_ok=True)
-        (paths.LISTS / "ipset-games.txt").write_text(text, encoding="utf-8")
-        self._last_written = text
+        with self._flush_lock:
+            text = self._render()
+            if text == self._last_written:
+                return
+            paths.LISTS.mkdir(parents=True, exist_ok=True)
+            f = paths.LISTS / "ipset-games.txt"
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, f)  # winws must never read a half-written list
+            self._last_written = text
+            self._last_restart = time.time()
         try:
             self.on_change()
         except Exception as e:
@@ -417,13 +455,15 @@ class GameWatcher(threading.Thread):
                 if use_divert:
                     with self._ev_lock:
                         ev, self._events = self._events, []
-                    if tick % 5 == 0:  # flow layer sees only new flows: also pick up already-open connections
+                    if tick % 20 == 0:  # flow layer sees only new flows: pick up already-open connections (~1/min)
                         ev += self._poll_psutil()
                     tick += 1
                 else:
                     ev = self._poll_psutil()
                 self._process(ev)
-                if self._pending_since and time.time() - self._pending_since >= 10:
+                now = time.time()
+                if (self._pending_since and now - self._pending_since >= DEBOUNCE
+                        and now - self._last_restart >= MIN_RESTART_GAP):
                     self._pending_since = None
                     self._flush()
             except Exception as e:

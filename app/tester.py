@@ -9,11 +9,13 @@ import psutil
 import requests
 
 from . import paths, strategies
+from .settings import load_settings, save_settings  # noqa: F401 (re-exported)
 from .runner import Runner
 
 READ_BYTES = 32 * 1024  # DPI often freezes TLS sessions after ~16 KB
-TIMEOUT = 5
-ROUNDS = 3
+TIMEOUT = 4
+ROUNDS = 2
+WARMUP = 1.5
 
 
 @dataclass
@@ -31,15 +33,18 @@ class Target:
         return self.url.startswith("stun://")
 
 
-VPN_RE = re.compile(r"vpn|wireguard|wg|amnezia|tun|tap|outline|nekoray|hiddify", re.I)
+VPN_RE = re.compile(r"vpn|wireguard|amnezia|outline|nekoray|hiddify|^(wg|tun|tap)\d*$|\b(tun|tap)\b", re.I)
 
 
 def egress_adapter() -> str | None:
     """Name of the adapter that carries traffic to the internet."""
     import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect(("8.8.8.8", 53))
-        ip = s.getsockname()[0]
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 53))
+            ip = s.getsockname()[0]
+    except OSError:  # no network / no route
+        return None
     return next((n for n, addrs in psutil.net_if_addrs().items() if any(a.address == ip for a in addrs)), None)
 
 
@@ -109,6 +114,9 @@ def target_group(t: Target) -> str:
     return "tcp:80,443,8443:ipset-all"
 
 
+BLOCK_PAGE = re.compile(r"warning\.rt\.ru|blocked|zapret-info|rkn\.gov|eais", re.I)
+
+
 def probe(t: Target) -> float | None:
     """Seconds to read READ_BYTES (or full body), None on failure."""
     if t.is_stun:
@@ -117,6 +125,8 @@ def probe(t: Target) -> float | None:
     try:
         with requests.get(t.url, timeout=TIMEOUT, stream=True, proxies={"http": None, "https": None},
                           headers={"User-Agent": "Mozilla/5.0"}) as r:
+            if r.status_code == 451 or BLOCK_PAGE.search(r.url):  # ISP stub page
+                return None
             got = 0
             for chunk in r.iter_content(4096):
                 got += len(chunk)
@@ -137,15 +147,26 @@ def score(res: dict[str, float | None]) -> tuple[int, float]:
     return len(ok), -(sum(ok) / len(ok) if ok else 99)
 
 
-def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float = 2.0) -> dict | None:
-    runner.start(s)
-    time.sleep(warmup)
-    if not runner.running:
+def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float = WARMUP) -> dict | None:
+    try:
+        runner.start(s)
+        time.sleep(warmup)
+        if not runner.running:
+            return None
+        res = probe_all(targets)
+        return res if runner.running else None  # winws died during probing
+    finally:
         runner.stop()
-        return None
-    res = probe_all(targets)
-    runner.stop()
-    return res
+
+
+QUICK = {"Discord": "DiscordMain", "YouTube": "YouTubeWeb", "Голос Discord": "STUN_Google19302"}
+
+
+def quick_check() -> dict[str, bool]:
+    """Check key services through the currently running bypass (does not touch winws)."""
+    ts = [t for t in load_targets() if t.key in QUICK.values()]
+    res = probe_all(ts)
+    return {name: res.get(key) is not None for name, key in QUICK.items()}
 
 
 def auto_pick(log=print) -> dict:
@@ -155,20 +176,30 @@ def auto_pick(log=print) -> dict:
     all_s = strategies.load_all()
     groups = {t.key: target_group(t) for t in targets}
 
-    results = {"_baseline": probe_all(targets)}
-    log(f"baseline: {score(results['_baseline'])[0]}/{len(targets)}")
     if vpn := vpn_active():
-        log(f"VPN '{vpn}' carries traffic: results are meaningless, aborting")
+        log(f"Включён VPN «{vpn}»: весь трафик идёт через него, проверка бессмысленна. "
+            "Отключите VPN или настройте раздельное туннелирование.")
         return {}
-    if score(results["_baseline"])[0] == len(targets):
-        log("nothing blocked without zapret; picking by latency only")
-    for s in all_s:
+    results = {"_baseline": probe_all(targets)}
+    n = len(targets)
+    base_ok = score(results["_baseline"])[0]
+    log(f"Без обхода доступно: {base_ok} из {n}")
+    if base_ok == 0:
+        log("Похоже, интернета нет — подбор отменён.")
+        return {}
+    for i, s in enumerate(all_s, 1):
         r = test_strategy(runner, s, targets)
         results[s.name] = r
-        log(f"{s.name}: " + ("winws failed" if r is None else f"{score(r)[0]}/{len(targets)}"))
+        log(f"[{i}/{len(all_s)}] {s.name}: " + ("не запустилась" if r is None else f"{score(r)[0]} из {n}"))
 
     tested = {s.name: s for s in all_s if results[s.name]}
+    if not tested:
+        log("Ни одна стратегия не запустилась (WinDivert/антивирус?). Откройте «Диагностику».")
+        return {}
     best = max(tested.values(), key=lambda s: score(results[s.name]))
+    if score(results[best.name])[0] <= base_ok and base_ok < n:
+        log("Ни одна стратегия не улучшила доступ — выбор не изменён.")
+        return {}
     picks = {}
     for g in set(groups.values()):
         keys = [k for k, v in groups.items() if v == g]
@@ -178,28 +209,19 @@ def auto_pick(log=print) -> dict:
     # single runs are noisy: re-test finalists several times and sum successes
     finalists = sorted(tested.values(), key=lambda s: score(results[s.name]), reverse=True)[:3] + [mixed]
     totals = {}
+    log("Финальная проверка лучших вариантов…")
     for s in finalists:
         runs = [r for r in (test_strategy(runner, s, targets) for _ in range(ROUNDS)) if r]
         totals[s.name] = (sum(score(r)[0] for r in runs), sum(score(r)[1] for r in runs))
         results[f"final:{s.name}"] = runs
-        log(f"final {s.name}: {totals[s.name][0]}/{len(targets) * ROUNDS}")
+        log(f"  {'комбинация' if s.name == 'mix' else s.name}: {totals[s.name][0]} из {n * ROUNDS}")
     win = max(totals, key=totals.get)
     choice = {"base": best.name, "picks": picks} if win == "mix" else {"base": win, "picks": {}}
     paths.DATA.mkdir(exist_ok=True)
     (paths.DATA / "results.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
     save_settings(strategy=choice)
-    log(f"chosen: {choice}")
+    log(f"Готово. Выбрано: {'комбинация стратегий' if choice['picks'] else choice['base']}")
     return choice
-
-
-def load_settings() -> dict:
-    p = paths.DATA / "settings.json"
-    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
-
-
-def save_settings(**kw) -> None:
-    s = load_settings() | kw
-    (paths.DATA / "settings.json").write_text(json.dumps(s, indent=1, ensure_ascii=False), encoding="utf-8")
 
 
 def chosen_strategy() -> strategies.Strategy | None:
