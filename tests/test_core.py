@@ -355,3 +355,26 @@ def test_quic_targets_grouped_by_profile():
     q = {t.key: t for t in tester.load_targets() if t.url.startswith("h3://")}
     assert q["YouTubeQUIC"].group.startswith("udp:443:")
     assert q["DiscordQUIC"].group == "udp:443:list-general"  # discord.com is in Flowseal's general list
+
+
+def test_user_domain_add_remove(tmp_path, monkeypatch):
+    from app import lists
+    monkeypatch.setattr(paths, "LISTS", tmp_path)
+    (tmp_path / "list-general-user.txt").write_text("# Never leave this file empty\ndomain.example.abc", encoding="utf-8")
+    assert lists.add_user_domain("Example.org") is True
+    assert lists.add_user_domain("example.org") is False  # case-insensitive duplicate
+    text = (tmp_path / "list-general-user.txt").read_text(encoding="utf-8")
+    assert text.splitlines()[-1] == "Example.org" and "abcExample" not in text  # added on its own line
+    lists.remove_user_domain("EXAMPLE.org")
+    assert "example" not in (tmp_path / "list-general-user.txt").read_text(encoding="utf-8").lower().replace(
+        "domain.example.abc", "")
+
+
+def test_vpn_exclude_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "LISTS", tmp_path)
+    monkeypatch.setattr(vpn, "server_ips", lambda: {"45.132.253.182"})
+    vpn.write_exclude()
+    assert (tmp_path / "ipset-exclude-vpn.txt").read_text().split() == ["45.132.253.182"]
+    monkeypatch.setattr(vpn, "server_ips", lambda: set())
+    vpn.write_exclude()
+    assert (tmp_path / "ipset-exclude-vpn.txt").read_text().split() == [vpn.PLACEHOLDER]  # never empty
