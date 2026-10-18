@@ -1,0 +1,61 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v1.0.8"
+        required: true
+      publish:
+        description: "Publish to the release (false = only upload a build artifact)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check tag matches app version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}".TrimStart('v')
+          $ver = (Select-String -Path app\__init__.py -Pattern '"(.+)"').Matches[0].Groups[1].Value
+          if ($tag -ne $ver) { throw "tag $tag != app version $ver" }
+      - name: Install build tools
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install -q -r requirements.txt
+          choco install innosetup -y --no-progress
+      - name: Build (tests + exe + installer)
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ZapretAuto-Setup
+          path: dist/ZapretAuto-Setup.exe*
+      - name: Publish release
+        if: github.event_name == 'push' || github.event.inputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $notes = "Сборка GitHub Actions. Установка: скачайте ZapretAuto-Setup.exe ниже. Инструкция: https://github.com/${{ github.repository }}/blob/main/docs/install.md"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag dist\ZapretAuto-Setup.exe dist\ZapretAuto-Setup.exe.sha256 --clobber
+          } else {
+            gh release create $tag dist\ZapretAuto-Setup.exe dist\ZapretAuto-Setup.exe.sha256 --title "ZapretAuto $($tag.TrimStart('v'))" --notes $notes
+          }
