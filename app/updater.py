@@ -121,14 +121,14 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
         raise RuntimeError(f"bad release tag: {tag!r}")
     cur = current_version(vendor)
     if not force and not is_newer(tag, cur):
-        log(f"Up to date ({cur})")
+        log(f"zapret актуален ({cur})")
         return False
-    log(f"Updating {cur} -> {tag}")
+    log(f"обновляю zapret {cur} → {tag}")
     vendor = Path(vendor)
     with tempfile.TemporaryDirectory(prefix="zapret_upd_") as td:
         td = Path(td)
         zpath = td / "release.zip"
-        log("Downloading...")
+        log("скачиваю…")
         _download(url, zpath, log)
         ex = td / "x"
         with zipfile.ZipFile(zpath) as z:
@@ -158,7 +158,7 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
             raise
         if had_old:
             shutil.rmtree(old, ignore_errors=True)
-    log(f"Updated to {tag}")
+    log(f"zapret обновлён до {tag}")
     return True
 
 
