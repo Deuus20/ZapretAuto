@@ -308,3 +308,16 @@ def test_auto_pick_aborts_on_vpn_without_bypass_route(tmp_path, monkeypatch):
     logs = []
     assert tester.auto_pick(logs.append, use_shared=False) == {}
     assert any("VPN" in m for m in logs)
+
+
+def test_quick_check_majority(tmp_path, monkeypatch):
+    from app import tester
+    monkeypatch.setattr(tester, "vpn_active", lambda: None)
+    keys = ["DiscordMain", "DiscordGateway", "DiscordCDN", "YouTubeWeb", "YouTubeImage", "YouTubeVideoRedirect",
+            "STUN_Google19302"]
+    monkeypatch.setattr(tester, "load_targets", lambda: [tester.Target(k, "https://x") for k in keys])
+    ok = {"DiscordMain", "DiscordGateway", "YouTubeImage", "STUN_Google19302"}
+    monkeypatch.setattr(tester, "probe_all", lambda ts: {t.key: (0.1 if t.key in ok else None) for t in ts})
+    monkeypatch.setattr(tester.time, "sleep", lambda s: None)
+    r = tester.quick_check(light=True)
+    assert r == {"Discord": True, "YouTube": False, "Голос Discord": True}
