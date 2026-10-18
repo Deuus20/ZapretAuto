@@ -259,12 +259,13 @@ QUICK = {"Discord": "DiscordMain", "YouTube": "YouTubeWeb", "Скорость Yo
          "Голос Discord": "STUN_Google19302", "Telegram": "TelegramWeb"}
 
 
-def quick_check() -> dict[str, bool]:
-    """Check key services through the currently running bypass (does not touch winws)."""
+def quick_check(light: bool = False) -> dict[str, bool]:
+    """Check key services through the currently running bypass (does not touch winws).
+    light=True skips the ~1 MB YouTube speed test (periodic background checks: ~144 MB/day otherwise)."""
     global BIND
     from . import vpn as vpnmod
     BIND = vpnmod.bind_ip() if vpn_active() else None  # check the direct path, not the VPN
-    ts = [t for t in load_targets() if t.key in QUICK.values()]
+    ts = [t for t in load_targets() if t.key in QUICK.values() and not (light and t.is_speed)]
     res = probe_all(ts)
     retry = [t for t in ts if res.get(t.key) is None]
     if retry:  # single probes through DPI are noisy: confirm failures once
