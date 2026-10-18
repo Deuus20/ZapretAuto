@@ -270,6 +270,7 @@ def test_gamepick_saves_profile_not_global(tmp_path, monkeypatch):
     monkeypatch.setattr(gamepick, "FlowCounter", lambda stem: (_ for _ in ()).throw(OSError()))
     monkeypatch.setattr(gamepick, "candidates", lambda: [{"base": "ALT11", "picks": {}}])
     monkeypatch.setattr(gamepick.tester, "quick_check", lambda: {"Discord": True, "YouTube": True})
+    monkeypatch.setattr(gamepick.time, "sleep", lambda s: None)
 
     class R:
         def start(self, *a, **k): pass
@@ -292,6 +293,8 @@ def _fake_pick_env(monkeypatch, tmp_path, baseline_ok, vpn=None, bind=None):
     monkeypatch.setattr(tester, "vpn_active", lambda: vpn)
     monkeypatch.setattr(vpnmod, "bind_ip", lambda: bind)
     monkeypatch.setattr(paths, "sync_lists", lambda: None)
+    from app import diag
+    monkeypatch.setattr(diag, "dns_poisoned", lambda: [])  # keep tests offline
     return tester
 
 
