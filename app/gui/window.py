@@ -737,11 +737,16 @@ class MainWindow(QWidget):
             if added:
                 lists.remove_user_domain(dom)
             if not ip_ok:
-                return f"{dom} заблокирован по IP-адресу — zapret тут не поможет, нужен VPN."
+                return f"{dom} заблокирован по IP-адресу — zapret тут не поможет, нужен VPN. [ip]"
             return f"Не помогло для {dom}. Попробуйте «Подобрать лучшую стратегию»."
 
         def done(msg):
             if msg:
+                if msg.endswith(" [ip]"):  # IP-blocked: hand the domain over for the VPN's site list
+                    msg = msg[:-5]
+                    QApplication.clipboard().setText(dom)
+                    msg += (f" Адрес «{dom}» скопирован — вставьте его в список сайтов раздельного "
+                            "туннелирования вашего VPN.")
                 self.log(msg)
                 QMessageBox.information(self, "Проверка сайта", msg)
         self.log(f"проверяю {dom}…")
