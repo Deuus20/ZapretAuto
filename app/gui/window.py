@@ -256,7 +256,7 @@ class MainWindow(QWidget):
         self.btn_auto = QPushButton("Подобрать лучшую стратегию", objectName="primary")
         self.btn_auto.setCursor(Qt.PointingHandCursor)
         self.btn_auto.setToolTip("Проверить все стратегии на Discord, YouTube и голосовом трафике "
-                                 "и собрать лучшую комбинацию. Занимает 3-5 минут.")
+                                 "и собрать лучшую комбинацию. Занимает 2–4 минуты.")
         self.btn_auto.clicked.connect(self.autopick)
         row.addWidget(self.btn_auto)
         self.combo = QComboBox()
@@ -892,7 +892,7 @@ class MainWindow(QWidget):
         if QMessageBox.question(
                 self, "Первая настройка",
                 "Нужно один раз подобрать стратегию под вашего провайдера.\n\n"
-                "Это займёт 3–5 минут. В это время Discord и YouTube могут ненадолго "
+                "Это займёт 2–4 минуты. В это время Discord и YouTube могут ненадолго "
                 "пропадать — это нормально. VPN на время подбора лучше выключить.\n\n"
                 "Начать?") == QMessageBox.Yes:
             self.autopick()
@@ -914,7 +914,7 @@ class MainWindow(QWidget):
         self.busy_text = "Подбираю стратегию…"
         self.error = ""
         self.refresh()
-        self.substatus.setText("Обычно 3–5 минут. Обход на это время выключен.")
+        self.substatus.setText("Обычно 2–4 минуты. Обход на это время выключен.")
         self.tabs.setCurrentIndex(0)
 
         t_start = time.time()

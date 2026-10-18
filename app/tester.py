@@ -302,6 +302,12 @@ def auto_pick(log=print, use_shared: bool | None = None) -> dict:
     if base_ok == 0:
         log("Похоже, интернета нет — подбор отменён.")
         return {}
+    current = load_settings().get("strategy")
+    if current and base_ok >= n - 2:
+        # DPI is barely active right now (often at night): every strategy passes, so a pick would be noise
+        log(f"Сейчас почти ничего не блокируется ({base_ok} из {n} без обхода) — сравнивать стратегии не на чем. "
+            "Текущая стратегия сохранена; подберите заново днём, если что-то перестанет работать.")
+        return current
     for i, s in enumerate(all_s, 1):
         r = test_strategy(runner, s, targets)
         results[s.name] = r
