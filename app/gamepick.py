@@ -95,43 +95,79 @@ def build(c: dict) -> strategies.Strategy:
     return by[c["base"]]
 
 
-def pick_for_game(exe_path: str, runner: Runner, log=print, stop=lambda: False) -> dict | None:
-    """Try candidates until the game logs in and Discord/YouTube still work. Saves and returns the winner."""
+def _attempt(stem: str, cmd: str, stop) -> tuple[bool, int, float]:
+    """Launch the game once (pressing keys while it loads); (logged_in, max_servers, seconds)."""
+    _kill(stem)
+    time.sleep(4)
+    os.startfile(cmd) if cmd.startswith("steam://") else subprocess.Popen([cmd], cwd=str(Path(cmd).parent))
+    t0, best = time.time(), 0
+    while time.time() - t0 < WAIT and not stop():
+        winkeys.press_any_key(stem)  # many games wait for "press any key" before logging in
+        best = max(best, _servers(stem))
+        if best >= LOGIN_SERVERS:
+            break
+        time.sleep(2)
+    return best >= LOGIN_SERVERS, best, time.time() - t0
+
+
+def _rate(stem: str, cmd: str, stop, tries: int) -> int:
+    """Successful logins out of `tries` (stops early once a majority is decided)."""
+    ok = 0
+    for n in range(tries):
+        if stop():
+            break
+        ok += _attempt(stem, cmd, stop)[0]
+        if ok > tries // 2 or (n + 1 - ok) > tries // 2:
+            break
+    return ok
+
+
+def pick_for_game(exe_path: str, runner: Runner, log=print, stop=lambda: False, tries: int = 3) -> dict | None:
+    """Find a strategy the game logs in with (majority of `tries` launches) while Discord/YouTube keep working.
+
+    Game logins are often flaky regardless of DPI, so every candidate is rated by repeated launches, and a
+    no-bypass baseline is measured first: if the game logs in without zapret, the bypass only has to not break it.
+    """
     stem = Path(exe_path).stem.split("-")[0]  # e.g. WardogsClient-Win64-Shipping -> WardogsClient
     stem = re.sub(r"(Client|Launcher)$", "", stem) or stem  # launcher + client of the same game
     cmd = launch_cmd(exe_path)
     s = load_settings()
+    need = tries // 2 + 1
+    log(f"Подбор для игры: {Path(exe_path).name}. Игра будет сама запускаться и закрываться, не трогайте её.")
+
+    runner.stop()
+    base_ok = _rate(stem, cmd, stop, tries)
+    log(f"Без обхода: вход {base_ok} из {tries}")
     cands = candidates()
-    log(f"Подбор для игры: {Path(exe_path).name}, вариантов: {len(cands)}. Игра будет сама запускаться и закрываться.")
     for i, c in enumerate(cands, 1):
         if stop():
             break
-        _kill(stem)
         try:
             runner.start(build(c), True, True, s.get("auto_hostlist", True))
         except Exception as e:  # noqa: BLE001
             log(f"[{i}/{len(cands)}] не запустилась: {e}")
             continue
         time.sleep(2)
-        os.startfile(cmd) if cmd.startswith("steam://") else subprocess.Popen([cmd], cwd=str(Path(cmd).parent))
-        t0, best = time.time(), 0
-        while time.time() - t0 < WAIT and not stop():
-            winkeys.press_any_key(stem)  # many games wait for "press any key" before logging in
-            best = max(best, _servers(stem))
-            if best >= LOGIN_SERVERS:
-                break
-            time.sleep(2)
+        ok = _rate(stem, cmd, stop, tries)
         name = c["base"] + (" + микс" if c.get("picks") else "")
-        if best < LOGIN_SERVERS:
-            log(f"[{i}/{len(cands)}] {name}: вход не прошёл ({best} серв.)")
+        if ok < need:
+            log(f"[{i}/{len(cands)}] {name}: вход {ok} из {tries} — не подходит")
             continue
         q = tester.quick_check()
         core = all(v for k, v in q.items() if k in ("Discord", "YouTube"))
-        log(f"[{i}/{len(cands)}] {name}: вход прошёл за {time.time() - t0:.0f} с; Discord/YouTube: {'✓' if core else '✗'}")
+        log(f"[{i}/{len(cands)}] {name}: вход {ok} из {tries}; Discord/YouTube: {'✓' if core else '✗'}")
         if core:
+            _kill(stem)
             save_settings(strategy=c, game_tcp=True, game_udp=True)
-            log("Готово: стратегия подходит и для игры, и для Discord/YouTube. Можно играть.")
+            if base_ok >= need:
+                log("Готово. Этой игре обход не нужен — она входит и без него; выбранная стратегия ей не мешает. "
+                    "Если вход иногда зависает — это сбои самой игры, просто перезапустите её.")
+            else:
+                log("Готово: стратегия подходит и для игры, и для Discord/YouTube. Можно играть.")
             return c
     _kill(stem)
-    log("Не нашлось стратегии, с которой игра входит и Discord/YouTube работают. Для этой игры нужен VPN.")
+    if base_ok >= need:
+        log("Игра входит без обхода, но любая стратегия ей мешает: добавьте игру в «Игнорировать».")
+    else:
+        log("Не нашлось стратегии, с которой игра входит и Discord/YouTube работают. Для этой игры нужен VPN.")
     return None
