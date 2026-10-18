@@ -146,6 +146,10 @@ def target_group(t: Target) -> str:
         return "tcp:443:list-google"
     if hit(_domains("list-general.txt") | _domains("list-general-user.txt")):
         return "tcp:80,443:list-general"
+    if load_settings().get("auto_hostlist", True):
+        # --hostlist-auto makes the general profile take every 80/443 host it sees (to learn blocked ones),
+        # so ipset hosts never reach the ipset profile: score them for the general profile
+        return "tcp:80,443:list-general"
     return "tcp:80,443,8443:ipset-all"
 
 
@@ -222,7 +226,7 @@ def score(res: dict[str, float | None]) -> tuple[int, float]:
 
 def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float = WARMUP) -> dict | None:
     try:
-        runner.start(s)
+        runner.start(s, auto_hostlist=load_settings().get("auto_hostlist", True))  # test what will run
         time.sleep(warmup)
         if not runner.running:
             return None

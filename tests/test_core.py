@@ -163,3 +163,10 @@ def test_stats_uptime_and_checks(tmp_path, monkeypatch):
     stats.record("stop")
     s = stats.summary(7)
     assert s["uptime_h"] == 1.0 and s["checks"] == 2 and s["ok_pct"] == 50
+
+
+def test_settings_with_bom(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    settings._cache = None
+    (tmp_path / "settings.json").write_text('{"a": 1}', encoding="utf-8-sig")
+    assert settings.load_settings() == {"a": 1}
