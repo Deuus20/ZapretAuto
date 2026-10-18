@@ -95,15 +95,20 @@ def build(c: dict) -> strategies.Strategy:
     return by[c["base"]]
 
 
+_FLOWS: "FlowCounter | None" = None
+
+
 def _attempt(stem: str, cmd: str, stop) -> tuple[bool, int, float]:
     """Launch the game once (pressing keys while it loads); (logged_in, max_servers, seconds)."""
     _kill(stem)
     time.sleep(4)
+    if _FLOWS:
+        _FLOWS.reset()
     os.startfile(cmd) if cmd.startswith("steam://") else subprocess.Popen([cmd], cwd=str(Path(cmd).parent))
     t0, best = time.time(), 0
     while time.time() - t0 < WAIT and not stop():
         winkeys.press_any_key(stem)  # many games wait for "press any key" before logging in
-        best = max(best, _servers(stem))
+        best = max(best, _servers(stem), _FLOWS.count() if _FLOWS else 0)
         if best >= LOGIN_SERVERS:
             break
         time.sleep(2)
@@ -133,6 +138,20 @@ def pick_for_game(exe_path: str, runner: Runner, log=print, stop=lambda: False, 
     cmd = launch_cmd(exe_path)
     s = load_settings()
     need = tries // 2 + 1
+    global _FLOWS
+    try:
+        _FLOWS = FlowCounter(stem)
+    except Exception:  # noqa: BLE001  (no WinDivert: psutil-only counting)
+        _FLOWS = None
+    try:
+        return _pick(exe_path, stem, cmd, s, runner, log, stop, tries, need)
+    finally:
+        if _FLOWS:
+            _FLOWS.stop()
+            _FLOWS = None
+
+
+def _pick(exe_path, stem, cmd, s, runner, log, stop, tries, need):
     log(f"Подбор для игры: {Path(exe_path).name}. Игра будет сама запускаться и закрываться, не трогайте её.")
 
     runner.stop()
@@ -171,3 +190,81 @@ def pick_for_game(exe_path: str, runner: Runner, log=print, stop=lambda: False, 
     else:
         log("Не нашлось стратегии, с которой игра входит и Discord/YouTube работают. Для этой игры нужен VPN.")
     return None
+
+
+class FlowCounter:
+    """Distinct remote servers per game seen by WinDivert's FLOW layer (sees unconnected UDP too, which
+    psutil misses: Steam-networking and many shooters never connect() their UDP sockets)."""
+
+    def __init__(self, stem: str):
+        from .gamewatch import GameWatcher
+        stem = stem.lower()
+        seen: set[str] = set()
+
+        class _W(GameWatcher):
+            def _process(self, events):  # count every flow of the game, no game/ipset logic
+                for pid, ip, _port, _proto in events:
+                    exe, _ = self._proc(pid)
+                    if exe and exe.startswith(stem) and "launcher" not in exe and not ip.startswith("127."):
+                        seen.add(ip)
+
+        self.seen = seen
+        self.replied: set[str] = set()
+        self._w = _W(lambda: None, log=lambda m: None, interval=1.0)
+        self._w.start()
+        self._h = None
+        self._sniff_start()
+
+    def _sniff_start(self) -> None:
+        """Sniff inbound packets (NETWORK layer, read-only) to learn which servers actually answered:
+        a UDP 'flow' exists as soon as the game sends, even if DPI drops every reply."""
+        import ctypes
+        import threading
+        from . import paths
+        try:
+            dll = ctypes.WinDLL(str(paths.BIN / "WinDivert.dll"), use_last_error=True)
+            dll.WinDivertOpen.restype = ctypes.c_void_p
+            dll.WinDivertOpen.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int16, ctypes.c_uint64]
+            dll.WinDivertRecv.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
+                                          ctypes.POINTER(ctypes.c_uint), ctypes.c_void_p]
+            dll.WinDivertRecv.restype = ctypes.c_int
+            dll.WinDivertClose.argtypes = [ctypes.c_void_p]
+            # layer NETWORK (0), flags SNIFF (1) | RECV_ONLY (4); only the 20-byte IPv4 header is needed
+            h = dll.WinDivertOpen(b"inbound and ip and (tcp or udp)", 0, 0, 1 | 4)
+            if not h or h == ctypes.c_void_p(-1).value:
+                return
+        except OSError:
+            return
+        self._dll, self._h = dll, h
+        addr = (ctypes.c_ubyte * 128)()  # WINDIVERT_ADDRESS (80 bytes) with headroom
+
+        def loop():
+            buf = (ctypes.c_ubyte * 65535)()
+            n = ctypes.c_uint()
+            while self._h:
+                if not dll.WinDivertRecv(h, buf, len(buf), ctypes.byref(n), addr):
+                    if not self._h:
+                        break
+                    continue
+                if n.value >= 20 and buf[0] >> 4 == 4:
+                    self.replied.add(f"{buf[12]}.{buf[13]}.{buf[14]}.{buf[15]}")
+                if len(self.replied) > 50000:
+                    self.replied.clear()
+        threading.Thread(target=loop, daemon=True, name="GamePickSniff").start()
+
+    def reset(self) -> None:
+        self.seen.clear()
+        self.replied.clear()
+
+    def count(self) -> int:
+        """Game servers that answered (all flows if sniffing is unavailable)."""
+        return len(self.seen & self.replied) if self._h else len(self.seen)
+
+    def stop(self) -> None:
+        self._w.stop()
+        h, self._h = self._h, None
+        if h:
+            try:
+                self._dll.WinDivertClose(h)
+            except OSError:
+                pass
