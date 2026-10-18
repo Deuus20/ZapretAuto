@@ -165,6 +165,8 @@ class MainWindow(QWidget):
         self.watcher = None
         self.worker: Worker | None = None
         self.busy = False
+        self._cancel = False  # set by «Отменить» during a pick
+        self._cancellable = False
         self._profile_exe: str | None = None  # game whose own strategy is active
         self.busy_text = ""
         self.error = ""
@@ -240,6 +242,11 @@ class MainWindow(QWidget):
         self.btn_site.setCursor(Qt.PointingHandCursor)
         self.btn_site.clicked.connect(self.check_site)
         brow.addWidget(self.btn_site)
+        self.btn_cancel = QPushButton("Отменить")
+        self.btn_cancel.setToolTip("Остановить подбор; обход вернётся к прежней стратегии")
+        self.btn_cancel.clicked.connect(self.cancel_busy)
+        self.btn_cancel.hide()
+        brow.addWidget(self.btn_cancel)
         brow.addStretch()
         col.addLayout(brow)
         col.addStretch()
@@ -584,6 +591,7 @@ class MainWindow(QWidget):
             self.tray.setIcon(app_icon(COLORS[state]))
             self.setWindowIcon(app_icon(COLORS[state]))
         self.progress.setVisible(self.busy)
+        self.btn_cancel.setVisible(self.busy and self._cancellable)
         if not self.busy:
             self.progress.setRange(0, 0)
         title = self.busy_text if self.busy else ("Обход включён" if run else "Обход выключен")
@@ -689,6 +697,11 @@ class MainWindow(QWidget):
                 self.tray.showMessage("ZapretAuto", self.error)
                 self.refresh()
         self._run(lambda log: diag.first_problem(), done)
+
+    def cancel_busy(self):
+        self._cancel = True
+        self.btn_cancel.setEnabled(False)
+        self.substatus.setText("Отменяю… (дождусь окончания текущей проверки)")
 
     def _game_running(self) -> bool:
         return bool(self.watcher and any(g.get("active") for g in self.watcher.games().values()))
@@ -969,7 +982,8 @@ class MainWindow(QWidget):
             elif t.startswith("Финальная"):
                 self.substatus.setText("Финальная проверка лучших вариантов…")
                 self.progress.setValue(self.progress.maximum() - 2)
-        self.worker = self._run(lambda log: tester.auto_pick(log), self._autopick_done, line)
+        self._cancel, self._cancellable = False, True
+        self.worker = self._run(lambda log: tester.auto_pick(log, stop=lambda: self._cancel), self._autopick_done, line)
 
     def _autopick_done(self, res):
         self.busy = False
@@ -978,11 +992,15 @@ class MainWindow(QWidget):
         after = self.settings.get("strategy") or {}
         if res and after != before:
             stats.record("switch", to=after.get("base", "?") + (" + микс" if after.get("picks") else ""))
-        self.log("автоподбор завершён" if res else "автоподбор не дал результата")
-        if not res:
+        cancelled = self._cancel
+        self._cancel = self._cancellable = False
+        self.btn_cancel.setEnabled(True)
+        self.log("автоподбор завершён" if res else ("подбор отменён" if cancelled else "автоподбор не дал результата"))
+        if not res and not cancelled:
             self.error = "Подбор не удался — подробности во вкладке «Лог»."
+        if res or self.settings.get("strategy"):
+            self.start_runner()  # the pick stopped the bypass: always bring it back (old strategy if pick failed)
         if res:
-            self.start_runner()
             self._offer_autostart()
             self._offer_share()
         self.refresh()
@@ -1106,17 +1124,24 @@ class MainWindow(QWidget):
 
         def done(res):
             self.busy = False
+            cancelled = self._cancel
+            self._cancel = self._cancellable = False
+            self.btn_cancel.setEnabled(True)
             self.settings = tester.load_settings()
+            self.start_runner()  # the pick stopped the bypass: bring it back in any case
             if res:
-                self.start_runner()
                 self.tray.showMessage("ZapretAuto", "Стратегия для игры подобрана — можно играть.")
+            elif cancelled:
+                self.log("подбор для игры отменён")
             else:
                 self.error = "Для этой игры подходящей стратегии не нашлось — попробуйте VPN."
             self.refresh()
         def line(t):
             self.log(t)
             self.substatus.setText(t if len(t) < 120 else t[:117] + "…")  # current step in the header
-        self.worker = self._run(lambda log: gamepick.pick_for_game(path, self.runner, log), done, line)
+        self._cancel, self._cancellable = False, True
+        self.worker = self._run(lambda log: gamepick.pick_for_game(path, self.runner, log, stop=lambda: self._cancel),
+                                done, line)
 
     def reset_game(self):
         r = self.table.currentRow()
