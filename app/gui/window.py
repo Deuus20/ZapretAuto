@@ -510,6 +510,13 @@ class MainWindow(QWidget):
             self.log(f"сеть изменилась ({self._net} → {net}), проверю доступ")
             self._next_health = now + 20
         self._net = net
+        if (not self.busy and now - self.settings.get("ipset_updated", 0) > 7 * 86400
+                and now - getattr(self, "_ipset_try", 0) > 3600):
+            self._ipset_try = now  # weekly; retry hourly on failure
+            from app import lists
+            self.log("еженедельное обновление ipset…")
+            self._run(lambda log: lists.update_ipset(log),
+                      lambda ok: self.start_runner() if ok and self.runner.running and not self.busy else None)
         if now >= self._next_health:
             self._next_health = now + 600
             self._health()
@@ -637,7 +644,41 @@ class MainWindow(QWidget):
             self.error = "Подбор не удался — подробности во вкладке «Лог»."
         if res:
             self.start_runner()
+            self._offer_share()
         self.refresh()
+
+    def _offer_share(self):
+        lp = self.settings.get("last_pick", {})
+        if lp.get("shared") or self.settings.get("share_never") or not lp.get("total"):
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Поделиться результатом")
+        box.setText("Подбор завершён. Отправить результат в общую базу?\n\n"
+                    "Другие пользователи вашего провайдера смогут настроиться за секунды. "
+                    "Отправляется только номер сети провайдера (AS) и найденная комбинация — "
+                    "без вашего IP. Откроется страница GitHub (нужен аккаунт).")
+        yes = box.addButton("Поделиться", QMessageBox.AcceptRole)
+        box.addButton("Не сейчас", QMessageBox.RejectRole)
+        never = box.addButton("Больше не спрашивать", QMessageBox.DestructiveRole)
+        box.exec()
+        if box.clickedButton() is never:
+            self.save(share_never=True)
+        elif box.clickedButton() is yes:
+            def done(url):
+                if url:
+                    import webbrowser
+                    webbrowser.open(url)
+                else:
+                    self.log("не удалось определить провайдера")
+
+            def make(log):
+                from app import __version__, sharedb
+                who = sharedb.isp()
+                if not who:
+                    return None
+                return sharedb.report_url(who[0], who[1], updater.current_version(), __version__,
+                                          self.settings.get("strategy", {}), lp["score"], lp["total"])
+            self._run(make, done)
 
     # ---------- games ----------
     def start_watcher(self):
