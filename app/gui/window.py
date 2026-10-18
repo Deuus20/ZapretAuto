@@ -767,7 +767,7 @@ class MainWindow(QWidget):
                 stats.record("repick", reason=bad)
                 self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. Подбираю стратегию заново…")
                 self.autopick()
-        self._run(lambda log: tester.quick_check(), done)
+        self._run(lambda log: tester.quick_check(light=True), done)  # no 1 MB speed test every 10 min
 
     def _check_profiles(self):
         """Switch to a game's own strategy while it runs (set by «Подобрать стратегию для этой игры»)."""
