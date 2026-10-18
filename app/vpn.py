@@ -56,8 +56,14 @@ def write_exclude() -> set[str]:
     """data/lists/ipset-exclude-vpn.txt: every profile skips these, so winws never touches VPN tunnels."""
     ips = server_ips()
     paths.LISTS.mkdir(parents=True, exist_ok=True)
-    (paths.LISTS / "ipset-exclude-vpn.txt").write_text(
-        "\n".join(sorted(ips) or [PLACEHOLDER]) + "\n", encoding="utf-8")
+    f = paths.LISTS / "ipset-exclude-vpn.txt"
+    text = "\n".join(sorted(ips) or [PLACEHOLDER]) + "\n"
+    try:
+        if f.read_text(encoding="utf-8") == text:
+            return ips  # unchanged: don't touch the file (winws reloads lists on modification)
+    except OSError:
+        pass
+    f.write_text(text, encoding="utf-8")
     return ips
 
 
