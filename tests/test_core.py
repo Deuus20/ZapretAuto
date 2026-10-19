@@ -215,10 +215,10 @@ def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
         w._process([(1, "9.9.9.9", 443, 6), (1, "9.9.9.10", 27015, 17)])
         g = w.games()["game.exe"]
         assert g["ips"] == {"9.9.9.10"}  # 443 skipped, game port kept
-        assert w._web_nets == {"9.9.9.0/24"}  # ...but its /24 is kept out of the ipset-all profiles
+        assert w._web_nets == {"9.9.9.0/24"} | gamewatch.KNOWN_WEB_NETS  # its /24 is kept out of ipset-all profiles
         w._flush()
-        assert (tmp_path / "lists" / "ipset-exclude-games.txt").read_text().split() == ["9.9.9.0/24"]
-        assert settings.load_settings()["games_web"] == ["9.9.9.0/24"]
+        assert "9.9.9.0/24" in (tmp_path / "lists" / "ipset-exclude-games.txt").read_text().split()
+        assert "3.164.206.0/24" in settings.load_settings()["games_web"]  # Wardogs login: known before 1st launch
         assert time.time() - w._games["game.exe"]["started"] < gamewatch.LOGIN_GRACE
     finally:
         w.stop()

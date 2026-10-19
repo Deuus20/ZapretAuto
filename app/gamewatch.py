@@ -20,6 +20,9 @@ from .settings import load_settings, save_settings
 PLACEHOLDER = "203.0.113.113/32"
 SKIP_PORTS = {80, 443}  # web/CDN traffic (launchers, login APIs) is covered by hostlists/ipset; desyncing it broke launchers
 MAX_WEB_NETS = 512      # /24s of games' web/login servers kept out of the ipset-all profiles
+# known login servers, so even a game's first launch logs in (the rest is learned from traffic)
+KNOWN_WEB_NETS = {"3.164.206.0/24", "3.171.214.0/24", "104.18.124.0/24", "104.18.125.0/24"}  # Wardogs
+KNOWN_WEB_HOSTS = ("game.live.wardogs.bulkhead.pragmaengine.com",)  # CloudFront: resolved at start, IPs rotate
 LOGIN_GRACE = 120.0  # s after a game starts: no winws restarts, so logins are not cut off
 GAME_DIRS = ("steamapps\\common", "\\epic games\\", "\\riot games\\", "\\battle.net\\", "\\ubisoft",
              "\\ea games\\", "\\gog games\\", "\\xboxgames\\", "\\windowsapps\\")
@@ -183,7 +186,7 @@ class GameWatcher(threading.Thread):
         if st.get("games_schema", 1) < 2:  # v1 collected 80/443 CDN addresses too: start over once
             save_settings(games={k: {"path": v.get("path", ""), "ips": []} for k, v in st.get("games", {}).items()},
                           games_schema=2)
-        self._web_nets: set[str] = set(load_settings().get("games_web", []))
+        self._web_nets: set[str] = set(load_settings().get("games_web", [])) | KNOWN_WEB_NETS
         for exe, g in load_settings().get("games", {}).items():
             self._games[exe] = {"path": g.get("path", ""), "ips": set(g.get("ips", [])),
                                 "active": False, "ping_ms": None}
@@ -490,7 +493,23 @@ class GameWatcher(threading.Thread):
             self.log(f"gamewatch: on_change error: {e}")
         self._schedule_rollback()
 
+    def _resolve_known(self) -> None:
+        nets = set()
+        for host in KNOWN_WEB_HOSTS:
+            try:
+                for *_, sa in socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM):
+                    nets.add(sa[0].rsplit(".", 1)[0] + ".0/24")
+            except OSError:
+                pass
+        with self._lock:
+            new = nets - self._web_nets
+            self._web_nets |= new
+        if new:
+            self._pending_since = time.time()
+
     def run(self) -> None:
+        self._pending_since = time.time()  # write ipset-exclude-games.txt with the known nets right away
+        threading.Thread(target=self._resolve_known, daemon=True, name="GameWatchDNS").start()
         use_divert = self._open_divert()
         if use_divert:
             threading.Thread(target=self._recv_loop, daemon=True, name="GameWatchRecv").start()
