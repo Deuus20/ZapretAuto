@@ -202,14 +202,25 @@ def app_update(log=print) -> bool:
     return True
 
 
+APP_CHECK_ERROR = ""  # why the last app check failed, in words for the Updates section
+
+
 def app_check_async(callback) -> None:
-    """callback(tag|None, newer) for the app itself."""
+    """callback(tag|None, newer) for the app itself; on failure APP_CHECK_ERROR says why."""
     def work():
+        global APP_CHECK_ERROR
         from . import __version__
         try:
             tag, _, _ = app_release()
+            APP_CHECK_ERROR = ""
             callback(tag, is_newer(tag, __version__))
+        except requests.HTTPError as e:
+            # 404 while the internet works: the project page itself is unavailable (it was hidden once)
+            APP_CHECK_ERROR = ("страница проекта на GitHub сейчас недоступна" if e.response is not None
+                               and e.response.status_code == 404 else "GitHub ответил ошибкой")
+            callback(None, False)
         except Exception:
+            APP_CHECK_ERROR = "нет связи с GitHub"
             callback(None, False)
 
     threading.Thread(target=work, daemon=True).start()

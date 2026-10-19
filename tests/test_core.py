@@ -853,3 +853,17 @@ def test_gui_chips_and_switch_rows(tmp_path, monkeypatch):
         assert w.tabs.rail.buttons[lists_i].isHidden()                   # Lists only with «Дополнительно»
     finally:
         _close(app, w)
+
+
+def test_app_check_explains_hidden_project(monkeypatch):
+    import requests
+    import threading
+    resp = requests.Response()
+    resp.status_code = 404
+
+    def gone():
+        raise requests.HTTPError(response=resp)
+    monkeypatch.setattr(updater, "app_release", gone)
+    ev, got = threading.Event(), []
+    updater.app_check_async(lambda t, n: (got.append((t, n)), ev.set()))
+    assert ev.wait(5) and got == [(None, False)] and "недоступна" in updater.APP_CHECK_ERROR
