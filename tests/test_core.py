@@ -494,3 +494,35 @@ def test_gui_auto_item_returns_to_last_pick(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
+
+
+def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(strategy={"base": "ALT8", "picks": {}}, ipset_updated=time.time(),
+                           game_watch=False, games_ignore=["mygame.exe"])
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    monkeypatch.setattr(gamewatch.GameWatcher, "start", lambda self: None)  # no WinDivert in tests
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: ("D:/Games/X/MyGame.exe", "")))
+    w = MainWindow()
+    try:
+        w.add_game()
+        st = settings.load_settings()
+        assert st["game_watch"] and w.cb["game_watch"].isChecked() and w.watcher
+        assert "mygame.exe" not in st["games_ignore"]               # «Игнорировать» undone
+        assert "mygame.exe" in st["games"]                          # persisted right away
+        assert w.table.rowCount() == 1 and w.table.item(0, 0).text() == "mygame.exe"  # shown before any traffic
+        assert gamewatch.classify(r"D:\Games\X\MyGame.exe", st)     # its traffic will count as a game
+    finally:
+        if w.watcher:
+            w.watcher.stop()
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
