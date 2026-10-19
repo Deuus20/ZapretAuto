@@ -505,7 +505,7 @@ def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
     settings._cache = None
     settings.save_settings(strategy={"base": "ALT8", "picks": {}}, ipset_updated=time.time(),
                            game_watch=False, games_ignore=["mygame.exe"])
-    from PySide6.QtWidgets import QApplication, QFileDialog
+    from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
     app = QApplication.instance() or QApplication([])
     from app.gui.window import MainWindow
     monkeypatch.setattr(gamewatch.GameWatcher, "start", lambda self: None)  # no WinDivert in tests
@@ -519,6 +519,10 @@ def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
         assert "mygame.exe" in st["games"]                          # persisted right away
         assert w.table.rowCount() == 1 and w.table.item(0, 0).text() == "mygame.exe"  # shown before any traffic
         assert gamewatch.classify(r"D:\Games\X\MyGame.exe", st)     # its traffic will count as a game
+        shown = []
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+        w.add_game()                                                 # second time: says so, adds nothing
+        assert shown and "уже есть" in shown[0] and w.table.rowCount() == 1
     finally:
         if w.watcher:
             w.watcher.stop()
