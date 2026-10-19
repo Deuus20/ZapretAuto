@@ -53,6 +53,10 @@ class _SrcAdapter(requests.adapters.HTTPAdapter):
         return super().init_poolmanager(*a, **kw)
 
 
+class _Enough(Exception):
+    """Raised from the curl write callback once enough bytes arrived."""
+
+
 def fetch(url: str, max_bytes: int, deadline: float, h3: bool = False) -> tuple[int, str, int]:
     """Download up to max_bytes; returns (status, final_url, bytes). Uses a Chrome TLS fingerprint
     (curl_cffi) when available: DPI and strategies react to the ClientHello, and browsers/Discord send
@@ -63,19 +67,32 @@ def fetch(url: str, max_bytes: int, deadline: float, h3: bool = False) -> tuple[
     except ImportError:
         cr = None
     if cr is not None:
+        # Non-streaming request with callbacks: curl_cffi's stream=True leaked a thread + handles per request
+        # (added up in the 24/7 health checks); a raw Curl handle lost curl_cffi's request setup and fared worse
+        # against DPI. Raising from the content callback is the only way to stop a transfer early.
+        # An early stop means a big real page (status 200, original URL); ISP stub pages (451 / redirect to a
+        # warning site) are small, finish normally and keep their real status and final URL.
+        got, status, final = 0, 200, url
+
+        def on_data(data: bytes) -> None:
+            nonlocal got
+            got += len(data)
+            if got >= max_bytes or time.perf_counter() - t0 > deadline:
+                raise _Enough
+
         kw = {"interface": BIND} if BIND else {}
         if h3:  # QUIC (UDP 443): browsers use it for YouTube/Google, and strategies have separate UDP profiles
             kw["http_version"] = "v3only"
-        r = cr.get(url, impersonate="chrome", timeout=TIMEOUT, stream=True, proxies={}, **kw)
-        try:
-            got = 0
-            for chunk in r.iter_content():
-                got += len(chunk)
-                if got >= max_bytes or time.perf_counter() - t0 > deadline:
-                    break
-            return r.status_code, str(r.url), got
-        finally:
-            r.close()
+        with cr.Session(impersonate="chrome") as sess:
+            try:
+                r = sess.get(url, timeout=(TIMEOUT, TIMEOUT + deadline), proxies={}, content_callback=on_data, **kw)
+                status, final = r.status_code, str(r.url)
+            except _Enough:
+                pass
+            except Exception:  # noqa: BLE001
+                if got == 0:
+                    raise
+        return status, final, got
     with _get(url, timeout=TIMEOUT, stream=True, proxies={"http": None, "https": None},
               headers={"User-Agent": "Mozilla/5.0"}) as r:
         got = 0
