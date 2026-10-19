@@ -14,14 +14,15 @@ from typing import Callable
 
 import psutil
 
-from . import paths
+from . import known_games, paths
 from .settings import load_settings, save_settings
 
 PLACEHOLDER = "203.0.113.113/32"
 SKIP_PORTS = {80, 443}  # web/CDN traffic (launchers, login APIs) is covered by hostlists/ipset; desyncing it broke launchers
 MAX_WEB_NETS = 512      # /24s of games' web/login servers kept out of the ipset-all profiles
 # known login servers, so even a game's first launch logs in (the rest is learned from traffic)
-KNOWN_WEB_NETS = {"3.164.206.0/24", "3.171.214.0/24", "104.18.124.0/24", "104.18.125.0/24"}  # Wardogs
+KNOWN_WEB_NETS = set(known_games.WEB_NETS) | {"3.164.206.0/24", "3.171.214.0/24", "104.18.124.0/24",
+                                                "104.18.125.0/24"}  # Wardogs login
 KNOWN_WEB_HOSTS = ("game.live.wardogs.bulkhead.pragmaengine.com",)  # CloudFront: resolved at start, IPs rotate
 LOGIN_GRACE = 120.0  # s after a game starts: no winws restarts, so logins are not cut off
 GAME_DIRS = ("steamapps\\common", "\\epic games\\", "\\riot games\\", "\\battle.net\\", "\\ubisoft",
@@ -408,7 +409,10 @@ class GameWatcher(threading.Thread):
                 continue
             seen_active.add(exe)
             with self._lock:
-                g = self._games.setdefault(exe, {"path": path, "ips": set(), "active": True, "ping_ms": None})
+                if exe not in self._games:  # first sight of a known game: its servers are known already
+                    new_ip = new_ip or exe in known_games.GAME_IPS
+                g = self._games.setdefault(exe, {"path": path, "ips": set(known_games.GAME_IPS.get(exe, ())),
+                                                 "active": True, "ping_ms": None})
                 g.setdefault("started", time.time())
                 g["path"] = path
                 if port in (80, 443):

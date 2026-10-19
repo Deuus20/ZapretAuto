@@ -557,3 +557,19 @@ def test_gui_update_check_shows_result(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
+
+
+def test_known_game_seeded_on_first_sight(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        exe = "wardogsclient-win64-shipping.exe"
+        monkeypatch.setattr(w, "_proc", lambda pid: (exe, rf"C:\Steam\steamapps\common\Wardogs\{exe}"))
+        monkeypatch.setattr(w, "_pool", type("P", (), {"submit": lambda *a, **k: None, "shutdown": lambda *a, **k: None})())
+        w._process([(1, "9.9.9.10", 27015, 17)])
+        assert len(w.games()[exe]["ips"]) > 100  # shipped servers + the new one
+        assert "3.164.206.0/24" in w._web_nets
+    finally:
+        w.stop()
