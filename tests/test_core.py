@@ -220,6 +220,9 @@ def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
         assert "9.9.9.0/24" in (tmp_path / "lists" / "ipset-exclude-games.txt").read_text().split()
         assert "3.164.206.0/24" in settings.load_settings()["games_web"]  # Wardogs login: known before 1st launch
         assert time.time() - w._games["game.exe"]["started"] < gamewatch.LOGIN_GRACE
+        w._games["game.exe"]["active"] = False
+        w._process([(1, "9.9.9.11", 443, 6)])                     # login talks only 443: still "running"
+        assert w.games()["game.exe"]["active"]
     finally:
         w.stop()
 
@@ -523,6 +526,10 @@ def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
         monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
         w.add_game()                                                 # second time: says so, adds nothing
         assert shown and "уже есть" in shown[0] and w.table.rowCount() == 1
+        w.watcher._games["mygame.exe"]["ips"].add("9.9.9.9")
+        w.table.selectRow(0)
+        w.ignore_game()                                              # not a game: its servers leave the ipset
+        assert not w.watcher.games()["mygame.exe"]["ips"] and w.table.rowCount() == 0
     finally:
         if w.watcher:
             w.watcher.stop()

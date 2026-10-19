@@ -46,11 +46,11 @@ UDP_NON_GAME_EXES = {
     "wireguard.exe", "openvpn.exe", "radmin_vpn.exe", "rvcontrolsvc.exe", "hamachi-2.exe", "zerotier-one_x64.exe",
     "nekoray.exe", "v2rayn.exe", "xray.exe", "sing-box.exe", "hiddify.exe", "claude.exe", "node.exe",
 }
-UDP_GAME_MIN_IPS = 3
+UDP_GAME_MIN_IPS = 3     # distinct public UDP peers before an unknown exe is treated as a game
 DEBOUNCE = 5.0           # s of quiet after the last new IP before rewriting the ipset
 MIN_RESTART_GAP = 5.0    # s between ipset rewrites (winws reloads the file itself, no restart needed)
 MAX_IPS_PER_GAME = 256
-PID_TTL = 30.0           # s; Windows reuses PIDs, so cached exe names expire  # distinct public UDP peers before an unknown exe is treated as a game
+PID_TTL = 30.0           # s; Windows reuses PIDs, so cached exe names expire
 SYSTEM_DIRS = ("\\windows\\", "\\microsoft\\edge\\", "\\google\\chrome\\", "\\windowsapps\\microsoft.",
                "\\windowsapps\\microsoftcorporationii.", "\\windowsapps\\spotifyab.",
                "\\windowsapps\\5319275a.", "\\windowsapps\\telegram")
@@ -174,8 +174,6 @@ class GameWatcher(threading.Thread):
         self._pool = ThreadPoolExecutor(4, thread_name_prefix="gamewatch")
         self._flush_lock = threading.Lock()
         self._last_restart = 0.0
-        self._web_only: set[str] = set()   # IPs seen only on ports 80/443
-        self._other_port: set[str] = set()
         self._pinging: set[str] = set()
         self._ping: dict[str, float | None] = {}
         self._base: dict[str, tuple[int, float, str]] = {}  # ip -> (port, ms, exe) baseline before desync
@@ -395,12 +393,14 @@ class GameWatcher(threading.Thread):
         for pid, ip, port, proto in set(events):
             if port in SKIP_PORTS and public_ipv4(ip):
                 net = ip.rsplit(".", 1)[0] + ".0/24"
-                if net not in self._web_nets and len(self._web_nets) < MAX_WEB_NETS:
-                    exe, path = self._proc(pid)
-                    if exe and web_client(path, settings):
-                        with self._lock:
-                            self._web_nets.add(net)
-                        new_web = True
+                exe, path = self._proc(pid)
+                if exe in self._games and classify(path, settings):
+                    seen_active.add(exe)  # a game logging in talks only 443: it runs (grace, no updates)
+                if (exe and net not in self._web_nets and len(self._web_nets) < MAX_WEB_NETS
+                        and web_client(path, settings)):
+                    with self._lock:
+                        self._web_nets.add(net)
+                    new_web = True
                 continue
             if not public_ipv4(ip) or ip in banned:
                 continue
@@ -415,12 +415,6 @@ class GameWatcher(threading.Thread):
                                                  "active": True, "ping_ms": None})
                 g.setdefault("started", time.time())
                 g["path"] = path
-                if port in (80, 443):
-                    if ip not in self._other_port:
-                        self._web_only.add(ip)
-                else:
-                    self._other_port.add(ip)
-                    self._web_only.discard(ip)
                 if ip not in g["ips"] and len(g["ips"]) < MAX_IPS_PER_GAME:
                     g["ips"].add(ip)
                     new_ip = True
@@ -477,7 +471,7 @@ class GameWatcher(threading.Thread):
     def _render(self) -> str:
         with self._lock:
             ips = set().union(*[g["ips"] for g in self._games.values()]) if self._games else set()
-        lines = sorted(_group(ips, self._web_only & ips), key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
+        lines = sorted(_group(ips), key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
         man = paths.DATA / "games_manual.txt"
         if man.exists():
             for ln in man.read_text(encoding="utf-8").splitlines():
