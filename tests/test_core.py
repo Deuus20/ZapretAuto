@@ -28,6 +28,7 @@ def test_game_and_vpn_lists_are_wired():
     argv = s.argv()
     assert sum("ipset-exclude-vpn.txt" in a for a in argv) == len(s.profiles)
     assert any("ipset-games.txt" in a for a in argv)
+    assert sum("ipset-exclude-games.txt" in a for a in argv) == sum("ipset-all" in p.group for p in s.profiles)
 
 
 def test_mix_replaces_only_matching_group():
@@ -177,16 +178,9 @@ def test_launchers_and_web_ports_are_not_game_traffic():
     assert not gamewatch.classify(r"C:\Steam\steamapps\common\Wardogs\WardogsLauncher-Shipping.exe", {})
     assert gamewatch.classify(r"C:\Steam\steamapps\common\Wardogs\WardogsClient-Win64-Shipping.exe", {})
     assert {80, 443} <= gamewatch.SKIP_PORTS
-
-
-def test_gamepick_majority_rating(monkeypatch):
-    from app import gamepick
-    seq = iter([True, False, True, True])
-    monkeypatch.setattr(gamepick, "_attempt", lambda *a: (next(seq), 0, 0))
-    assert gamepick._rate("g", "x", lambda: False, 3) == 2  # stops after 2 of 3 successes
-    seq2 = iter([False, False, True])
-    monkeypatch.setattr(gamepick, "_attempt", lambda *a: (next(seq2), 0, 0))
-    assert gamepick._rate("g", "x", lambda: False, 3) == 0  # stops after 2 failures
+    # the launcher's own web servers (Fastly, CloudFront) must not be desynced either
+    assert gamewatch.web_client(r"C:\Steam\steamapps\common\Wardogs\WardogsLauncher-Shipping.exe", {})
+    assert not gamewatch.web_client(r"C:\Program Files\Google\Chrome\Application\chrome.exe", {})
 
 
 def test_merge_ignores_old_app_reports():
@@ -221,6 +215,10 @@ def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
         w._process([(1, "9.9.9.9", 443, 6), (1, "9.9.9.10", 27015, 17)])
         g = w.games()["game.exe"]
         assert g["ips"] == {"9.9.9.10"}  # 443 skipped, game port kept
+        assert w._web_nets == {"9.9.9.0/24"}  # ...but its /24 is kept out of the ipset-all profiles
+        w._flush()
+        assert (tmp_path / "lists" / "ipset-exclude-games.txt").read_text().split() == ["9.9.9.0/24"]
+        assert settings.load_settings()["games_web"] == ["9.9.9.0/24"]
         assert time.time() - w._games["game.exe"]["started"] < gamewatch.LOGIN_GRACE
     finally:
         w.stop()
@@ -260,28 +258,6 @@ def test_gui_smoke(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()  # destroy Qt objects before the interpreter exits (else a crash at shutdown)
         app.processEvents()
-
-
-def test_gamepick_saves_profile_not_global(tmp_path, monkeypatch):
-    from app import gamepick
-    monkeypatch.setattr(paths, "DATA", tmp_path)
-    settings._cache = None
-    settings.save_settings(strategy={"base": "ALT12", "picks": {}})
-    monkeypatch.setattr(gamepick, "_attempt", lambda *a: (True, 9, 1.0))
-    monkeypatch.setattr(gamepick, "_kill", lambda stem: None)
-    monkeypatch.setattr(gamepick, "FlowCounter", lambda stem: (_ for _ in ()).throw(OSError()))
-    monkeypatch.setattr(gamepick, "candidates", lambda: [{"base": "ALT11", "picks": {}}])
-    monkeypatch.setattr(gamepick.tester, "quick_check", lambda: {"Discord": True, "YouTube": True})
-    monkeypatch.setattr(gamepick.time, "sleep", lambda s: None)
-
-    class R:
-        def start(self, *a, **k): pass
-        def stop(self): pass
-    c = gamepick.pick_for_game(r"C:\G\game-Win64.exe", R(), log=lambda m: None, tries=1)
-    st = settings.load_settings()
-    assert c == {"base": "ALT11", "picks": {}}
-    assert st["strategy"]["base"] == "ALT12"  # global untouched
-    assert st["game_profiles"]["game-win64.exe"]["base"] == "ALT11"
 
 
 def _fake_pick_env(monkeypatch, tmp_path, baseline_ok, vpn=None, bind=None):

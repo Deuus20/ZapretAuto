@@ -41,7 +41,6 @@ class MainWindow(QWidget):
         self.busy = False
         self._cancel = False  # set by «Отменить» during a pick
         self._cancellable = False
-        self._profile_exe: str | None = None  # game whose own strategy is active
         self.busy_text = ""
         self.error = ""
         self._workers: list = []  # keep workers referenced until finished
@@ -229,18 +228,12 @@ class MainWindow(QWidget):
         b2.setToolTip("Выбрать exe игры вручную, если она не нашлась сама")
         b2.clicked.connect(self.add_game)
         b3 = QPushButton("Сбросить игру")
-        b3.setToolTip("Убрать собранные адреса выбранной игры и её собственный профиль стратегии")
+        b3.setToolTip("Убрать собранные адреса выбранной игры")
         b3.clicked.connect(self.reset_game)
         r.addWidget(b1)
         r.addWidget(b2)
         r.addWidget(b3)
         gl.addLayout(r)
-        self.btn_gamepick = QPushButton("Подобрать стратегию для этой игры", objectName="primary")
-        self.btn_gamepick.setToolTip("Если игра не входит в онлайн («Вход в систему…»): программа сама запускает игру "
-                                     "с разными стратегиями и оставляет ту, с которой вход проходит, а Discord и "
-                                     "YouTube работают. Занимает до 15 минут, игру в это время не трогайте.")
-        self.btn_gamepick.clicked.connect(self.pick_for_game)
-        gl.addWidget(self.btn_gamepick)
         self.tabs.addTab(g, "Игры")
         u = QWidget()
         ul = QVBoxLayout(u)
@@ -451,8 +444,6 @@ class MainWindow(QWidget):
                                   "Выход — правый клик по значку → «Выход».")
 
     def describe(self) -> str:
-        if self._profile_exe:
-            return f"профиль игры {self._profile_exe.rsplit('.', 1)[0]}"
         c = self.settings.get("strategy")
         if not c:
             return "не выбрана"
@@ -489,8 +480,7 @@ class MainWindow(QWidget):
             tip += f"\nпроверка {time.strftime('%H:%M', time.localtime(last[0]))}: {ok}"
         self.tray.setToolTip(tip[:127])  # Windows truncates tray tooltips at 127 chars
         self.btn_toggle.setAccessibleName(title)
-        for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site,
-                  self.btn_gamepick):
+        for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site):
             w.setEnabled(not self.busy)
         self.btn_toggle.setProperty("state", state)
         self.btn_toggle.setIcon(power_icon({"on": "#22c55e", "busy": "#f59e0b"}.get(state, "#9aa3b5")))
@@ -511,13 +501,6 @@ class MainWindow(QWidget):
         if self.busy:
             return False
         s = tester.chosen_strategy()
-        prof = self.settings.get("game_profiles", {}).get(self._profile_exe or "")
-        if prof:
-            from app import gamepick
-            try:
-                s = gamepick.build(prof)
-            except KeyError:  # strategy vanished after a zapret update
-                pass
         if not s:
             self.error = "Стратегия не выбрана — нажмите «Подобрать лучшую стратегию»."
             self.refresh()
@@ -680,27 +663,6 @@ class MainWindow(QWidget):
                 self.autopick()
         self._run(lambda log: tester.quick_check(light=True), done)  # no 1 MB speed test every 10 min
 
-    def _check_profiles(self):
-        """Switch to a game's own strategy while it runs (set by «Подобрать стратегию для этой игры»)."""
-        profiles = self.settings.get("game_profiles", {})
-        if not profiles or self.busy:
-            return
-        import psutil
-        try:
-            running = {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
-        except psutil.Error:
-            return
-        exe = next((e for e in profiles if e in running), None)
-        if exe != self._profile_exe:
-            self._profile_exe = exe
-            if self.runner.running:
-                self.start_runner()
-            msg = (f"Запущена {exe.rsplit('.', 1)[0]} — включён её профиль обхода" if exe
-                   else "Игра закрыта — возвращена общая стратегия")
-            self.log(msg)
-            if exe:
-                self.tray.showMessage("ZapretAuto", msg)
-
     def _tick(self):
         """Detect winws dying on its own (antivirus, driver conflict)."""
         now = time.time()
@@ -711,8 +673,6 @@ class MainWindow(QWidget):
             if not self.runner.running and not self.busy:
                 self.start_runner()
                 self.tray.showMessage("ZapretAuto", "Обход снова включён.")
-        if self._ticks % 5 == 0:  # ~10 s
-            self._check_profiles()
         if self._ticks % 30 == 0 and self.runner.running and not self.busy:  # ~1 min: VPN may have moved
             from app import vpn
             self._run(lambda log: vpn.write_exclude(), lambda _: None)  # winws reloads the file itself
@@ -1049,61 +1009,12 @@ class MainWindow(QWidget):
         self.save(games_ignore=sorted(set(self.settings.get("games_ignore", [])) | {exe}))
         self.fill_games()
 
-    def pick_for_game(self):
-        r = self.table.currentRow()
-        games = self.watcher.games() if self.watcher else {}
-        exe = self.table.item(r, 0).text() if r >= 0 else None
-        path = (games.get(exe) or {}).get("path") or (self.settings.get("games", {}).get(exe) or {}).get("path")
-        if not path:
-            path, _ = QFileDialog.getOpenFileName(self, "Выберите exe игры", "", "Программы (*.exe)")
-            if not path:
-                return
-        if QMessageBox.question(self, "Подбор для игры",
-                                f"{Path(path).name}\n\nПрограмма будет сама запускать и закрывать игру с разными "
-                                "стратегиями (до 15 минут). Не трогайте игру, пока идёт подбор.\n\n"
-                                "Начать?") != QMessageBox.Yes:
-            return
-        from app import gamepick
-        self._expect_running = False
-        self.busy, self.busy_text, self.error = True, "Подбираю стратегию для игры…", ""
-        self.refresh()
-        self.tabs.setCurrentIndex(0)
-
-        def done(res):
-            self.busy = False
-            cancelled = self._cancel
-            self._cancel = self._cancellable = False
-            self.btn_cancel.setEnabled(True)
-            self.settings = tester.load_settings()
-            self.start_runner()  # the pick stopped the bypass: bring it back in any case
-            if res:
-                self.tray.showMessage("ZapretAuto", "Стратегия для игры подобрана — можно играть.")
-            elif cancelled:
-                self.log("подбор для игры отменён")
-            else:
-                self.error = "Для этой игры подходящей стратегии не нашлось — попробуйте VPN."
-            self.refresh()
-        def line(t):
-            self.log(t)
-            self.substatus.setText(t if len(t) < 120 else t[:117] + "…")  # current step in the header
-        self._cancel, self._cancellable = False, True
-        self.worker = self._run(lambda log: gamepick.pick_for_game(path, self.runner, log, stop=lambda: self._cancel),
-                                done, line)
-
     def reset_game(self):
         r = self.table.currentRow()
         if r < 0 or not self.watcher:
             return
         exe = self.table.item(r, 0).text()
         self.watcher.reset_game(exe)
-        profiles = dict(self.settings.get("game_profiles", {}))
-        if profiles.pop(exe.lower(), None) is not None:
-            self.save(game_profiles=profiles)
-            self.log(f"профиль стратегии игры удалён: {exe}")
-            if self._profile_exe == exe.lower():
-                self._profile_exe = None
-                if self.runner.running:
-                    self.start_runner()
         self.log(f"IP игры сброшены: {exe}")
         self.fill_games()
 
