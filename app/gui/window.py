@@ -820,12 +820,21 @@ class MainWindow(QWidget):
             time.sleep(1.0)  # winws re-reads the changed list by itself (on the next packet): no restart
             if any(tester.probe(t) is not None for _ in range(3)):  # first tries through DPI can be reset
                 return f"Готово: {dom} добавлен в обход и открывается."
-            ip_ok = tester.probe(tester.Target("ip", f"tcp://{dom}:443")) is not None
             if added:
                 lists.remove_user_domain(dom)
+            # the other way round: the bypass itself may break it (Cloudflare/Amazon ranges in the IP list,
+            # sign-in pages, launchers) — try with the site excluded from every profile
+            excluded = lists.add_user_domain(dom, "list-exclude-user.txt")
+            time.sleep(1.0)
+            if any(tester.probe(t) is not None for _ in range(2)):
+                return (f"Готово: {dom} ломался из-за обхода — теперь обход его не трогает, и сайт открывается. "
+                        "Отменить: «Списки» → «Сайты, которые обход не трогает».")
+            if excluded:
+                lists.remove_user_domain(dom, "list-exclude-user.txt")
+            ip_ok = tester.probe(tester.Target("ip", f"tcp://{dom}:443")) is not None
             if not ip_ok:
                 return f"{dom} заблокирован по IP-адресу — zapret тут не поможет, нужен VPN. [ip]"
-            return f"Не помогло для {dom}. Попробуйте «Подобрать лучшую стратегию»."
+            return f"Не помогло для {dom}. Попробуйте «Подобрать заново» на главной."
 
         def done(msg):
             if msg:

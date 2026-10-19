@@ -42,21 +42,27 @@ def update_ipset(log=print) -> bool:
     return True
 
 
-def add_user_domain(domain: str) -> bool:
-    """Append a domain to list-general-user.txt; False if already there."""
-    f = paths.LISTS / "list-general-user.txt"
-    have = {l.strip().lower() for l in f.read_text(encoding="utf-8").splitlines()} if f.exists() else set()
-    if domain.lower() in have:
+DOMAIN_PLACEHOLDER = "domain.example.abc"  # winws refuses empty lists: upstream keeps this dummy entry
+
+
+def add_user_domain(domain: str, name: str = "list-general-user.txt") -> bool:
+    """Add a domain to a user hostlist (bypass it, or with list-exclude-user.txt: leave it alone).
+    False if already there."""
+    f = paths.LISTS / name
+    lines = f.read_text(encoding="utf-8").splitlines() if f.exists() else []
+    if domain.lower() in {l.strip().lower() for l in lines}:
         return False
-    with open(f, "a", encoding="utf-8") as fh:
-        fh.write(("" if not have or f.read_text(encoding="utf-8").endswith("\n") else "\n") + domain + "\n")
+    paths.write_list(f, "\n".join([l for l in lines if l.strip()] + [domain]) + "\n")
     return True
 
 
-def remove_user_domain(domain: str) -> None:
-    f = paths.LISTS / "list-general-user.txt"
+def remove_user_domain(domain: str, name: str = "list-general-user.txt") -> None:
+    f = paths.LISTS / name
     if f.exists():
-        keep = [l for l in f.read_text(encoding="utf-8").splitlines() if l.strip().lower() != domain.lower()]
+        keep = [l for l in f.read_text(encoding="utf-8").splitlines()
+                if l.strip() and l.strip().lower() != domain.lower()]
+        if not any(not l.strip().startswith("#") for l in keep):
+            keep.append(DOMAIN_PLACEHOLDER)
         paths.write_list(f, "\n".join(keep) + "\n")
 
 
