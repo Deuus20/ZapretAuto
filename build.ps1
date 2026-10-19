@@ -17,6 +17,9 @@ foreach ($p in 'translations', 'plugins\platforminputcontexts', 'plugins\platfor
   Remove-Item "$q\$p" -Recurse -Force -ErrorAction SilentlyContinue
 }
 Copy-Item vendor dist\ZapretAuto\vendor -Recurse -Force
+# Russian Yes/No/Cancel in dialogs (Qt's translations folder is pruned above)
+New-Item -ItemType Directory -Force dist\ZapretAuto\assets | Out-Null
+Copy-Item assets\qtbase_ru.qm dist\ZapretAuto\assets\ -Force
 "built: dist\ZapretAuto\ZapretAuto.exe"
 $iscc = @("$env:ProgramFiles\Inno Setup 6\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($iscc) { Remove-Item dist\ZapretAuto-Setup.exe* -ErrorAction SilentlyContinue; & $iscc /Qp "/DAppVer=$ver" installer.iss; if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }; $h = (Get-FileHash dist\ZapretAuto-Setup.exe -Algorithm SHA256).Hash.ToLower(); "$h  ZapretAuto-Setup.exe" | Out-File -Encoding ascii dist\ZapretAuto-Setup.exe.sha256; "installer: dist\ZapretAuto-Setup.exe (+ .sha256)" } else { "Inno Setup not found, skipping installer" }

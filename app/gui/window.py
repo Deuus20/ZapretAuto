@@ -5,11 +5,11 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QColor
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHeaderView, QHBoxLayout, QInputDialog, QLabel,
-                               QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSystemTrayIcon,
-                               QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHeaderView, QHBoxLayout, QInputDialog,
+                               QLabel, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
+                               QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from app import diag, lists, logs, stats, strategies, tester
 from app.runner import Runner
@@ -27,7 +27,8 @@ from app.paths import ROOT
 TASK = "ZapretAuto"
 AUTO = "Авто (результат подбора)"
 UPDATE_EVERY = 6 * 3600  # s between background update checks
-from app.gui.style import COLORS, STYLE, app_icon, power_icon  # noqa: E402
+from app.gui.style import COLORS, STYLE, app_icon, init_fonts  # noqa: E402
+from app.gui.widgets import PowerButton, Pages, Rail, SettingRow, StatusChip, Switch  # noqa: E402
 from app.gui.worker import Bridge, Worker  # noqa: E402
 
 
@@ -35,7 +36,8 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ZapretAuto")
-        self.resize(700, 680)
+        self.resize(880, 640)
+        self.setMinimumSize(720, 520)
         self.runner = Runner()
         self.watcher = None
         self.busy = False
@@ -70,251 +72,61 @@ class MainWindow(QWidget):
         self._next_health = time.time() + 120
 
     # ---------- UI ----------
+    SETTINGS = [  # key, title, supporting text, default, section
+        ("game_watch", "Следить за играми",
+         "Находить запущенные игры и включать обход для их серверов. Если с обходом стало хуже — адрес убирается.",
+         False, "main"),
+        ("auto_repick", "Чинить обход самостоятельно",
+         "Каждые 10 минут и при смене сети проверять Discord и YouTube. Если не открываются дважды подряд — "
+         "подобрать стратегию заново (не посреди игры).", True, "main"),
+        ("auto_update", "Обновляться автоматически",
+         "Ставить новые версии zapret и ZapretAuto при запуске и раз в 6 часов, но не во время игры.", True, "main"),
+        ("autostart", "Запускать вместе с Windows",
+         "ZapretAuto тихо стартует в трее при входе в Windows.", False, "main"),
+        ("auto_hostlist", "Находить заблокированные сайты",
+         "Обход сам замечает сайты, которые не открываются из-за DPI, и включает для них обход. "
+         "Найденное — в разделе «Списки» → list-auto.txt.", True, "adv"),
+        ("game_udp", "Обход UDP для игр",
+         "Обход UDP-трафика игр на портах 1024–65535. Включается сам, когда найдена игра.", False, "adv"),
+        ("game_tcp", "Обход TCP для игр",
+         "То же для TCP: некоторые игры входят в онлайн по TCP. Включается сам, когда найдена игра.", False, "adv"),
+        ("telegram", "Telegram (эксперимент)",
+         "Добавить подсети Telegram в обход. Помогает не всем провайдерам: при блокировке по IP нужен прокси или VPN.",
+         False, "adv"),
+        ("zapret2", "zapret2 (эксперимент)",
+         "Новый движок: если сайт начинает блокироваться, обход сам переключает для него другую стратегию — "
+         "без перезапуска и подбора. При первом включении скачивается ~4 МБ.", False, "adv"),
+    ]
+
     def _build(self):
         QApplication.instance().setStyle("Fusion")
+        init_fonts()
         QApplication.instance().setStyleSheet(STYLE)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(12)
+        self.setObjectName("root")
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        rail = Rail()
+        outer.addWidget(rail)
+        self.tabs = Pages(rail)
+        outer.addWidget(self.tabs, 1)
 
-        # header: big power button + status
-        head = QFrame(objectName="card")
-        hl = QHBoxLayout(head)
-        hl.setContentsMargins(16, 16, 16, 16)
-        hl.setSpacing(18)
-        self.btn_toggle = QPushButton(objectName="power")
-        self.btn_toggle.setIconSize(QSize(44, 44))
-        self.btn_toggle.setFixedSize(96, 96)
-        self.btn_toggle.setCursor(Qt.PointingHandCursor)
-        self.btn_toggle.setToolTip("Включить или выключить обход блокировок")
-        self.btn_toggle.clicked.connect(self.toggle)
-        hl.addWidget(self.btn_toggle, 0, Qt.AlignVCenter)
-        col = QVBoxLayout()
-        col.setSpacing(4)
-        self.status = QLabel(objectName="title")
-        self.substatus = QLabel(objectName="sub")
-        self.substatus.setWordWrap(True)
-        col.addStretch()
-        col.addWidget(self.status)
-        col.addWidget(self.substatus)
-        self.chips = QHBoxLayout()
-        self.chips.setSpacing(6)
-        chips_w = QWidget()
-        chips_w.setLayout(self.chips)
-        chips_w.setObjectName("chipsrow")
-        self.chips.setContentsMargins(0, 2, 0, 2)
-        col.addWidget(chips_w)
-        self.btn_check_access = QPushButton("Проверить доступ")
-        self.btn_check_access.setToolTip("Проверить, открываются ли Discord, YouTube и голосовой чат прямо сейчас")
-        self.btn_check_access.setCursor(Qt.PointingHandCursor)
-        self.btn_check_access.clicked.connect(lambda: self.check_access())
-        brow = QHBoxLayout()
-        brow.addWidget(self.btn_check_access)
-        self.btn_site = QPushButton("Сайт не открывается…")
-        self.btn_site.setToolTip("Проверить конкретный сайт и, если поможет, добавить его в обход")
-        self.btn_site.setCursor(Qt.PointingHandCursor)
-        self.btn_site.clicked.connect(self.check_site)
-        brow.addWidget(self.btn_site)
-        self.btn_cancel = QPushButton("Отменить")
-        self.btn_cancel.setToolTip("Остановить подбор; обход вернётся к прежней стратегии")
-        self.btn_cancel.clicked.connect(self.cancel_busy)
-        self.btn_cancel.hide()
-        brow.addWidget(self.btn_cancel)
-        brow.addStretch()
-        col.addLayout(brow)
-        col.addStretch()
-        hl.addLayout(col, 1)
-        lay.addWidget(head)
-        self.progress = QProgressBar(objectName="thin")
-        self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(4)
-        self.progress.setRange(0, 0)
-        self.progress.hide()
-        lay.addWidget(self.progress)
-
-        # strategy row
-        row = QHBoxLayout()
-        self.btn_auto = QPushButton("Подобрать лучшую стратегию", objectName="primary")
-        self.btn_auto.setCursor(Qt.PointingHandCursor)
-        self.btn_auto.setToolTip("Проверить все стратегии на Discord, YouTube и голосовом трафике "
-                                 "и собрать лучшую комбинацию. Занимает 2–4 минуты.")
-        self.btn_auto.clicked.connect(self.autopick)
-        row.addWidget(self.btn_auto)
-        self.combo = QComboBox()
-        self.combo.setToolTip("«Авто» — подобранная комбинация. Можно выбрать стратегию вручную.")
-        self.combo.addItem(AUTO)
-        self.combo.addItems([s.name for s in strategies.load_all()])
-        self.combo.activated.connect(self.on_combo)
-        row.addWidget(self.combo, 1)
-        lay.addLayout(row)
-
-        # settings
-        box = QGroupBox("Настройки")
-        grid = QGridLayout(box)
-        grid.setHorizontalSpacing(24)
-        s = self.settings
-        self.cb = {}
-        adv = QWidget()
-        agrid = QGridLayout(adv)
-        agrid.setContentsMargins(0, 0, 0, 0)
-        agrid.setHorizontalSpacing(24)
-        n_main = n_adv = 0
-        for key, text, default, tip, advanced in [
-            ("game_watch", "Следить за играми", False,
-             "Находить запущенные игры, собирать их серверы и включать для них обход. "
-             "Если с обходом соединение стало хуже, IP убирается.", False),
-            ("auto_repick", "Сам чинить при сбоях", True,
-             "Каждые 10 минут и при смене сети проверять Discord и YouTube. Если они дважды подряд "
-             "не открываются — автоматически подобрать стратегию заново.", False),
-            ("auto_update", "Автообновление", True,
-             "При запуске проверять обновления zapret и ZapretAuto и ставить их автоматически.", False),
-            ("autostart", "Запускать вместе с Windows", False,
-             "Запускать ZapretAuto при входе в Windows (задача планировщика с правами администратора).", False),
-            ("game_udp", "Обход UDP для игр", False,
-             "Game filter UDP: обход UDP-трафика игр на портах 1024-65535. Включается сам, когда найдена игра.",
-             True),
-            ("game_tcp", "Обход TCP для игр", False,
-             "Game filter TCP: обход TCP-трафика игр на портах 1024-65535 (только адреса из ipset и списка игр).",
-             True),
-            ("auto_hostlist", "Сам находить заблокированные сайты", True,
-             "winws сам замечает сайты, которые не открываются из-за DPI, и включает для них обход. "
-             "Найденное видно во вкладке «Списки» → list-auto.txt (можно удалить лишнее).", True),
-            ("telegram", "Telegram (экспериментально)", False,
-             "Добавить подсети Telegram в обход. Помогает не всем провайдерам: если Telegram "
-             "заблокирован по IP, zapret бессилен — нужен прокси.", True),
-            ("zapret2", "zapret2 (эксперимент)", False,
-             "Новый движок zapret2: если сайт начинает блокироваться, обход сам переключает для него "
-             "другую стратегию — без перезапуска и без подбора на 2–4 минуты. Скачивается при включении (~4 МБ).",
-             True),
-        ]:
-            c = QCheckBox(text)
-            c.setToolTip(tip)
-            c.setChecked(bool(s.get(key, default)))
-            c.toggled.connect(lambda v, k=key: self.on_check(k, v))
-            self.cb[key] = c
-            if advanced:
-                agrid.addWidget(c, n_adv // 2, n_adv % 2)
-                n_adv += 1
-            else:
-                grid.addWidget(c, n_main // 2, n_main % 2)
-                n_main += 1
-        self.btn_adv = QPushButton(objectName="link")
-        self.btn_adv.setCursor(Qt.PointingHandCursor)
-        self.btn_adv.clicked.connect(lambda: self.set_advanced(not adv.isVisible()))
-        grid.addWidget(self.btn_adv, (n_main + 1) // 2, 0, 1, 2, Qt.AlignLeft)
-        grid.addWidget(adv, (n_main + 1) // 2 + 1, 0, 1, 2)
-        self.adv_box = adv
-        lay.addWidget(box)
-        self.box_settings = box
-        self.tabs = QTabWidget()
-        lay.addWidget(self.tabs, 1)
-        self.logbox = QPlainTextEdit(readOnly=True)
-        self.tabs.addTab(self.logbox, "Лог")
-        g = QWidget()
-        gl = QVBoxLayout(g)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Игра", "Адресов", "Пинг, мс", "Запущена"])
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.verticalHeader().hide()
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.games_empty = QLabel(objectName="empty")
-        self.games_empty.setAlignment(Qt.AlignCenter)
-        self.games_empty.setWordWrap(True)
-        gl.addWidget(self.games_empty, 1)
-        gl.addWidget(self.table)
-        r = QHBoxLayout()
-        b1 = QPushButton("Игнорировать")
-        b1.setToolTip("Больше не считать выбранную программу игрой")
-        b1.clicked.connect(self.ignore_game)
-        b2 = QPushButton("Добавить игру (exe)…")
-        b2.setToolTip("Выбрать exe игры вручную, если она не нашлась сама")
-        b2.clicked.connect(self.add_game)
-        b3 = QPushButton("Сбросить игру")
-        b3.setToolTip("Убрать собранные адреса выбранной игры")
-        b3.clicked.connect(self.reset_game)
-        b4 = QPushButton("Поделиться адресами…")
-        b4.setToolTip("Отправить найденные серверы игр в общую базу: у других игра заработает с первого запуска. "
-                      "Отправляются только адреса серверов, без вашего IP. Нужен аккаунт GitHub.")
-        b4.clicked.connect(self.share_games)
-        r.addWidget(b1)
-        r.addWidget(b2)
-        r.addWidget(b3)
-        r.addWidget(b4)
-        gl.addLayout(r)
-        self.tabs.addTab(g, "Игры")
-        u = QWidget()
-        ul = QVBoxLayout(u)
-        self.lbl_ver = QLabel()
-        ul.addWidget(self.lbl_ver)
-        r = QHBoxLayout()
-        self.btn_check = QPushButton("Проверить обновления")
-        self.btn_check.setToolTip("Проверить, есть ли новые версии zapret и ZapretAuto")
-        self.btn_check.clicked.connect(lambda: self.check_update(manual=True))
-        self.btn_update = QPushButton("Обновить")
-        self.btn_update.setToolTip("Скачать и установить новую версию zapret")
-        self.btn_update.clicked.connect(lambda: self.do_update(False))
-        r.addWidget(self.btn_check)
-        r.addWidget(self.btn_update)
-        ul.addLayout(r)
-        self.lbl_upd = QLabel(wordWrap=True)  # result of the last check: the button used to only write the log
-        ul.addWidget(self.lbl_upd)
-        ul.addStretch()
-        self.tabs.addTab(u, "Обновления")
-        d = QWidget()
-        dl = QVBoxLayout(d)
-        self.btn_diag = QPushButton("Найти проблемы")
-        self.btn_diag.setToolTip("Найти частые причины, по которым обход не работает")
-        self.btn_diag.clicked.connect(self.run_diag)
-        drow = QHBoxLayout()
-        drow.addWidget(self.btn_diag)
-        self.btn_report = QPushButton("Сохранить отчёт об ошибке…")
-        self.btn_report.setToolTip("Собрать журнал, диагностику и настройки в zip, чтобы отправить разработчику. "
-                                   "Имя пользователя Windows в отчёте скрыто.")
-        self.btn_report.clicked.connect(self.save_report)
-        drow.addWidget(self.btn_report)
-        drow.addStretch()
-        dl.addLayout(drow)
-        self.diag_table = QTableWidget(0, 3)
-        self.diag_table.setHorizontalHeaderLabels(["Проверка", "Результат", ""])
-        hh = self.diag_table.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        hh.setSectionResizeMode(1, QHeaderView.Stretch)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.diag_table.verticalHeader().hide()
-        self.diag_table.setWordWrap(True)
-        self.diag_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        dl.addWidget(self.diag_table)
-        self.tabs.addTab(d, "Диагностика")
-        st = QWidget()
-        stl = QVBoxLayout(st)
-        self.lbl_stats = QLabel()
-        self.lbl_stats.setWordWrap(True)
-        self.lbl_stats.setTextFormat(Qt.RichText)
-        stl.addWidget(self.lbl_stats)
-        stl.addStretch()
-        self.tabs.addTab(st, "Статистика")
-        self.tabs.currentChanged.connect(lambda i: self.fill_stats() if self.tabs.widget(i) is st else None)
-        ls = QWidget()
-        ll = QVBoxLayout(ls)
-        self.list_combo = QComboBox()
-        self.list_combo.addItems(list(lists.user_list_paths()))
-        self.list_combo.currentIndexChanged.connect(self.load_list)
-        ll.addWidget(self.list_combo)
-        self.list_edit = QPlainTextEdit()
-        ll.addWidget(self.list_edit, 1)
-        r = QHBoxLayout()
-        b = QPushButton("Сохранить")
-        b.clicked.connect(self.save_list)
-        self.btn_ipset = QPushButton("Обновить ipset с GitHub")
-        self.btn_ipset.setToolTip("Скачать свежий список IP-диапазонов (Cloudflare и др.) для обхода")
-        self.btn_ipset.clicked.connect(self.update_ipset)
-        r.addWidget(b)
-        r.addWidget(self.btn_ipset)
-        ll.addLayout(r)
-        self.tabs.addTab(ls, "Списки")
-        self.tab_lists = self.tabs.indexOf(ls)
+        self.tabs.addTab(self._page_home(), "Главная", "home")
+        self.page_games = self._page_games()
+        self.tabs.addTab(self.page_games, "Игры", "games")
+        self.tabs.addTab(self._page_settings(), "Настройки", "settings")
+        self.tabs.addTab(self._page_diag(), "Диагностика", "diag")
+        log = self._page_log()
+        self.tabs.addTab(log, "Журнал", "log")
+        self.tabs.currentChanged.connect(lambda i: self.fill_stats() if self.tabs.widget(i) is log else None)
+        self.tabs.currentChanged.connect(lambda i: self.fill_games() if self.tabs.widget(i) is self.page_games
+                                         else None)
+        lists_page = self._page_lists()
+        self.tabs.addTab(lists_page, "Списки", "lists")
+        from PySide6.QtGui import QKeySequence, QShortcut
+        for i in range(self.tabs.count()):  # keyboard navigation for the rail
+            QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self.tabs.setCurrentIndex(i))
+        self.tab_lists = self.tabs.indexOf(lists_page)
         self.load_list()
         self.set_advanced(bool(self.settings.get("show_advanced")), save=False)
         ver = "недоступно"
@@ -324,12 +136,287 @@ class MainWindow(QWidget):
             except Exception:  # noqa: BLE001
                 pass
         from app import __version__
-        self.lbl_ver.setText(f"ZapretAuto {__version__} | zapret {ver}")
+        self.lbl_ver.setText(f"ZapretAuto {__version__} · zapret {ver}")
         if not updater:
             self.btn_check.setEnabled(False)
             self.btn_update.setEnabled(False)
         if not gamewatch:
             self.cb["game_watch"].setEnabled(False)
+
+    @staticmethod
+    def _page(margins=(28, 24, 28, 24)) -> tuple[QWidget, QVBoxLayout]:
+        w = QWidget(objectName="page")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(*margins)
+        lay.setSpacing(12)
+        return w, lay
+
+    @staticmethod
+    def _header(lay: QVBoxLayout, title: str, text: str = "") -> None:
+        lay.addWidget(QLabel(title, objectName="h1"))
+        if text:
+            lay.addWidget(QLabel(text, objectName="muted", wordWrap=True))
+        lay.addSpacing(4)
+
+    def _page_home(self) -> QWidget:
+        page, lay = self._page()
+        hero = QHBoxLayout()
+        hero.setSpacing(24)
+        self.btn_toggle = PowerButton()
+        self.btn_toggle.setToolTip("Включить или выключить обход блокировок")
+        self.btn_toggle.clicked.connect(self.toggle)
+        hero.addWidget(self.btn_toggle, 0, Qt.AlignVCenter)
+        col = QVBoxLayout()
+        col.setSpacing(6)
+        col.addStretch()
+        self.status = QLabel(objectName="title")
+        self.substatus = QLabel(objectName="sub", wordWrap=True)
+        col.addWidget(self.status)
+        col.addWidget(self.substatus)
+        self.chips = QHBoxLayout()
+        self.chips.setSpacing(8)
+        self.chips.setContentsMargins(0, 6, 0, 0)
+        col.addLayout(self.chips)
+        col.addStretch()
+        hero.addLayout(col, 1)
+        lay.addLayout(hero)
+        self.progress = QProgressBar(objectName="thin")
+        self.progress.setTextVisible(False)
+        self.progress.setRange(0, 0)
+        self.progress.hide()
+        lay.addWidget(self.progress)
+
+        acts = QHBoxLayout()
+        acts.setSpacing(8)
+        self.btn_check_access = QPushButton("Проверить доступ", objectName="tonal")
+        self.btn_check_access.setToolTip("Проверить, открываются ли Discord, YouTube и голосовой чат прямо сейчас")
+        self.btn_check_access.clicked.connect(lambda: self.check_access())
+        self.btn_site = QPushButton("Сайт не открывается…")
+        self.btn_site.setToolTip("Проверить конкретный сайт и, если поможет, добавить его в обход")
+        self.btn_site.clicked.connect(self.check_site)
+        self.btn_cancel = QPushButton("Отменить подбор", objectName="text")
+        self.btn_cancel.setToolTip("Остановить подбор; обход вернётся к прежней стратегии")
+        self.btn_cancel.clicked.connect(self.cancel_busy)
+        self.btn_cancel.hide()
+        for b in (self.btn_check_access, self.btn_site, self.btn_cancel):
+            b.setCursor(Qt.PointingHandCursor)
+            acts.addWidget(b)
+        acts.addStretch()
+        lay.addLayout(acts)
+
+        card = QFrame(objectName="card")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(20, 18, 20, 20)
+        cl.setSpacing(10)
+        cl.addWidget(QLabel("Стратегия", objectName="h2"))
+        cl.addWidget(QLabel("Как именно обходить блокировки у вашего провайдера. Подбор проверяет все варианты "
+                            "на Discord, YouTube и голосе и собирает лучшую комбинацию (2–4 минуты).",
+                            objectName="muted", wordWrap=True))
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.combo = QComboBox()
+        self.combo.setToolTip("«Авто» — результат подбора. Можно выбрать стратегию вручную.")
+        self.combo.addItem(AUTO)
+        self.combo.addItems([s.name for s in strategies.load_all()])
+        self.combo.activated.connect(self.on_combo)
+        row.addWidget(self.combo, 1)
+        self.btn_auto = QPushButton("Подобрать стратегию", objectName="primary")
+        self.btn_auto.setCursor(Qt.PointingHandCursor)
+        self.btn_auto.setToolTip("Проверить все стратегии и собрать лучшую комбинацию. Занимает 2–4 минуты.")
+        self.btn_auto.clicked.connect(self.autopick)
+        row.addWidget(self.btn_auto)
+        cl.addLayout(row)
+        lay.addWidget(card)
+        recent = QFrame(objectName="card")
+        rl = QVBoxLayout(recent)
+        rl.setContentsMargins(20, 14, 20, 16)
+        rl.setSpacing(6)
+        rl.addWidget(QLabel("Последние события", objectName="h2"))
+        self.lbl_recent = QLabel("Пока ничего не происходило.", objectName="muted", wordWrap=True)
+        self.lbl_recent.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        rl.addWidget(self.lbl_recent)
+        lay.addWidget(recent)
+        lay.addStretch(1)
+        return page
+
+    def _page_games(self) -> QWidget:
+        page, lay = self._page()
+        self._header(lay, "Игры", "Запущенные игры находятся сами: программа собирает их серверы и включает для них "
+                                  "обход. Серверы входа и лаунчеров обход не трогает.")
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Игра", "Адресов", "Пинг, мс", "Сейчас"])
+        hh = self.table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Stretch)
+        for i in (1, 2, 3):
+            hh.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setShowGrid(False)
+        self.table.verticalHeader().hide()
+        self.games_empty = QLabel(objectName="empty", alignment=Qt.AlignCenter, wordWrap=True)
+        lay.addWidget(self.games_empty, 1)
+        lay.addWidget(self.table, 1)
+        r = QHBoxLayout()
+        r.setSpacing(8)
+        b2 = QPushButton("Добавить игру…", objectName="tonal")
+        b2.setToolTip("Выбрать exe игры вручную, если она не нашлась сама")
+        b2.clicked.connect(self.add_game)
+        b1 = self.btn_ignore = QPushButton("Не игра")
+        b1.setToolTip("Больше не считать выбранную программу игрой и убрать её адреса из обхода")
+        b1.clicked.connect(self.ignore_game)
+        b3 = self.btn_reset = QPushButton("Сбросить адреса")
+        b3.setToolTip("Убрать собранные адреса выбранной игры (если после добавления ей стало хуже)")
+        b3.clicked.connect(self.reset_game)
+        b4 = QPushButton("Поделиться адресами…", objectName="text")
+        b4.setToolTip("Отправить найденные серверы игр в общую базу: у других игра заработает с первого запуска. "
+                      "Отправляются только адреса серверов, без вашего IP. Нужен аккаунт GitHub.")
+        b4.clicked.connect(self.share_games)
+        for b in (b2, b1, b3):
+            r.addWidget(b)
+        for b in (b1, b3):  # act on the selected game: off until one is selected
+            b.setEnabled(False)
+        self.table.itemSelectionChanged.connect(
+            lambda: [b.setEnabled(bool(self.table.selectedItems())) for b in (b1, b3)])
+        r.addStretch()
+        r.addWidget(b4)
+        lay.addLayout(r)
+        return page
+
+    def _page_settings(self) -> QWidget:
+        page, lay = self._page((28, 24, 28, 0))
+        self._header(lay, "Настройки")
+        area = QScrollArea(widgetResizable=True)
+        body = QWidget(objectName="page")
+        self.box_settings = body  # disabled while busy: a toggle would restart winws mid-pick
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(0, 0, 8, 24)
+        bl.setSpacing(0)
+        s = self.settings
+        self.cb = {}
+        groups = {}
+        for sec, title in (("main", "Основное"), ("adv", "Дополнительно")):
+            if sec == "adv":
+                self.btn_adv = QPushButton(objectName="text")
+                self.btn_adv.setCursor(Qt.PointingHandCursor)
+                self.btn_adv.clicked.connect(lambda: self.set_advanced(not self.adv_box.isVisible()))
+                bl.addWidget(self.btn_adv, 0, Qt.AlignLeft)
+            box = QFrame(objectName="group")
+            gl = QVBoxLayout(box)
+            gl.setContentsMargins(4, 4, 4, 4)
+            gl.setSpacing(0)
+            if sec == "main":
+                bl.addWidget(QLabel(title, objectName="section"))
+            bl.addWidget(box)
+            groups[sec] = gl
+            if sec == "adv":
+                self.adv_box = box
+        for key, title, text, default, sec in self.SETTINGS:
+            sw = Switch()
+            sw.setChecked(bool(s.get(key, default)))
+            sw.setAccessibleName(title)
+            sw.setToolTip(text)  # short description on hover
+            sw.toggled.connect(lambda v, k=key: self.on_check(k, v))
+            self.cb[key] = sw
+            groups[sec].addWidget(SettingRow(title, text, sw))
+        bl.addWidget(QLabel("Обновления", objectName="section"))
+        upd = QFrame(objectName="group")
+        ul = QVBoxLayout(upd)
+        ul.setContentsMargins(16, 14, 16, 16)
+        ul.setSpacing(10)
+        self.lbl_ver = QLabel(objectName="rowTitle")
+        ul.addWidget(self.lbl_ver)
+        self.lbl_upd = QLabel(objectName="muted", wordWrap=True)  # result of the last check
+        ul.addWidget(self.lbl_upd)
+        r = QHBoxLayout()
+        r.setSpacing(8)
+        self.btn_check = QPushButton("Проверить обновления", objectName="tonal")
+        self.btn_check.setToolTip("Проверить, есть ли новые версии zapret и ZapretAuto")
+        self.btn_check.clicked.connect(lambda: self.check_update(manual=True))
+        self.btn_update = QPushButton("Обновить zapret")
+        self.btn_update.setToolTip("Скачать и установить новую версию zapret")
+        self.btn_update.clicked.connect(lambda: self.do_update(False))
+        r.addWidget(self.btn_check)
+        r.addWidget(self.btn_update)
+        r.addStretch()
+        ul.addLayout(r)
+        bl.addWidget(upd)
+        bl.addStretch(1)
+        area.setWidget(body)
+        lay.addWidget(area, 1)
+        return page
+
+    def _page_diag(self) -> QWidget:
+        page, lay = self._page()
+        self._header(lay, "Диагностика", "Поиск частых причин, по которым обход не работает: конфликтующие "
+                                         "программы, зависший драйвер, подмена DNS и другое.")
+        drow = QHBoxLayout()
+        drow.setSpacing(8)
+        self.btn_diag = QPushButton("Найти проблемы", objectName="primary")
+        self.btn_diag.clicked.connect(self.run_diag)
+        drow.addWidget(self.btn_diag)
+        self.btn_report = QPushButton("Сохранить отчёт об ошибке…")
+        self.btn_report.setToolTip("Собрать журнал, диагностику и настройки в zip, чтобы отправить разработчику. "
+                                   "Имя пользователя Windows в отчёте скрыто.")
+        self.btn_report.clicked.connect(self.save_report)
+        drow.addWidget(self.btn_report)
+        drow.addStretch()
+        lay.addLayout(drow)
+        self.diag_table = QTableWidget(0, 3)
+        self.diag_table.setHorizontalHeaderLabels(["Проверка", "Результат", ""])
+        hh = self.diag_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.diag_table.verticalHeader().hide()
+        self.diag_table.setShowGrid(False)
+        self.diag_table.setWordWrap(True)
+        self.diag_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        lay.addWidget(self.diag_table, 1)
+        return page
+
+    def _page_log(self) -> QWidget:
+        page, lay = self._page()
+        self._header(lay, "Журнал")
+        stats = QFrame(objectName="card")
+        sl = QVBoxLayout(stats)
+        sl.setContentsMargins(20, 14, 20, 14)
+        self.lbl_stats = QLabel(wordWrap=True, textFormat=Qt.RichText)
+        sl.addWidget(self.lbl_stats)
+        lay.addWidget(stats)
+        self.logbox = QPlainTextEdit(readOnly=True)
+        self.logbox.setMaximumBlockCount(5000)  # runs for weeks: keep the widget small
+        lay.addWidget(self.logbox, 1)
+        return page
+
+    def _page_lists(self) -> QWidget:
+        page, lay = self._page()
+        self._header(lay, "Списки", "Ваши списки сайтов и адресов. Обход перечитывает их сам после сохранения.")
+        self.list_combo = QComboBox()
+        names = {"list-general-user.txt": "Сайты, для которых включить обход",
+                 "list-exclude-user.txt": "Сайты, которые обход не трогает",
+                 "ipset-exclude-user.txt": "IP-адреса, которые обход не трогает",
+                 "games_manual": "Адреса игровых серверов (вручную)"}
+        for key in lists.user_list_paths():
+            self.list_combo.addItem(names.get(key, key), key)
+        self.list_combo.currentIndexChanged.connect(self.load_list)
+        lay.addWidget(self.list_combo)
+        self.list_edit = QPlainTextEdit(objectName="editor")
+        lay.addWidget(self.list_edit, 1)
+        r = QHBoxLayout()
+        r.setSpacing(8)
+        b = QPushButton("Сохранить", objectName="primary")
+        b.clicked.connect(self.save_list)
+        self.btn_ipset = QPushButton("Обновить IP-список с GitHub")
+        self.btn_ipset.setToolTip("Скачать свежий список IP-диапазонов (Cloudflare и др.) для обхода")
+        self.btn_ipset.clicked.connect(self.update_ipset)
+        r.addWidget(b)
+        r.addWidget(self.btn_ipset)
+        r.addStretch()
+        lay.addLayout(r)
+        return page
 
     # ---------- diagnostics / lists ----------
     def run_diag(self):
@@ -366,14 +453,14 @@ class MainWindow(QWidget):
         self.run_diag()
 
     def load_list(self, *_):
-        p = lists.user_list_paths()[self.list_combo.currentText()]
+        p = lists.user_list_paths()[self.list_combo.currentData()]
         try:
             self.list_edit.setPlainText(p.read_text(encoding="utf-8"))
         except OSError:
             self.list_edit.setPlainText("")
 
     def save_list(self):
-        p = lists.user_list_paths()[self.list_combo.currentText()]
+        p = lists.user_list_paths()[self.list_combo.currentData()]
         p.parent.mkdir(parents=True, exist_ok=True)
         text = self.list_edit.toPlainText()
         if not any(l.strip() and not l.strip().startswith("#") for l in text.splitlines()):
@@ -413,7 +500,10 @@ class MainWindow(QWidget):
 
     # ---------- helpers ----------
     def log(self, text: str):
+        line = time.strftime("%H:%M ") + text
         self.logbox.appendPlainText(time.strftime("%H:%M:%S ") + text)
+        self._recent = (getattr(self, "_recent", []) + [line])[-4:]
+        self.lbl_recent.setText("\n".join(self._recent))
         logs.log.info(text)
 
     def showEvent(self, e):
@@ -430,15 +520,14 @@ class MainWindow(QWidget):
                 pass
 
     def set_chips(self, res: dict):
-        """Colored pills: service ✓/✗ after an access check."""
+        """Service status chips after an access check: a dot and the name, and the words when it fails."""
         while self.chips.count():
             it = self.chips.takeAt(0)
             if it.widget():
+                it.widget().hide()  # deleteLater waits for the event loop: the old chip showed under the new
                 it.widget().deleteLater()
         for name, ok in res.items():
-            c = QLabel(f"{'✓' if ok else '✗'} {name}", objectName="chip")
-            c.setProperty("ok", "yes" if ok else "no")
-            self.chips.addWidget(c)
+            self.chips.addWidget(StatusChip(name, ok))
         self.chips.addStretch()
 
     def show_window(self):
@@ -482,12 +571,14 @@ class MainWindow(QWidget):
         self.status.setText(title)
         if self.error and not self.busy:
             self.substatus.setText(self.error)
-            self.substatus.setStyleSheet("color:#f87171")
-        else:
-            self.substatus.setStyleSheet("")
-            if not self.busy:
-                self.substatus.setText(f"Стратегия: {self.describe()}" if run
-                                       else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
+        elif not self.busy:
+            self.substatus.setText(f"Стратегия: {self.describe()}" if run
+                                   else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
+        err = "yes" if self.error and not self.busy else "no"
+        if self.substatus.property("error") != err:
+            self.substatus.setProperty("error", err)
+            self.substatus.style().unpolish(self.substatus)
+            self.substatus.style().polish(self.substatus)
         last = getattr(self, "_last_check", None)
         tip = f"ZapretAuto — {title}\n{self.describe()}"
         if last:
@@ -499,10 +590,7 @@ class MainWindow(QWidget):
             w.setEnabled(not self.busy)
         if self._zapret2_on():  # zapret2 picks strategies per site itself: the winws list does not apply
             self.combo.setEnabled(False)
-        self.btn_toggle.setProperty("state", state)
-        self.btn_toggle.setIcon(power_icon({"on": "#22c55e", "busy": "#f59e0b"}.get(state, "#9aa3b5")))
-        self.btn_toggle.style().unpolish(self.btn_toggle)
-        self.btn_toggle.style().polish(self.btn_toggle)
+        self.btn_toggle.set_state(state)
         self.act_toggle.setText("Выключить" if run else "Включить")
         self.btn_auto.setEnabled(not self.busy)
         c = self.settings.get("strategy")
@@ -532,7 +620,7 @@ class MainWindow(QWidget):
             self._expect_running = True
         except Exception as e:  # noqa: BLE001
             self.log(f"ошибка запуска: {e}")
-            self.error = "Не удалось запустить обход. Откройте вкладку «Диагностика» → «Найти проблемы»."
+            self.error = "Не удалось запустить обход. Откройте раздел «Диагностика» → «Найти проблемы»."
             self._explain_failure()
         self.refresh()
         return self.runner.running
@@ -554,15 +642,20 @@ class MainWindow(QWidget):
         s = stats.summary(7)
         last = time.strftime("%d.%m %H:%M", time.localtime(s["last_repick"])) if s["last_repick"] else "не было"
         pct = f"{s['ok_pct']}%" if s["ok_pct"] is not None else "ещё нет данных"
+        rows = [("Обход работал", f"{s['uptime_h']} ч"),
+                ("Фоновых проверок", f"{s['checks']}, успешных {pct}" if s["checks"] else "ещё не было"),
+                ("Сам чинил обход", f"{s['repicks']} раз, последний: {last}"),
+                ("Неожиданных остановок обхода", str(s["crashes"])),
+                ("Обновлений IP-списка", str(s["ipset"]))]
+        if s["switches"]:
+            rows.append(("Смены стратегии", ", ".join(f"{time.strftime('%d.%m %H:%M', time.localtime(t))} — {n}"
+                                                      for t, n in s["switches"][-3:])))
+        muted = "#c3c6cf"
         self.lbl_stats.setText(
-            f"<h3>За последние {s['days']} дней</h3>"
-            f"<p>Обход работал: <b>{s['uptime_h']} ч</b></p>"
-            f"<p>Фоновых проверок: <b>{s['checks']}</b>, успешных: <b>{pct}</b></p>"
-            f"<p>Программа сама чинила обход: <b>{s['repicks']}</b> раз (последний: {last})</p>"
-            f"<p>Неожиданных остановок winws: <b>{s['crashes']}</b></p>"
-            f"<p>Обновлений списка ipset: <b>{s['ipset']}</b></p>"
-            + ("<p>Смены стратегии: " + ", ".join(f"{time.strftime('%d.%m %H:%M', time.localtime(t))} → {n}"
-                                                for t, n in s["switches"][-5:]) + "</p>" if s["switches"] else ""))
+            f"<div style='font-weight:600; margin-bottom:6px'>За последние {s['days']} дней</div>"
+            "<table cellspacing='0' cellpadding='3'>"
+            + "".join(f"<tr><td style='color:{muted}; padding-right:18px'>{k}</td><td>{v}</td></tr>" for k, v in rows)
+            + "</table>")
 
     def set_advanced(self, on: bool, save: bool = True):
         """Show/hide expert settings and the raw lists editor."""
@@ -716,7 +809,7 @@ class MainWindow(QWidget):
                 self.start_runner()
             else:
                 self._expect_running = False
-                self.error = "Обход постоянно падает. Проверьте антивирус и вкладку «Диагностика»."
+                self.error = "Обход постоянно падает. Проверьте антивирус и раздел «Диагностика»."
                 self.log("winws падает слишком часто — автоперезапуск остановлен")
                 self.tray.showMessage("ZapretAuto", self.error)
                 self._explain_failure()
@@ -738,6 +831,8 @@ class MainWindow(QWidget):
                 if ok:
                     stats.record("ipset")  # winws re-reads ipset-all.txt by itself
             self._run(lambda log: lists.update_ipset(log), ipset_done)
+        if self.isVisible() and self.tabs.currentWidget() is self.page_games:
+            self.fill_games()  # live ping / «Сейчас» while the page is open
         if now >= self._next_health:
             self._next_health = now + 600
             self._health()
@@ -943,7 +1038,7 @@ class MainWindow(QWidget):
         self.btn_cancel.setEnabled(True)
         self.log("автоподбор завершён" if res else ("подбор отменён" if cancelled else "автоподбор не дал результата"))
         if not res and not cancelled:
-            self.error = "Подбор не удался — подробности во вкладке «Лог»."
+            self.error = "Подбор не удался — подробности в разделе «Журнал»."
         if res or self.settings.get("strategy"):
             self.start_runner()  # the pick stopped the bypass: always bring it back (old strategy if pick failed)
         if getattr(self, "_repair", False):  # this pick was an automatic repair: tell how it ended
@@ -1005,12 +1100,14 @@ class MainWindow(QWidget):
         self.watcher = gamewatch.GameWatcher(lambda *a: self.bridge.games_changed.emit(), self.bridge.log.emit)
         self.watcher.start()
         self.log("слежение за играми включено")
+        self.fill_games()  # known games show at once: the table used to fill only when a game got new IPs
 
     def stop_watcher(self):
         if self.watcher:
             self.watcher.stop()
             self.watcher = None
             self.log("слежение за играми выключено")
+            self.fill_games()
 
     def _game_flags(self) -> tuple[bool, bool]:
         wanted = self._game_udp_wanted()
@@ -1102,7 +1199,7 @@ class MainWindow(QWidget):
                 return
             self.save(games_force=sorted(set(self.settings.get("games_force", [])) | {exe}),
                       games_ignore=[x for x in self.settings.get("games_ignore", []) if x.lower() != name],
-                      game_watch=True)  # adding a game by hand means "watch it": also undo an earlier «Игнорировать»
+                      game_watch=True)  # adding a game by hand means "watch it": also undo an earlier «Не игра»
             if not self.watcher:
                 self.cb["game_watch"].blockSignals(True)
                 self.cb["game_watch"].setChecked(True)
