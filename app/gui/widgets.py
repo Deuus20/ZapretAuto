@@ -126,6 +126,24 @@ class SettingRow(QWidget):
         self.title.setEnabled(self.switch.isEnabled())
 
 
+class InputRow(QWidget):
+    """One line: title on the left, a short text field on the right; the description shows on hover."""
+
+    def __init__(self, title: str, text: str, edit, parent=None):
+        super().__init__(parent)
+        self.setObjectName("row")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setToolTip(text)
+        self.edit = edit
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(12, 4, 8, 4)
+        lay.setSpacing(12)
+        lay.addWidget(QLabel(title, objectName="rowTitle"), 1)
+        edit.setToolTip(text)
+        edit.setFixedWidth(190)
+        lay.addWidget(edit, 0, Qt.AlignVCenter)
+
+
 class RailButton(QAbstractButton):
     """Navigation rail destination: icon in a pill-shaped active indicator, label below."""
 

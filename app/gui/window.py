@@ -8,8 +8,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHeaderView, QHBoxLayout, QInputDialog,
-                               QLabel, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
-                               QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+                               QScrollArea, QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from app import diag, lists, logs, stats, strategies, tester
 from app.runner import Runner
@@ -28,7 +28,7 @@ TASK = "ZapretAuto"
 AUTO = "Авто (результат подбора)"
 UPDATE_EVERY = 6 * 3600  # s between background update checks
 from app.gui.style import COLORS, STYLE, app_icon, init_fonts  # noqa: E402
-from app.gui.widgets import PowerButton, Pages, Rail, SettingRow, StatusChip, Switch  # noqa: E402
+from app.gui.widgets import InputRow, PowerButton, Pages, Rail, SettingRow, StatusChip, Switch  # noqa: E402
 from app.gui.worker import Bridge, Worker  # noqa: E402
 
 
@@ -343,6 +343,16 @@ class MainWindow(QWidget):
             sw.toggled.connect(lambda v, k=key: self.on_check(k, v))
             self.cb[key] = sw
             groups[sec].addWidget(SettingRow(title, text, sw))
+        self.ports = {}
+        for proto, default in (("tcp", strategies.GAME_TCP), ("udp", strategies.GAME_UDP)):
+            e = QLineEdit(s.get(f"game_ports_{proto}") or "", placeholderText=default)
+            e.editingFinished.connect(lambda p=proto: self.on_ports(p))
+            self.ports[proto] = e
+            groups["adv"].addWidget(InputRow(
+                f"Порты игр, {proto.upper()}",
+                f"Какие порты {proto.upper()} обходить для игр (когда обход для игр включён). Через запятую, "
+                f"диапазоны через дефис. Пусто — по умолчанию: {default}"
+                + (" (1935 пропущен — трансляции OBS)." if proto == "tcp" else "."), e))
         bl.addWidget(QLabel("Обновления", objectName="section"))
         upd = QFrame(objectName="group")
         ul = QVBoxLayout(upd)
@@ -352,6 +362,7 @@ class MainWindow(QWidget):
         ul.addWidget(self.lbl_ver)
         self.lbl_upd = QLabel(objectName="muted", wordWrap=True)  # result of the last check
         ul.addWidget(self.lbl_upd)
+        self.lbl_upd.hide()  # shown once there is a result: an empty line left a gap
         r = QHBoxLayout()
         r.setSpacing(8)
         self.btn_check = QPushButton("Проверить обновления", objectName="tonal")
@@ -1012,6 +1023,22 @@ class MainWindow(QWidget):
         from app import zapret2
         return zapret2.installed()
 
+    def on_ports(self, proto: str):
+        """Save the game filter ports; a bad value is shown in red and not applied."""
+        e = self.ports[proto]
+        text = e.text().replace(" ", "")
+        ok = not text or strategies.valid_ports(text)
+        e.setProperty("error", "no" if ok else "yes")
+        e.style().unpolish(e)
+        e.style().polish(e)
+        key = f"game_ports_{proto}"
+        if not ok or text == (self.settings.get(key) or ""):
+            return
+        self.save(**{key: text})
+        self.log(f"порты игр {proto.upper()}: {text or 'по умолчанию'}")
+        if self.runner.running and not self.busy and self._game_flags()[0 if proto == "tcp" else 1]:
+            self.start_runner()  # the filter ports are fixed at start
+
     def set_zapret2(self, on: bool):
         """Switch the engine: download winws2 on first use, then restart the bypass with it (or back)."""
         from app import zapret2
@@ -1337,6 +1364,7 @@ class MainWindow(QWidget):
             self._upd = {}
             if manual:  # a click only checks; an auto check still in flight must not start an update now
                 self._auto_check = False
+                self.lbl_upd.show()
                 self.lbl_upd.setText("Проверяю…")
                 self.btn_check.setEnabled(False)
             updater.check_async(lambda tag, newer: self.bridge.update_checked.emit(tag, newer))
@@ -1346,6 +1374,7 @@ class MainWindow(QWidget):
     def _show_upd(self, key, text):
         self._upd = {**getattr(self, "_upd", {}), key: text}
         if len(self._upd) == 2:  # both answers in (zapret + app)
+            self.lbl_upd.show()
             self.lbl_upd.setText(f"{self._upd['app']}. {self._upd['zapret']}. Проверено в {time.strftime('%H:%M')}.")
             self.btn_check.setEnabled(True)
 
@@ -1367,6 +1396,7 @@ class MainWindow(QWidget):
                     QTimer.singleShot(1500, self.quit)
                 else:
                     self.log("самообновление не выполнено")
+                    self.lbl_upd.show()
                     self.lbl_upd.setText(f"Не удалось установить ZapretAuto {tag} — подробности в журнале.")
             self._app_updating = True  # two checks at once downloaded and ran the installer twice
             self._run(lambda log: updater.app_update(log), done)

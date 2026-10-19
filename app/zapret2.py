@@ -133,8 +133,9 @@ class Strategy2:
 
     def argv(self, game_tcp: bool = False, game_udp: bool = False, auto_hostlist: bool = False) -> list[str]:
         r, ls = root(), paths.LISTS
-        gt = strategies.GAME_TCP if game_tcp else GAME_OFF
-        gu = "1024-65535" if game_udp else GAME_OFF
+        pt, pu = strategies.game_ports()
+        gt = pt if game_tcp else GAME_OFF
+        gu = pu if game_udp else GAME_OFF
         hosts = [f"--hostlist={ls / 'list-general.txt'}", f"--hostlist={ls / 'list-general-user.txt'}",
                  f"--hostlist={ls / 'list-google.txt'}"]
         if auto_hostlist:

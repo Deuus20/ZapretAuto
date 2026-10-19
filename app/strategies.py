@@ -8,6 +8,29 @@ from . import paths
 
 GAME_OFF = "12"  # upstream uses a dummy port when the game filter is disabled
 GAME_TCP = "1024-1934,1936-65535"  # game filter TCP minus RTMP (1935): desyncing it broke OBS streams (Flowseal 1.10.3)
+GAME_UDP = "1024-65535"
+_PORTS = re.compile(r"^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$")
+
+
+def valid_ports(s: str) -> bool:
+    """'1024-1934,1936-65535': ports 1..65535, ranges low-high, comma-separated (WinDivert/winws syntax)."""
+    s = (s or "").replace(" ", "")
+    if not _PORTS.match(s):
+        return False
+    for part in s.split(","):
+        lo, _, hi = part.partition("-")
+        lo, hi = int(lo), int(hi or lo)
+        if not (1 <= lo <= hi <= 65535):
+            return False
+    return True
+
+
+def game_ports() -> tuple[str, str]:
+    """(TCP, UDP) ports of the game filter: the user's choice (settings game_ports_tcp/udp) or the defaults."""
+    from .settings import load_settings
+    st = load_settings()
+    t, u = (st.get("game_ports_tcp") or "").replace(" ", ""), (st.get("game_ports_udp") or "").replace(" ", "")
+    return (t if valid_ports(t) else GAME_TCP), (u if valid_ports(u) else GAME_UDP)
 
 
 @dataclass
@@ -39,11 +62,12 @@ class Strategy:
     profiles: list[Profile] = field(default_factory=list)
 
     def argv(self, game_tcp: bool = False, game_udp: bool = False, auto_hostlist: bool = False) -> list[str]:
+        gt, gu = game_ports()
         subs = {
             "%BIN%": str(paths.BIN) + "\\",
             "%LISTS%": str(paths.LISTS) + "\\",
-            "%GameFilterTCP%": GAME_TCP if game_tcp else GAME_OFF,
-            "%GameFilterUDP%": "1024-65535" if game_udp else GAME_OFF,
+            "%GameFilterTCP%": gt if game_tcp else GAME_OFF,
+            "%GameFilterUDP%": gu if game_udp else GAME_OFF,
         }
 
         def sub(s: str) -> str:
