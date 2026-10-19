@@ -1009,21 +1009,26 @@ class MainWindow(QWidget):
                                    "да" if g.get("active") else "нет"]):
                 self.table.setItem(i, j, QTableWidgetItem(t))
 
-    def ignore_game(self):
+    def _selected_game(self) -> str | None:
         r = self.table.currentRow()
-        if r < 0:
+        if r < 0 or not self.table.item(r, 0):
+            QMessageBox.information(self, "ZapretAuto", "Сначала выберите игру в списке.")
+            return None
+        return self.table.item(r, 0).text()
+
+    def ignore_game(self):
+        exe = self._selected_game()
+        if not exe:
             return
-        exe = self.table.item(r, 0).text()
         self.save(games_ignore=sorted(set(self.settings.get("games_ignore", [])) | {exe}))
         if self.watcher:  # not a game: its servers must leave the game ipset (and the game filter)
             self.watcher.reset_game(exe)
         self.fill_games()
 
     def reset_game(self):
-        r = self.table.currentRow()
-        if r < 0 or not self.watcher:
+        exe = self._selected_game()
+        if not exe or not self.watcher:
             return
-        exe = self.table.item(r, 0).text()
         self.watcher.reset_game(exe)
         self.log(f"IP игры сброшены: {exe}")
         self.fill_games()
@@ -1118,17 +1123,34 @@ class MainWindow(QWidget):
     def _update_done(self, ok, was, auto):
         self.busy = False
         self.log("обновление завершено" if ok else "обновление не выполнено")
-        if ok:
-            if auto:
-                self.autopick()
-                return
-            if was:
-                self.start_runner()
-            if QMessageBox.question(self, "ZapretAuto", "Обновлено. Запустить автоподбор стратегии?") == QMessageBox.Yes:
-                self.autopick()
-        elif was:
+        if ok and (was or auto):
+            self._verify_after_update()
+            return
+        if was:
             self.start_runner()
         self.refresh()
+
+    def _verify_after_update(self):
+        """New zapret: keep the strategy if Discord/YouTube still open with it; re-pick (2–4 min offline) only if not."""
+        if not tester.chosen_strategy() or not self.start_runner():
+            self.log("стратегии после обновления нет — подбираю заново")
+            self.autopick()
+            return
+        self.busy, self.busy_text = True, "Проверяю обход после обновления…"
+        self.refresh()
+
+        def done(res):
+            self.busy = False
+            core = [v for k, v in (res or {}).items() if k in ("Discord", "YouTube")]
+            if res and not all(core):
+                self.log("после обновления не работает: " + ", ".join(k for k, v in res.items() if not v)
+                         + " — подбираю стратегию заново")
+                self.autopick()
+                return
+            self.log("после обновления всё работает — стратегия оставлена" if res else
+                     "проверить после обновления не удалось — стратегия оставлена")
+            self.refresh()
+        self._run(lambda log: tester.quick_check(light=True), done)
 
     # ---------- lifecycle ----------
     def startup(self, autostart=True):
