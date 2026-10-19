@@ -472,6 +472,10 @@ def _try_shared(runner: Runner, targets, log) -> dict | None:
 
 
 def chosen_strategy() -> strategies.Strategy | None:
+    if load_settings().get("zapret2"):  # experimental mode: winws2 rotates strategies per site by itself
+        from . import zapret2
+        if zapret2.installed():
+            return zapret2.Strategy2()
     c = load_settings().get("strategy")
     if not c:
         return None

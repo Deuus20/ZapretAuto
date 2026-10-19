@@ -125,7 +125,7 @@ def run_checks() -> list[dict]:
     res.append(_item("AdGuard", "warn" if ag else "ok", "AdguardSvc.exe запущен — может мешать" if ag else "нет"))
 
     wd = _svc_status("WinDivert")
-    stale = wd == "Running" and "winws.exe" not in procs
+    stale = wd == "Running" and "winws.exe" not in procs and "winws2.exe" not in procs  # winws2: zapret2 mode
     res.append(_item("Остаточный WinDivert", "warn" if stale else "ok",
                      "служба WinDivert работает без winws.exe" if stale else (wd or "нет"),
                      "remove_windivert" if stale else None))

@@ -63,7 +63,7 @@ def write_exclude() -> set[str]:
             return ips  # unchanged: don't touch the file (winws reloads lists on modification)
     except OSError:
         pass
-    f.write_text(text, encoding="utf-8")
+    paths.write_list(f, text)
     return ips
 
 

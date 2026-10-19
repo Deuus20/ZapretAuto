@@ -32,7 +32,7 @@ def update_ipset(log=print) -> bool:
     dst = paths.LISTS / "ipset-all.txt"
     if dst.exists():
         shutil.copy2(dst, dst.with_name(dst.name + ".bak"))
-    dst.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    paths.write_list(dst, "\n".join(lines) + "\n")
     # keep sync_lists from reverting it to the vendor copy
     (paths.LISTS / "ipset-all.txt.custom").write_text("updated from GitHub\n", encoding="utf-8")
     import time
@@ -57,7 +57,7 @@ def remove_user_domain(domain: str) -> None:
     f = paths.LISTS / "list-general-user.txt"
     if f.exists():
         keep = [l for l in f.read_text(encoding="utf-8").splitlines() if l.strip().lower() != domain.lower()]
-        f.write_text("\n".join(keep) + "\n", encoding="utf-8")
+        paths.write_list(f, "\n".join(keep) + "\n")
 
 
 def user_list_paths() -> dict:
@@ -82,7 +82,7 @@ def set_telegram(on: bool, log=print) -> None:
     f = paths.LISTS / "ipset-telegram.txt"
     paths.LISTS.mkdir(parents=True, exist_ok=True)
     if not on:
-        f.write_text("203.0.113.113/32\n", encoding="utf-8")
+        paths.write_list(f, "203.0.113.113/32\n")
         return
     cidrs = TELEGRAM_CIDRS
     try:
@@ -92,5 +92,5 @@ def set_telegram(on: bool, log=print) -> None:
             cidrs = got
     except requests.RequestException:
         pass
-    f.write_text("\n".join(cidrs) + "\n", encoding="utf-8")
+    paths.write_list(f, "\n".join(cidrs) + "\n")
     log(f"Telegram: {len(cidrs)} подсетей добавлено в обход")

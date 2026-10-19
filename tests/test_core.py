@@ -91,7 +91,7 @@ def test_classify_and_grouping():
     assert not gamewatch.classify(r"C:\Program Files\Google\Chrome\chrome.exe", {})
     ips = {f"5.5.5.{i}" for i in range(1, 5)}
     assert gamewatch._group(ips) == {"5.5.5.0/24"}
-    assert gamewatch._group(ips, ips) == ips  # CDN-only IPs stay exact
+    assert gamewatch._group({"5.5.5.1", "6.6.6.6"}) == {"5.5.5.1", "6.6.6.6"}
 
 
 def test_udp_heuristic_ignores_torrents():
@@ -661,3 +661,111 @@ def test_shared_games_db_seeds_known_games(tmp_path, monkeypatch):
         assert gamewatch.GameWatcher._shared_db()["games"]["new.exe"] == ["5.5.5.5"]
     finally:
         w.stop()
+
+
+def test_zapret2_argv_and_mode(tmp_path, monkeypatch):
+    from app import zapret2
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    a = zapret2.Strategy2().argv(True, False, True)
+    assert a[0].endswith("winws2.exe") and "--wf-tcp-out=80,443,2053,2083,2087,2096,8443,1024-65535" in a
+    assert "--wf-udp-out=443,12" in a                                   # UDP game filter off
+    circ = [x for x in a if x.startswith("--lua-desync=") and ":strategy=" in x]
+    nums = {int(x.rsplit("=", 1)[1]) for x in circ}
+    assert nums == set(range(1, len(zapret2.ROTATION) + 1))             # circular: 1..N without gaps
+    assert a.count("--lua-desync=circular:fails=3") == 3                # lists, discord.media, ipset-all
+    assert any("ipset-exclude-games.txt" in x for x in a) and any("list-auto.txt" in x for x in a)
+    settings.save_settings(zapret2=True, strategy={"base": "ALT8", "picks": {}})
+    assert tester.chosen_strategy().name == "ALT8"                      # not downloaded yet: normal engine
+    monkeypatch.setattr(zapret2, "installed", lambda: True)
+    assert tester.chosen_strategy().name == zapret2.NAME
+
+
+def test_zapret2_install_checks_hashes(tmp_path, monkeypatch):
+    from app import zapret2
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(zapret2, "FILES", {"a.txt": __import__("hashlib").sha256(b"good").hexdigest()})
+    resp = type("R", (), {"content": b"evil"})
+    monkeypatch.setattr(zapret2.requests, "get", lambda *a, **k: resp)
+    assert not zapret2.install(lambda m: None) and not (tmp_path / "zapret2" / "a.txt").exists()
+    resp.content = b"good"
+    assert zapret2.install(lambda m: None) and zapret2.installed()
+
+
+def _gui(tmp_path, monkeypatch, **st):
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(strategy={"base": "ALT8", "picks": {}}, ipset_updated=time.time(), **st)
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    return app, MainWindow()
+
+
+def _close(app, w):
+    w.tray.hide()
+    w._timer.stop()
+    w.deleteLater()
+    app.processEvents()
+
+
+def test_gui_zapret2_toggle(tmp_path, monkeypatch):
+    from app import zapret2
+    from PySide6.QtWidgets import QMessageBox
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        started, shown = [], []
+        monkeypatch.setattr(w, "start_runner", lambda: started.append(tester.chosen_strategy().name) or True)
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+        monkeypatch.setattr(zapret2, "install", lambda log: False)          # download failed
+        w._expect_running = True
+        w.cb["zapret2"].setChecked(True)
+        assert not w.cb["zapret2"].isChecked() and not settings.load_settings()["zapret2"] and "zapret2" in w.error
+        assert started == ["ALT8"]                                           # stays on the normal engine
+        monkeypatch.setattr(zapret2, "install", lambda log: True)
+        monkeypatch.setattr(zapret2, "installed", lambda: True)
+        w.error = ""
+        w.cb["zapret2"].setChecked(True)
+        assert started[-1] == zapret2.NAME and w.describe() == zapret2.NAME
+        w.refresh()
+        assert not w.combo.isEnabled()                                       # list of winws strategies is moot
+        w.show()
+        w.autopick()
+        assert shown and "zapret2" in shown[-1] and not w.busy               # no pointless 2–4 min pick
+        w._health_fails = 1
+        monkeypatch.setattr(tester, "quick_check", lambda light=False: {"Discord": False, "YouTube": True})
+        w.runner.proc = type("P", (), {"poll": lambda self: None})()          # looks running
+        w._health()
+        assert not w.busy and w._health_fails == 0
+        w.runner.proc = None
+        w.cb["zapret2"].setChecked(False)
+        assert started[-1] == "ALT8" and w.combo.isEnabled()
+    finally:
+        _close(app, w)
+
+
+def test_gui_share_games(tmp_path, monkeypatch):
+    import webbrowser
+    from PySide6.QtWidgets import QMessageBox
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        opened, shown = [], []
+        monkeypatch.setattr(webbrowser, "open", lambda u: opened.append(u))
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.Yes))
+        w.share_games()
+        assert shown and not opened                                          # nothing collected yet
+        monkeypatch.setattr(gamewatch.GameWatcher, "start", lambda self: None)
+        w.start_watcher()
+        w.watcher._games["game.exe"] = {"path": "x", "ips": {"9.9.9.9"}, "active": False, "ping_ms": None}
+        w.share_games()
+        assert opened and "%5Bgames%5D" in opened[0] and "9.9.9.9" in opened[0]
+    finally:
+        w.stop_watcher()
+        _close(app, w)
