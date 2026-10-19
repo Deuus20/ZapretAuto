@@ -19,7 +19,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - Shared game servers: games-db.json (published = sent by 2+ people), «Поделиться адресами…» issue `[games]` merged by .github/workflows/games-db.yml + scripts/merge_games.py; gamewatch loads it at start (cache data/games-db.json).
 - `zapret2.py`: experimental zapret2 mode (setting `zapret2`): winws2 + Lua `circular` rotates 5 ported strategies per site; files from bol-van/zapret-win-bundle at a pinned commit, sha256-checked, into data/zapret2 (the zapret2 release zip trips Defender reputation: never download it).
 - `diag.py`: system checks + fixes. `lists.py`: ipset update from GitHub (marker ipset-all.txt.custom), user list paths.
-- `gui/style.py`: palette, stylesheet, drawn icons. `gui/worker.py`: QThread Worker + Bridge signals.
+- `gui/style.py`: Material 3 dark tokens `C`, stylesheet, icon font (Segoe Fluent/MDL2 glyphs), app icon. `gui/widgets.py`: Switch, SettingRow, Rail + Pages (QTabWidget-like API: tabs.addTab/setTabVisible), PowerButton, StatusChip. `gui/worker.py`: Python-thread Worker + Bridge signals.
 - `gui/window.py`: tray + main window; `main.py` entry (elevation, single instance; env ZAPRET_NO_AUTOSTART=1 skips autostart for tests).
 - Settings keys (data/settings.json): strategy{base,picks}, game_tcp, game_udp, auto_update, game_watch, games, games_force, games_ignore, games_web, zapret2.
 - Build: `powershell -File build.ps1` -> dist\ZapretAuto (onedir, uac-admin, vendor copied next to exe).
@@ -27,6 +27,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 ## Tools
 - `python tools/make_icon.py`: regenerate assets/icon.ico from app_icon().
 - `python tools/shot.py <out.png> [maxW]`: screenshot (use maxW 1024 to save tokens), then Read the png.
+- `python tools/render.py <out_dir>`: render every page + states (games, busy, error, dialog) offscreen to PNGs — no window, no focus stealing, temp data dir. Prefer it over shot.py for UI work.
 
 ## Tests
 - `.venv\Scripts\python -m pytest -q` (offline, ~1 s); build.ps1 runs them first.

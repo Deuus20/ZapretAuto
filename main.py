@@ -46,6 +46,10 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    from PySide6.QtCore import QTranslator
+    tr = QTranslator(app)
+    if tr.load(str(ROOT / "assets" / "qtbase_ru.qm")):  # «Да»/«Нет» instead of Yes/No in dialogs
+        app.installTranslator(tr)
     sock = QLocalSocket()
     sock.connectToServer("ZapretAuto")
     if sock.waitForConnected(300):

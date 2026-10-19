@@ -769,3 +769,19 @@ def test_gui_share_games(tmp_path, monkeypatch):
     finally:
         w.stop_watcher()
         _close(app, w)
+
+
+def test_gui_known_games_show_after_restart(tmp_path, monkeypatch):
+    """Bug: after an app update/restart the games table stayed empty until a game got a new IP."""
+    monkeypatch.setattr(gamewatch.GameWatcher, "start", lambda self: None)
+    app, w = _gui(tmp_path, monkeypatch, game_watch=True, games_schema=2,
+                  games={"deadlock.exe": {"path": "x", "ips": ["9.9.9.9"]}})
+    try:
+        w.start_watcher()
+        assert w.table.rowCount() == 1 and w.table.item(0, 0).text() == "deadlock.exe" and not w.table.isHidden()
+        assert not w.btn_reset.isEnabled()                   # nothing selected yet
+        w.table.selectRow(0)
+        assert w.btn_reset.isEnabled() and w.btn_ignore.isEnabled()
+    finally:
+        w.stop_watcher()
+        _close(app, w)
