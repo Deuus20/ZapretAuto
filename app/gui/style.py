@@ -146,5 +146,7 @@ QMessageBox, QInputDialog, QDialog {{ background: {C['surface_high']}; }}
 QMenu {{ background: {C['surface_cont']}; padding: 6px 0; }}
 QMenu::item {{ padding: 8px 24px; }}
 QMenu::item:selected {{ background: rgba(226, 226, 233, 0.08); }}
-QLineEdit {{ background: transparent; border: 1px solid {C['outline']}; border-radius: 8px; padding: 8px; }}
+QLineEdit {{ background: transparent; border: 1px solid {C['outline']}; border-radius: 8px; padding: 5px 8px; }}
+QLineEdit:focus {{ border: 2px solid {C['primary']}; }}
+QLineEdit[error="yes"] {{ border: 2px solid {C['error']}; }}
 """

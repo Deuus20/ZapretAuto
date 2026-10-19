@@ -867,3 +867,25 @@ def test_app_check_explains_hidden_project(monkeypatch):
     ev, got = threading.Event(), []
     updater.app_check_async(lambda t, n: (got.append((t, n)), ev.set()))
     assert ev.wait(5) and got == [(None, False)] and "недоступна" in updater.APP_CHECK_ERROR
+
+
+def test_game_ports_custom_and_validated(tmp_path, monkeypatch):
+    assert strategies.valid_ports("1024-1934,1936-65535") and strategies.valid_ports("27015")
+    for bad in ("", "0-10", "100-50", "70000", "1024-", "a,b", "1024;2048"):
+        assert not strategies.valid_ports(bad), bad
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        s = {x.name: x for x in strategies.load_all()}["ALT8"]
+        assert any("1024-1934,1936-65535" in a for a in s.argv(True, True))   # default skips RTMP
+        w.ports["tcp"].setText("2000-3000")
+        w.on_ports("tcp")
+        assert settings.load_settings()["game_ports_tcp"] == "2000-3000"
+        assert any("2000-3000" in a for a in s.argv(True, True)) and not any("1936-65535" in a for a in s.argv(True))
+        w.ports["udp"].setText("99999")
+        w.on_ports("udp")                                                      # invalid: red, not saved
+        assert w.ports["udp"].property("error") == "yes" and "game_ports_udp" not in settings.load_settings()
+        w.ports["tcp"].setText("")
+        w.on_ports("tcp")                                                      # empty: back to the default
+        assert any("1024-1934,1936-65535" in a for a in s.argv(True))
+    finally:
+        _close(app, w)

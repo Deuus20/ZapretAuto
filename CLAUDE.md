@@ -21,7 +21,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - `diag.py`: system checks + fixes. `lists.py`: ipset update from GitHub (marker ipset-all.txt.custom), user list paths.
 - `gui/style.py`: Material 3 dark tokens `C`, stylesheet, icon font (Segoe Fluent/MDL2 glyphs), app icon. `gui/widgets.py`: Switch, SettingRow, Rail + Pages (QTabWidget-like API: tabs.addTab/setTabVisible), PowerButton, StatusChip. `gui/worker.py`: Python-thread Worker + Bridge signals.
 - `gui/window.py`: tray + main window; `main.py` entry (elevation, single instance; env ZAPRET_NO_AUTOSTART=1 skips autostart for tests).
-- Settings keys (data/settings.json): strategy{base,picks}, game_tcp, game_udp, auto_update, game_watch, games, games_force, games_ignore, games_web, zapret2.
+- Settings keys (data/settings.json): strategy{base,picks}, game_tcp, game_udp, game_ports_tcp, game_ports_udp, auto_update, game_watch, games, games_force, games_ignore, games_web, zapret2.
 - Build: `powershell -File build.ps1` -> dist\ZapretAuto (onedir, uac-admin, vendor copied next to exe).
 
 ## Tools
