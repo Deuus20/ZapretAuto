@@ -43,3 +43,39 @@ def report_url(asn: str, name: str, zapret_version: str, app_version: str, choic
             + json.dumps(body, ensure_ascii=False, indent=1) + "\n```\n")
     title = f"[report] {asn} {name}"[:120]
     return f"https://github.com/{APP_REPO}/issues/new?title={quote(title)}&body={quote(text)}"
+
+
+GAMES_URL = f"https://raw.githubusercontent.com/{APP_REPO}/main/games-db.json"
+MAX_URL = 7500  # GitHub drops prefilled issue text beyond ~8 KB of URL
+
+
+def games_db() -> dict | None:
+    """Crowd-sourced game servers {"games": {exe: [ip]}, "web": [net]}: each address sent by 2+ people."""
+    try:
+        db = requests.get(GAMES_URL, timeout=8).json()
+    except (requests.RequestException, ValueError):
+        return None
+    return db if isinstance(db, dict) else None
+
+
+def games_report_url(app_version: str, games: dict[str, list[str]], web: list[str]) -> str:
+    """Prefilled issue with learned game servers; big lists are trimmed to fit the URL."""
+    games = {k: sorted(v) for k, v in games.items() if v}
+    web = sorted(web)
+    while True:
+        body = {"app": app_version, "games": games, "web": web}
+        text = ("Автоматический отчёт ZapretAuto: адреса серверов игр. Не меняйте блок ниже.\n\n```json\n"
+                + json.dumps(body, separators=(",", ":")) + "\n```\n")
+        title = "[games] " + ", ".join(sorted(games))[:100]
+        url = f"https://github.com/{APP_REPO}/issues/new?title={quote(title)}&body={quote(text)}"
+        if len(url) <= MAX_URL:
+            return url
+        big = max(games, key=lambda k: len(games[k]), default=None)
+        if web and (big is None or len(web) >= len(games[big])):
+            web = web[:len(web) // 2]
+        elif big is not None:
+            games[big] = games[big][:len(games[big]) // 2]
+            if not games[big]:
+                games.pop(big)
+        else:
+            return url

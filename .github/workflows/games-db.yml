@@ -1,0 +1,44 @@
+name: games-db
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: games-db
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: startsWith(github.event.issue.title, '[games]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Merge report
+        id: merge
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          REPORTER: ${{ github.event.issue.user.login }}
+        run: |
+          if python scripts/merge_games.py; then echo "ok=1" >> "$GITHUB_OUTPUT"; else echo "ok=0" >> "$GITHUB_OUTPUT"; fi
+      - name: Commit
+        if: steps.merge.outputs.ok == '1'
+        run: |
+          git config user.name "games-db bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add games-db.json
+          git diff --cached --quiet || (git commit -m "games-db: report #${{ github.event.issue.number }}" && git pull --rebase && git push)
+      - name: Close issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OK: ${{ steps.merge.outputs.ok }}
+        run: |
+          if [ "$OK" = "1" ]; then msg="Спасибо! Адреса добавлены. В общую базу попадают адреса, которые прислали хотя бы двое."; else msg="Отчёт не прошёл проверку и не добавлен."; fi
+          gh issue close ${{ github.event.issue.number }} -R ${{ github.repository }} -c "$msg"

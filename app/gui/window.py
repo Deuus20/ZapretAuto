@@ -231,9 +231,14 @@ class MainWindow(QWidget):
         b3 = QPushButton("Сбросить игру")
         b3.setToolTip("Убрать собранные адреса выбранной игры")
         b3.clicked.connect(self.reset_game)
+        b4 = QPushButton("Поделиться адресами…")
+        b4.setToolTip("Отправить найденные серверы игр в общую базу: у других игра заработает с первого запуска. "
+                      "Отправляются только адреса серверов, без вашего IP. Нужен аккаунт GitHub.")
+        b4.clicked.connect(self.share_games)
         r.addWidget(b1)
         r.addWidget(b2)
         r.addWidget(b3)
+        r.addWidget(b4)
         gl.addLayout(r)
         self.tabs.addTab(g, "Игры")
         u = QWidget()
@@ -1057,6 +1062,23 @@ class MainWindow(QWidget):
                 self.watcher.add_manual(exe)
             self.log(f"игра добавлена: {exe}")
             self.fill_games()
+
+    def share_games(self):
+        games = self.watcher.games() if self.watcher else {}
+        ign = set(self.settings.get("games_ignore", []))
+        found = {exe: sorted(g["ips"]) for exe, g in games.items() if g.get("ips") and exe not in ign}
+        if not found:
+            QMessageBox.information(self, "ZapretAuto", "Пока нечем делиться: адреса появятся, когда вы поиграете.")
+            return
+        text = ("Отправить адреса серверов игр в общую базу?\n\n" + ", ".join(sorted(found)) + "\n\n"
+                "У других пользователей эти игры заработают с первого запуска. Отправляются только адреса "
+                "серверов игр — без вашего IP. Откроется страница GitHub (нужен аккаунт), там нажмите «Create».")
+        if QMessageBox.question(self, "Поделиться адресами игр", text) != QMessageBox.Yes:
+            return
+        import webbrowser
+        from app import __version__, sharedb
+        webbrowser.open(sharedb.games_report_url(__version__, found, self.watcher.web_nets()))
+        self.log("открыта страница отправки адресов игр")
 
     # ---------- updates ----------
     def check_update(self, manual: bool = False):

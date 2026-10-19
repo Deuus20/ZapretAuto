@@ -610,3 +610,54 @@ def test_gui_zapret_update_keeps_working_strategy(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
+
+
+def _games_mod():
+    spec = importlib.util.spec_from_file_location("merge_games", ROOT / "scripts" / "merge_games.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_games_db_needs_two_reporters():
+    m = _games_mod()
+    body = lambda g, w=(): "```json\n" + json.dumps({"app": "1.2.0", "games": g, "web": list(w)}) + "\n```"
+    db = m.merge({}, m.parse(body({"game.exe": ["9.9.9.9", "8.8.4.4"]}, ["3.164.206.0/24"])), "alice")
+    assert db["games"] == {} and db["web"] == []                      # one person is not enough
+    db = m.merge(db, m.parse(body({"game.exe": ["9.9.9.9"]})), "alice")
+    assert db["games"] == {}                                          # the same person twice still is not
+    db = m.merge(db, m.parse(body({"game.exe": ["9.9.9.9"]}, ["3.164.206.0/24"])), "Bob")
+    assert db["games"] == {"game.exe": ["9.9.9.9"]} and db["web"] == ["3.164.206.0/24"]
+    for bad in ({"game.exe": ["192.168.1.1"]}, {"../x.exe": ["9.9.9.9"]}, {"g.exe": "9.9.9.9"}):
+        with pytest.raises(ValueError):
+            m.parse(body(bad))
+    with pytest.raises(ValueError):
+        m.parse(body({}, ["10.0.0.0/24"]))
+
+
+def test_games_report_url_fits():
+    from app import sharedb
+    ips = [f"9.{a}.{b}.1" for a in range(10) for b in range(100)]
+    url = sharedb.games_report_url("1.2.0", {"big.exe": ips, "small.exe": ["9.9.9.9"]}, ["3.164.206.0/24"])
+    assert len(url) <= sharedb.MAX_URL and "small.exe" in url and "%5Bgames%5D" in url
+
+
+def test_shared_games_db_seeds_known_games(tmp_path, monkeypatch):
+    from app import sharedb
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(games={"old.exe": {"path": "x", "ips": ["7.7.7.7"]}}, games_schema=2)
+    monkeypatch.setattr(sharedb, "games_db", lambda: {"games": {"old.exe": ["6.6.6.6", "10.0.0.1"],
+                                                                "new.exe": ["5.5.5.5"]}, "web": ["4.4.4.0/24"]})
+    monkeypatch.setattr(gamewatch, "KNOWN_WEB_HOSTS", ())
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        w._resolve_known()
+        assert w.games()["old.exe"]["ips"] == {"7.7.7.7", "6.6.6.6"}   # private IP from the base is dropped
+        assert "4.4.4.0/24" in w._web_nets and "4.4.4.0/24" in settings.load_settings()["games_web"]
+        assert w._seed("new.exe") == {"5.5.5.5"}
+        monkeypatch.setattr(sharedb, "games_db", lambda: None)          # offline: last good copy is used
+        assert gamewatch.GameWatcher._shared_db()["games"]["new.exe"] == ["5.5.5.5"]
+    finally:
+        w.stop()
