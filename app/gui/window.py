@@ -1028,10 +1028,19 @@ class MainWindow(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите exe игры", "", "Программы (*.exe)")
         if path:
             exe = path.replace("/", "\\")
-            self.save(games_force=sorted(set(self.settings.get("games_force", [])) | {exe}))
-            if self.watcher and hasattr(self.watcher, "add_manual"):
+            name = exe.rsplit("\\", 1)[-1].lower()
+            self.save(games_force=sorted(set(self.settings.get("games_force", [])) | {exe}),
+                      games_ignore=[x for x in self.settings.get("games_ignore", []) if x.lower() != name],
+                      game_watch=True)  # adding a game by hand means "watch it": also undo an earlier «Игнорировать»
+            if not self.watcher:
+                self.cb["game_watch"].blockSignals(True)
+                self.cb["game_watch"].setChecked(True)
+                self.cb["game_watch"].blockSignals(False)
+                self.start_watcher()
+            if self.watcher:
                 self.watcher.add_manual(exe)
             self.log(f"игра добавлена: {exe}")
+            self.fill_games()
 
     # ---------- updates ----------
     def check_update(self):

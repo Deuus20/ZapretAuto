@@ -224,6 +224,15 @@ class GameWatcher(threading.Thread):
         self._persist_settings()
         self._flush()
 
+    def add_manual(self, path: str) -> str:
+        """Add a game picked by hand (shown at once; its servers are collected when it runs)."""
+        exe = path.replace("/", "\\").rsplit("\\", 1)[-1].lower()
+        with self._lock:
+            g = self._games.setdefault(exe, {"path": path, "ips": set(), "active": False, "ping_ms": None})
+            g["path"] = path
+        self._persist_settings()
+        return exe
+
     def reset_game(self, exe: str) -> None:
         """Drop all learned IPs of a game."""
         with self._lock:
