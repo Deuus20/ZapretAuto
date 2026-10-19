@@ -812,3 +812,19 @@ def test_discord_cache_fix(tmp_path, monkeypatch):
     assert "очищен" in diag.apply_fix("discord_cache")
     assert not diag._discord_caches() and (tmp_path / "discord" / "Local Storage").exists()  # login kept
     assert "Discord.exe" in killed
+
+
+def test_issue_report_is_redacted_and_fits(tmp_path, monkeypatch):
+    from app import logs
+    from urllib.parse import unquote
+    monkeypatch.setattr(logs, "LOG_DIR", tmp_path)
+    lines = [f"2026-10-20 01:00:{i:02d} INFO VPN сервер 185.1.2.{i % 250} C:/Users/Danil/x 192.168.1.5 " + "x" * 80
+             for i in range(400)]
+    (tmp_path / "zapretauto.log").write_text("\n".join(lines), encoding="utf-8")
+    url = logs.issue_url("Discord не грузится", [{"label": "Подмена DNS", "level": "err", "detail": "youtube.com"},
+                                                 {"label": "BFE", "level": "ok", "detail": "Running"}])
+    text = unquote(url)
+    assert len(url) <= logs.ISSUE_URL_MAX and "[log]" in text and "Discord не грузится" in text
+    assert "Подмена DNS" in text and "BFE" not in text            # only problems from diagnostics
+    assert "185.1.2." not in text and "<ip>" in text and "192.168.1.5" in text  # public IPs hidden, LAN kept
+    assert "Danil" not in text and "01:00:" in text               # user name hidden; log tail included
