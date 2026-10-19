@@ -971,3 +971,26 @@ def test_video_cdn_probe(monkeypatch):
     assert "109.1.2.3" not in repr(vars(tester).get("_CDN_NODE"))      # the user's IP is not kept
     monkeypatch.setattr(tester, "fetch", lambda *a, **k: (_ for _ in ()).throw(OSError("reset")))
     assert tester.probe(tester.Target("YouTubeVideo", "ytcdn://")) is None and tester._CDN_NODE is None
+
+
+def test_gui_exclude_app(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    monkeypatch.setattr(gamewatch.GameWatcher, "start", lambda self: None)
+    app, w = _gui(tmp_path, monkeypatch, game_watch=False)
+    try:
+        monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                            staticmethod(lambda *a, **k: ("C:/Users/x/AppData/Roaming/Spotify/Spotify.exe", "")))
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+        w.exclude_app()
+        st = settings.load_settings()
+        assert st["apps_exclude"] == ["spotify.exe"] and st["game_watch"] and w.watcher
+        assert gamewatch.web_client(r"C:\Users\x\AppData\Roaming\Spotify\Spotify.exe", st)   # its 443 nets: excluded
+        assert not gamewatch.classify(r"C:\Users\x\AppData\Roaming\Spotify\Spotify.exe", st)  # but not a game
+        w.list_combo.setCurrentIndex(w.list_combo.findData("apps_exclude"))
+        assert w.list_edit.toPlainText() == "spotify.exe\n"
+        w.list_edit.setPlainText("")
+        w.save_list()
+        assert settings.load_settings()["apps_exclude"] == []
+    finally:
+        w.stop_watcher()
+        _close(app, w)
