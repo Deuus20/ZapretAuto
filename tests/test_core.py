@@ -530,3 +530,30 @@ def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
+
+
+def test_gui_update_check_shows_result(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(strategy={"base": "ALT8", "picks": {}}, ipset_updated=time.time())
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app import updater
+    from app.gui.window import MainWindow
+    monkeypatch.setattr(updater, "check_async", lambda cb: cb("1.10.3", False))
+    monkeypatch.setattr(updater, "app_check_async", lambda cb: cb(None, False))
+    w = MainWindow()
+    try:
+        w.btn_check.click()
+        app.processEvents()
+        t = w.lbl_upd.text()
+        assert "1.10.3, последняя версия" in t and "не удалось проверить" in t and w.btn_check.isEnabled()
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
