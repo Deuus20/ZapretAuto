@@ -828,3 +828,28 @@ def test_issue_report_is_redacted_and_fits(tmp_path, monkeypatch):
     assert "Подмена DNS" in text and "BFE" not in text            # only problems from diagnostics
     assert "185.1.2." not in text and "<ip>" in text and "192.168.1.5" in text  # public IPs hidden, LAN kept
     assert "Danil" not in text and "01:00:" in text               # user name hidden; log tail included
+
+
+def test_gui_chips_and_switch_rows(tmp_path, monkeypatch):
+    from app.gui.widgets import SettingRow, StatusChip
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        w.set_chips({"Discord": True, "YouTube": True, "Скорость YouTube": False, "Голос Discord": False})
+        chips = [w.chips.itemAt(i).widget() for i in range(w.chips.count()) if w.chips.itemAt(i).widget()]
+        assert [c.toolTip() for c in chips] == ["Discord: работает", "YouTube: медленно", "Голос Discord: не открывается"]
+        assert all(isinstance(c, StatusChip) for c in chips)
+        row = w.cb["autostart"].parent()
+        assert isinstance(row, SettingRow) and row.toolTip()           # description on hover
+        monkeypatch.setattr(w, "set_autostart", lambda on: None)        # no schtasks in tests
+        before = w.cb["autostart"].isChecked()
+        pos = QPointF(5, row.height() / 2)
+        row.mouseReleaseEvent(QMouseEvent(QMouseEvent.MouseButtonRelease, pos, pos, Qt.LeftButton, Qt.LeftButton,
+                                          Qt.NoModifier))
+        assert w.cb["autostart"].isChecked() != before and settings.load_settings()["autostart"] != before
+        w.set_advanced(False, save=False)
+        lists_i = w.tab_lists
+        assert w.tabs.rail.buttons[lists_i].isHidden()                   # Lists only with «Дополнительно»
+    finally:
+        _close(app, w)

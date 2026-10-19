@@ -126,7 +126,8 @@ class MainWindow(QWidget):
         self.tabs.addTab(lists_page, "Списки", "lists")
         from PySide6.QtGui import QKeySequence, QShortcut
         for i in range(self.tabs.count()):  # keyboard navigation for the rail
-            QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self.tabs.setCurrentIndex(i))
+            QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self, activated=lambda i=i: self.tabs.setCurrentIndex(i)
+                      if not self.tabs.rail.buttons[i].isHidden() else None)  # Lists: only with «Дополнительно»
         self.tab_lists = self.tabs.indexOf(lists_page)
         self.load_list()
         self.set_advanced(bool(self.settings.get("show_advanced")), save=False)
@@ -571,8 +572,11 @@ class MainWindow(QWidget):
             if it.widget():
                 it.widget().hide()  # deleteLater waits for the event loop: the old chip showed under the new
                 it.widget().deleteLater()
+        res = dict(res)
+        speed = res.pop("Скорость YouTube", None)  # one YouTube chip: "медленно" when it opens but crawls
         for name, ok in res.items():
-            self.chips.addWidget(StatusChip(name, ok))
+            slow = name == "YouTube" and ok and speed is False
+            self.chips.addWidget(StatusChip(name, ok and not slow, "медленно" if slow else ""))
         self.chips.addStretch()
 
     def show_window(self):
