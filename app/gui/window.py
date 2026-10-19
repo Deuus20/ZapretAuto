@@ -36,8 +36,8 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ZapretAuto")
-        self.resize(880, 640)
-        self.setMinimumSize(720, 520)
+        self.resize(800, 560)
+        self.setMinimumSize(680, 480)
         self.runner = Runner()
         self.watcher = None
         self.busy = False
@@ -69,7 +69,7 @@ class MainWindow(QWidget):
         self._crashes: list[float] = []
         self._repick_pending = False
         self._net = None
-        self._next_health = time.time() + 120
+        self._next_health = time.time() + 30  # status chips soon after start
 
     # ---------- UI ----------
     SETTINGS = [  # key, title, supporting text, default, section
@@ -142,13 +142,14 @@ class MainWindow(QWidget):
             self.btn_update.setEnabled(False)
         if not gamewatch:
             self.cb["game_watch"].setEnabled(False)
+        self.fill_games()  # home games card text, also when watching is off
 
     @staticmethod
-    def _page(margins=(28, 24, 28, 24)) -> tuple[QWidget, QVBoxLayout]:
+    def _page(margins=(20, 16, 20, 16)) -> tuple[QWidget, QVBoxLayout]:
         w = QWidget(objectName="page")
         lay = QVBoxLayout(w)
         lay.setContentsMargins(*margins)
-        lay.setSpacing(12)
+        lay.setSpacing(10)
         return w, lay
 
     @staticmethod
@@ -161,33 +162,27 @@ class MainWindow(QWidget):
     def _page_home(self) -> QWidget:
         page, lay = self._page()
         hero = QHBoxLayout()
-        hero.setSpacing(24)
+        hero.setSpacing(18)
         self.btn_toggle = PowerButton()
         self.btn_toggle.setToolTip("Включить или выключить обход блокировок")
         self.btn_toggle.clicked.connect(self.toggle)
         hero.addWidget(self.btn_toggle, 0, Qt.AlignVCenter)
         col = QVBoxLayout()
-        col.setSpacing(6)
+        col.setSpacing(4)
         col.addStretch()
         self.status = QLabel(objectName="title")
         self.substatus = QLabel(objectName="sub", wordWrap=True)
         col.addWidget(self.status)
         col.addWidget(self.substatus)
         self.chips = QHBoxLayout()
-        self.chips.setSpacing(8)
-        self.chips.setContentsMargins(0, 6, 0, 0)
+        self.chips.setSpacing(6)
+        self.chips.setContentsMargins(0, 4, 0, 0)
         col.addLayout(self.chips)
         col.addStretch()
         hero.addLayout(col, 1)
-        lay.addLayout(hero)
-        self.progress = QProgressBar(objectName="thin")
-        self.progress.setTextVisible(False)
-        self.progress.setRange(0, 0)
-        self.progress.hide()
-        lay.addWidget(self.progress)
-
-        acts = QHBoxLayout()
-        acts.setSpacing(8)
+        acts = QVBoxLayout()
+        acts.setSpacing(6)
+        acts.addStretch()
         self.btn_check_access = QPushButton("Проверить доступ", objectName="tonal")
         self.btn_check_access.setToolTip("Проверить, открываются ли Discord, YouTube и голосовой чат прямо сейчас")
         self.btn_check_access.clicked.connect(lambda: self.check_access())
@@ -202,41 +197,67 @@ class MainWindow(QWidget):
             b.setCursor(Qt.PointingHandCursor)
             acts.addWidget(b)
         acts.addStretch()
-        lay.addLayout(acts)
+        hero.addLayout(acts)
+        lay.addLayout(hero)
+        self.progress = QProgressBar(objectName="thin")
+        self.progress.setTextVisible(False)
+        self.progress.setRange(0, 0)
+        self.progress.hide()
+        lay.addWidget(self.progress)
 
+        grid = QHBoxLayout()
+        grid.setSpacing(10)
         card = QFrame(objectName="card")
         cl = QVBoxLayout(card)
-        cl.setContentsMargins(20, 18, 20, 20)
-        cl.setSpacing(10)
+        cl.setContentsMargins(14, 12, 14, 14)
+        cl.setSpacing(8)
         cl.addWidget(QLabel("Стратегия", objectName="h2"))
-        cl.addWidget(QLabel("Как именно обходить блокировки у вашего провайдера. Подбор проверяет все варианты "
-                            "на Discord, YouTube и голосе и собирает лучшую комбинацию (2–4 минуты).",
-                            objectName="muted", wordWrap=True))
-        row = QHBoxLayout()
-        row.setSpacing(8)
         self.combo = QComboBox()
         self.combo.setToolTip("«Авто» — результат подбора. Можно выбрать стратегию вручную.")
         self.combo.addItem(AUTO)
         self.combo.addItems([s.name for s in strategies.load_all()])
         self.combo.activated.connect(self.on_combo)
-        row.addWidget(self.combo, 1)
-        self.btn_auto = QPushButton("Подобрать стратегию", objectName="primary")
+        cl.addWidget(self.combo)
+        self.btn_auto = QPushButton("Подобрать заново", objectName="primary")
         self.btn_auto.setCursor(Qt.PointingHandCursor)
-        self.btn_auto.setToolTip("Проверить все стратегии и собрать лучшую комбинацию. Занимает 2–4 минуты.")
+        self.btn_auto.setToolTip("Проверить все стратегии на Discord, YouTube и голосе и собрать лучшую "
+                                 "комбинацию. Занимает 2–4 минуты, обход на это время выключен.")
         self.btn_auto.clicked.connect(self.autopick)
+        row = QHBoxLayout()
         row.addWidget(self.btn_auto)
+        row.addStretch()
         cl.addLayout(row)
-        lay.addWidget(card)
+        cl.addStretch()
+        grid.addWidget(card, 1)
+
+        games = QFrame(objectName="card")
+        gl = QVBoxLayout(games)
+        gl.setContentsMargins(14, 12, 14, 14)
+        gl.setSpacing(6)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Игры", objectName="h2"))
+        top.addStretch()
+        more = QPushButton("Все игры", objectName="text")
+        more.setCursor(Qt.PointingHandCursor)
+        more.clicked.connect(lambda: self.tabs.setCurrentWidget(self.page_games))
+        top.addWidget(more)
+        gl.addLayout(top)
+        self.lbl_games = QLabel(objectName="muted", wordWrap=True, textFormat=Qt.RichText)
+        gl.addWidget(self.lbl_games)
+        gl.addStretch()
+        grid.addWidget(games, 1)
+        lay.addLayout(grid)
+
         recent = QFrame(objectName="card")
         rl = QVBoxLayout(recent)
-        rl.setContentsMargins(20, 14, 20, 16)
-        rl.setSpacing(6)
+        rl.setContentsMargins(14, 12, 14, 12)
+        rl.setSpacing(4)
         rl.addWidget(QLabel("Последние события", objectName="h2"))
         self.lbl_recent = QLabel("Пока ничего не происходило.", objectName="muted", wordWrap=True)
         self.lbl_recent.setTextInteractionFlags(Qt.TextSelectableByMouse)
         rl.addWidget(self.lbl_recent)
-        lay.addWidget(recent)
-        lay.addStretch(1)
+        rl.addStretch()
+        lay.addWidget(recent, 1)
         return page
 
     def _page_games(self) -> QWidget:
@@ -285,7 +306,7 @@ class MainWindow(QWidget):
         return page
 
     def _page_settings(self) -> QWidget:
-        page, lay = self._page((28, 24, 28, 0))
+        page, lay = self._page((20, 16, 20, 0))
         self._header(lay, "Настройки")
         area = QScrollArea(widgetResizable=True)
         body = QWidget(objectName="page")
@@ -500,10 +521,10 @@ class MainWindow(QWidget):
 
     # ---------- helpers ----------
     def log(self, text: str):
-        line = time.strftime("%H:%M ") + text
         self.logbox.appendPlainText(time.strftime("%H:%M:%S ") + text)
-        self._recent = (getattr(self, "_recent", []) + [line])[-4:]
-        self.lbl_recent.setText("\n".join(self._recent))
+        if not text.startswith(("gamewatch:", "zapret2: скачиваю")):  # home card: events for people, not internals
+            self._recent = (getattr(self, "_recent", []) + [time.strftime("%H:%M ") + text])[-8:]
+            self.lbl_recent.setText("\n".join(self._recent))
         logs.log.info(text)
 
     def showEvent(self, e):
@@ -831,8 +852,8 @@ class MainWindow(QWidget):
                 if ok:
                     stats.record("ipset")  # winws re-reads ipset-all.txt by itself
             self._run(lambda log: lists.update_ipset(log), ipset_done)
-        if self.isVisible() and self.tabs.currentWidget() is self.page_games:
-            self.fill_games()  # live ping / «Сейчас» while the page is open
+        if self.isVisible() and self.tabs.currentIndex() in (0, self.tabs.indexOf(self.page_games)):
+            self.fill_games()  # live ping / «играете» on the games page and the home card
         if now >= self._next_health:
             self._next_health = now + 600
             self._health()
@@ -1157,16 +1178,40 @@ class MainWindow(QWidget):
         self.table.setRowCount(len(rows))
         for i, (exe, g) in enumerate(rows):
             ping = g.get("ping_ms")
-            for j, t in enumerate([exe, str(len(g.get("ips", ()))), "-" if ping is None else f"{ping:.0f}",
-                                   "да" if g.get("active") else "нет"]):
-                self.table.setItem(i, j, QTableWidgetItem(t))
+            for j, t in enumerate([gamewatch.display_name(exe, g.get("path")), str(len(g.get("ips", ()))),
+                                   "—" if ping is None else f"{ping:.0f}", "играете" if g.get("active") else ""]):
+                it = QTableWidgetItem(t)
+                if j == 0:
+                    it.setData(Qt.UserRole, exe)  # the exe is the key; the name is for people
+                    it.setToolTip(exe)
+                self.table.setItem(i, j, it)
+        self._fill_home_games(rows)
+
+    def _fill_home_games(self, rows: list) -> None:
+        """Home card: running games first, then the ones with most servers; three at most."""
+        if not self.settings.get("game_watch"):
+            self.lbl_games.setText("Слежение за играми выключено — включите его в «Настройках».")
+            return
+        if not rows:
+            self.lbl_games.setText("Пока игр не найдено. Запустите игру — она появится здесь сама.")
+            return
+        top = sorted(rows, key=lambda r: (not r[1].get("active"), -len(r[1].get("ips", ()))))[:3]
+        lines = []
+        for exe, g in top:
+            name = gamewatch.display_name(exe, g.get("path"))
+            ping = g.get("ping_ms")
+            state = ("<span style='color:#6dd58c'>играете</span>" + (f", {ping:.0f} мс" if ping else "")
+                     if g.get("active") else f"{len(g.get('ips', ()))} адресов в обходе")
+            lines.append(f"<span style='color:#e2e2e9'>{name}</span> — {state}")
+        more = len(rows) - len(top)
+        self.lbl_games.setText("<br>".join(lines) + (f"<br>и ещё {more}" if more > 0 else ""))
 
     def _selected_game(self) -> str | None:
         r = self.table.currentRow()
         if r < 0 or not self.table.item(r, 0):
             QMessageBox.information(self, "ZapretAuto", "Сначала выберите игру в списке.")
             return None
-        return self.table.item(r, 0).text()
+        return self.table.item(r, 0).data(Qt.UserRole)
 
     def ignore_game(self):
         exe = self._selected_game()
@@ -1192,7 +1237,7 @@ class MainWindow(QWidget):
             name = exe.rsplit("\\", 1)[-1].lower()
             ignored = name in {x.lower() for x in self.settings.get("games_ignore", [])}
             if self.watcher and name in self.watcher.games() and not ignored:
-                rows = [self.table.item(i, 0).text() for i in range(self.table.rowCount())]
+                rows = [self.table.item(i, 0).data(Qt.UserRole) for i in range(self.table.rowCount())]
                 if name in rows:
                     self.table.selectRow(rows.index(name))
                 QMessageBox.information(self, "ZapretAuto", f"{name} уже есть в списке игр.")
@@ -1269,7 +1314,7 @@ class MainWindow(QWidget):
             self._run(lambda log: updater.app_update(log), done)
 
     def on_update_checked(self, tag, newer):
-        self.log(f"последняя версия: {tag}" + (" (есть обновление)" if newer else " (актуально)" if tag else " (не удалось проверить)"))
+        self.log(f"zapret {tag}: " + ("есть обновление" if newer else "последняя версия") if tag else "zapret: проверить обновления не удалось")
         self._show_upd("zapret", "zapret: " + ("не удалось проверить" if not tag else
                                               f"есть версия {tag} — нажмите «Обновить»" if newer and not self._auto_check
                                               else f"обновляю до {tag}" if newer else f"{tag}, последняя версия"))

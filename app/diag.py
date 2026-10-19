@@ -53,39 +53,62 @@ def first_problem() -> str | None:
 
 
 ANYCAST_DOMAINS = ("discord.com", "rutracker.org")  # Cloudflare anycast: same IPs from any resolver
-STUB_CHECK_DOMAINS = ("www.youtube.com",)
+STUB_CHECK_DOMAINS = ("www.youtube.com", "youtube.com")
+
+
+# JSON DoH endpoints, tried in order: ISPs block some of them (8.8.8.8 since July 2026)
+DOH_JSON = ("https://1.1.1.1/dns-query", "https://dns.quad9.net:5053/dns-query", "https://dns.google/resolve")
+# DoH templates for browsers, same providers and order (fix_browser_doh picks the first reachable one)
+DOH_TEMPLATES = ("https://cloudflare-dns.com/dns-query", "https://dns.quad9.net/dns-query",
+                 "https://dns.google/dns-query{?dns}")
 
 
 def _doh(name: str) -> set[str]:
+    """A records of name via DNS-over-HTTPS; raises if no endpoint answers."""
     import requests
-    j = requests.get("https://1.1.1.1/dns-query", params={"name": name, "type": "A"},
-                     headers={"accept": "application/dns-json"}, timeout=6).json()
-    return {a["data"] for a in j.get("Answer", []) if a.get("type") == 1}
+    err = None
+    for url in DOH_JSON:
+        try:
+            j = requests.get(url, params={"name": name, "type": "A"}, headers={"accept": "application/dns-json"},
+                             timeout=6).json()
+            return {a["data"] for a in j.get("Answer", []) if a.get("type") == 1}
+        except (requests.RequestException, ValueError) as e:
+            err = e
+    raise OSError(f"no DoH endpoint answered: {err}")
 
 
 def dns_poisoned() -> list[str] | None:
-    """Domains whose system-resolver answers look forged (bogus IPs, or no overlap with DoH for anycast
-    domains). None if DoH itself is unreachable."""
+    """Domains whose system-resolver answers look forged: bogus IPs, "no such domain" for a domain that exists
+    (ISPs answer NXDOMAIN for blocked sites since August 2026), or no overlap with DoH for anycast domains.
+    None if DoH itself is unreachable and nothing is obviously wrong."""
     import ipaddress
     import socket
-    bad = []
+    bad, doh_down = [], False
     for d in ANYCAST_DOMAINS + STUB_CHECK_DOMAINS:
         try:
             sys_ips = set(socket.gethostbyname_ex(d)[2])
+        except socket.gaierror:  # "no such host" for a domain that exists: forged, if DNS works at all
+            try:
+                socket.gethostbyname("ya.ru")  # control: offline / no DNS also fails here
+                bad.append(d)
+            except OSError:
+                pass
+            continue
         except OSError:
             continue
         if any((a := ipaddress.ip_address(ip)).is_private or a.is_loopback or a.is_unspecified or a.is_link_local
                for ip in sys_ips):
             bad.append(d)
             continue
-        if d in ANYCAST_DOMAINS:
+        if d in ANYCAST_DOMAINS and not doh_down:
             try:
                 doh = _doh(d)
             except Exception:  # noqa: BLE001
-                return None
+                doh_down = True
+                continue
             if doh and not (sys_ips & doh):
                 bad.append(d)
-    return bad
+    return bad if bad or not doh_down else None
 
 
 def run_checks() -> list[dict]:
@@ -156,8 +179,12 @@ def run_checks() -> list[dict]:
     if bad is None:
         res.append(_item("Подмена DNS", "ok", "не удалось проверить (нет доступа к 1.1.1.1)"))
     elif bad:
+        doh_on = _browser_doh_on()
         res.append(_item("Подмена DNS", "err", "провайдер подменяет адреса: " + ", ".join(bad) +
-                         " — обход не поможет, пока не включён защищённый DNS (DoH) в Windows или браузере"))
+                         (" — защищённый DNS в браузерах уже включён; программам вне браузера (Discord) нужен DoH "
+                          "в Windows" if doh_on else
+                          " — обход не поможет без защищённого DNS. «Исправить» включит его в Chrome, Edge и "
+                          "Яндекс.Браузере"), None if doh_on else "browser_doh"))
     else:
         res.append(_item("Подмена DNS", "ok", "ответы DNS совпадают с DNS-over-HTTPS"))
 
@@ -206,10 +233,43 @@ def _disable_quic() -> str:
     return "QUIC отключён для Chrome, Edge и Яндекс.Браузера — перезапустите браузер"
 
 
-def apply_fix(fix_id: str) -> str:
-    if fix_id == "disable_quic":
+def _browser_doh_on() -> bool:
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, QUIC_POLICIES[0]) as k:
+            return winreg.QueryValueEx(k, "DnsOverHttpsMode")[0] == "secure"
+    except OSError:
+        return False
+
+
+def _browser_doh() -> str:
+    """Secure DNS in Chromium browsers via policy, with the first DoH provider this network can reach."""
+    import winreg
+    import requests
+    tpl = None
+    for json_url, t in zip(DOH_JSON, DOH_TEMPLATES):
         try:
-            return _disable_quic()
+            requests.get(json_url, params={"name": "youtube.com", "type": "A"},
+                         headers={"accept": "application/dns-json"}, timeout=6).json()
+            tpl = t
+            break
+        except (requests.RequestException, ValueError):
+            continue
+    if not tpl:
+        return "не удалось: ни один сервер защищённого DNS не отвечает (возможно, они тоже заблокированы)"
+    for path in QUIC_POLICIES:
+        with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as k:
+            winreg.SetValueEx(k, "DnsOverHttpsMode", 0, winreg.REG_SZ, "secure")
+            winreg.SetValueEx(k, "DnsOverHttpsTemplates", 0, winreg.REG_SZ, tpl)
+    host = tpl.split("/")[2]
+    return (f"защищённый DNS ({host}) включён в Chrome, Edge и Яндекс.Браузере — перезапустите браузер. "
+            "Браузер покажет «Управляется организацией»: это и есть эта настройка")
+
+
+def apply_fix(fix_id: str) -> str:
+    if fix_id in ("disable_quic", "browser_doh"):
+        try:
+            return _disable_quic() if fix_id == "disable_quic" else _browser_doh()
         except OSError as e:
             return f"не удалось: {e}"
     cmds = {

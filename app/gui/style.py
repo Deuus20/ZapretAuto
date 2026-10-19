@@ -71,27 +71,28 @@ _OFF_FG = "rgba(226, 226, 233, 0.38)"
 _OFF_BG = "rgba(226, 226, 233, 0.12)"
 
 STYLE = f"""
-* {{ font-family: "Segoe UI Variable Text", "Segoe UI"; font-size: 10pt; color: {C['on_surface']}; }}
+* {{ font-family: "Segoe UI Variable Text", "Segoe UI"; font-size: 9.5pt; color: {C['on_surface']}; }}
 QWidget {{ background: transparent; }}
 QWidget#root, QWidget#rail, QStackedWidget, QWidget#page {{ background: {C['surface']}; }}
 QScrollArea {{ background: {C['surface']}; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: {C['surface']}; }}
 
-QLabel#h1 {{ font-size: 18pt; font-weight: 600; }}
-QLabel#title {{ font-size: 18pt; font-weight: 600; }}
-QLabel#h2 {{ font-size: 12pt; font-weight: 600; }}
+QLabel#h1 {{ font-size: 14pt; font-weight: 600; }}
+QLabel#title {{ font-size: 15pt; font-weight: 600; }}
+QLabel#h2 {{ font-size: 10.5pt; font-weight: 600; }}
 QLabel#sub, QLabel#rowText, QLabel#muted {{ color: {C['on_surface_variant']}; }}
 QLabel#sub[error="yes"] {{ color: {C['error']}; }}
-QLabel#rowTitle {{ font-size: 10.5pt; }}
+QLabel#rowTitle {{ font-size: 10pt; }}
+QLabel#rowText {{ font-size: 9pt; }}
 QLabel#rowTitle:disabled, QLabel#rowText:disabled {{ color: {C['outline']}; }}
-QLabel#section {{ color: {C['primary']}; font-weight: 600; font-size: 9.5pt; padding: 18px 16px 6px 16px; }}
-QLabel#empty {{ color: {C['on_surface_variant']}; padding: 40px; font-size: 11pt; }}
+QLabel#section {{ color: {C['primary']}; font-weight: 600; font-size: 9pt; padding: 10px 12px 4px 12px; }}
+QLabel#empty {{ color: {C['on_surface_variant']}; padding: 24px; font-size: 10pt; }}
 
-QFrame#card, QFrame#group {{ background: {C['surface_low']}; border-radius: 16px; }}
-QWidget#row {{ border-radius: 12px; }}
+QFrame#card, QFrame#group {{ background: {C['surface_low']}; border-radius: 12px; }}
+QWidget#row {{ border-radius: 8px; }}
 QWidget#row:hover {{ background: {C['surface_cont']}; }}
 
-QPushButton {{ border-radius: 20px; padding: 9px 20px; font-weight: 600; min-height: 22px;
+QPushButton {{ border-radius: 15px; padding: 5px 14px; font-weight: 600; min-height: 20px;
               background: transparent; border: 1px solid {C['outline']}; color: {C['primary']}; }}
 QPushButton:hover {{ background: {_HOVER}; }}
 QPushButton:pressed {{ background: {_PRESS}; }}
@@ -102,10 +103,10 @@ QPushButton#primary:hover {{ background: #b6d0fb; }}
 QPushButton#primary:disabled, QPushButton#tonal:disabled {{ background: {_OFF_BG}; color: {_OFF_FG}; }}
 QPushButton#tonal {{ background: {C['secondary_container']}; color: {C['on_secondary_container']}; border: none; }}
 QPushButton#tonal:hover {{ background: #46526a; }}
-QPushButton#text, QPushButton#link {{ border: none; padding: 9px 12px; color: {C['primary']}; }}
+QPushButton#text, QPushButton#link {{ border: none; padding: 5px 10px; color: {C['primary']}; }}
 QPushButton#text:hover, QPushButton#link:hover {{ background: {_HOVER}; }}
 
-QComboBox {{ background: transparent; border: 1px solid {C['outline']}; border-radius: 8px; padding: 9px 12px;
+QComboBox {{ background: transparent; border: 1px solid {C['outline']}; border-radius: 8px; padding: 5px 10px;
             min-height: 20px; }}
 QComboBox:hover {{ border-color: {C['on_surface']}; }}
 QComboBox:focus {{ border: 2px solid {C['primary']}; }}
@@ -115,28 +116,28 @@ QComboBox QAbstractItemView {{ background: {C['surface_cont']}; border: none; pa
                                selection-background-color: {C['secondary_container']}; }}
 
 QTabWidget::pane {{ border: none; }}
-QTabBar::tab {{ background: transparent; padding: 10px 18px; color: {C['on_surface_variant']};
+QTabBar::tab {{ background: transparent; padding: 7px 14px; color: {C['on_surface_variant']};
                border-bottom: 3px solid transparent; font-weight: 600; }}
 QTabBar::tab:selected {{ color: {C['primary']}; border-bottom: 3px solid {C['primary']}; }}
 QTabBar::tab:hover {{ background: rgba(226, 226, 233, 0.08); }}
 
-QPlainTextEdit, QTableWidget {{ background: {C['surface_low']}; border: none; border-radius: 16px; padding: 8px;
+QPlainTextEdit, QTableWidget {{ background: {C['surface_low']}; border: none; border-radius: 12px; padding: 6px;
                                selection-background-color: {C['primary_container']}; }}
 QPlainTextEdit {{ font-family: "Cascadia Mono", Consolas; font-size: 9pt; }}
 QPlainTextEdit#editor {{ border: 1px solid {C['outline_variant']}; }}
 QTableWidget {{ gridline-color: transparent; }}
-QTableWidget::item {{ padding: 6px; border: none; }}
+QTableWidget::item {{ padding: 3px 6px; border: none; }}
 QTableWidget::item:selected {{ background: {C['secondary_container']}; color: {C['on_secondary_container']}; }}
 QHeaderView, QHeaderView::section, QTableCornerButton::section {{ background: {C['surface_low']}; border: none; }}
-QHeaderView::section {{ color: {C['on_surface_variant']}; padding: 8px 6px; font-weight: 600; }}
+QHeaderView::section {{ color: {C['on_surface_variant']}; padding: 5px 6px; font-weight: 600; }}
 
-QWidget#chip {{ border-radius: 8px; border: 1px solid {C['outline_variant']}; }}
+QWidget#chip {{ border-radius: 6px; border: 1px solid {C['outline_variant']}; }}
 QWidget#chip[ok="yes"] {{ background: {C['good_container']}; border-color: {C['good_container']}; }}
 QWidget#chip[ok="no"] {{ background: {C['error_container']}; border-color: {C['error_container']}; }}
 QLabel#dot {{ border-radius: 4px; background: {C['outline']}; }}
 QLabel#dot[ok="yes"] {{ background: {C['good']}; }}
 QLabel#dot[ok="no"] {{ background: {C['error']}; }}
-QLabel#chipText {{ font-size: 9.5pt; font-weight: 600; }}
+QLabel#chipText {{ font-size: 9pt; font-weight: 600; }}
 QLabel#chipText[ok="yes"] {{ color: {C['on_good_container']}; }}
 QLabel#chipText[ok="no"] {{ color: {C['on_error_container']}; }}
 

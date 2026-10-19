@@ -98,24 +98,21 @@ class Switch(QAbstractButton):
 
 
 class SettingRow(QWidget):
-    """Title + supporting text on the left, a switch on the right; a click anywhere flips the switch."""
+    """One line: title on the left, a switch on the right; the description shows on hover (row and switch).
+    A click anywhere on the row flips the switch."""
 
     def __init__(self, title: str, text: str, switch: Switch, parent=None):
         super().__init__(parent)
         self.setObjectName("row")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(text)
         self.switch = switch
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 10, 12, 10)
-        lay.setSpacing(16)
-        col = QVBoxLayout()
-        col.setSpacing(2)
+        lay.setContentsMargins(12, 0, 4, 0)
+        lay.setSpacing(12)
         self.title = QLabel(title, objectName="rowTitle")
-        self.text = QLabel(text, objectName="rowText", wordWrap=True)
-        col.addWidget(self.title)
-        col.addWidget(self.text)
-        lay.addLayout(col, 1)
+        lay.addWidget(self.title, 1)
         lay.addWidget(switch, 0, Qt.AlignVCenter)
 
     def mouseReleaseEvent(self, e) -> None:  # noqa: N802
@@ -138,29 +135,29 @@ class RailButton(QAbstractButton):
         self._icon = icon
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)  # Ctrl+1..6 switch pages; a focus pill on start looked like a 2nd selection
-        self.setFixedSize(80, 64)
+        self.setFixedSize(68, 54)
         self.setToolTip(text)
 
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         on = self.isChecked()
-        pill = QRectF((self.width() - 56) / 2, 6, 56, 32)
+        pill = QRectF((self.width() - 48) / 2, 4, 48, 28)
         if on or self.underMouse():
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(C["secondary_container"]) if on else _alpha(C["on_surface"], .08))
-            p.drawRoundedRect(pill, 16, 16)
+            p.drawRoundedRect(pill, 14, 14)
         f = QFont(ICON_FONT)
-        f.setPixelSize(18)
+        f.setPixelSize(16)
         p.setFont(f)
         p.setPen(QColor(C["on_secondary_container"] if on else C["on_surface_variant"]))
         p.drawText(pill, Qt.AlignCenter, glyph(self._icon))
         f = QFont(self.font())
-        f.setPixelSize(12)
+        f.setPixelSize(11)
         f.setWeight(QFont.DemiBold if on else QFont.Medium)
         p.setFont(f)
         p.setPen(QColor(C["on_surface"] if on else C["on_surface_variant"]))
-        p.drawText(QRectF(0, 40, self.width(), 18), Qt.AlignHCenter | Qt.AlignTop, self.text())
+        p.drawText(QRectF(0, 34, self.width(), 16), Qt.AlignHCenter | Qt.AlignTop, self.text())
         p.end()
 
 
@@ -172,9 +169,9 @@ class Rail(QWidget):
         super().__init__(parent)
         self.setObjectName("rail")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setFixedWidth(88)
+        self.setFixedWidth(76)
         self._lay = QVBoxLayout(self)
-        self._lay.setContentsMargins(4, 12, 4, 12)
+        self._lay.setContentsMargins(4, 10, 4, 10)
         self._lay.setSpacing(4)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
@@ -215,6 +212,9 @@ class Pages(QStackedWidget):
             self.setCurrentIndex(0)
 
 
+S = 88  # power button size, px
+
+
 class PowerButton(QAbstractButton):
     """The one bold element: a big round toggle whose ring tells the state (off / on / working)."""
 
@@ -222,7 +222,7 @@ class PowerButton(QAbstractButton):
         super().__init__(parent)
         self.state = "off"
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(124, 124)
+        self.setFixedSize(S, S)
         self._spin = 0.0
         self._anim = QVariantAnimation(self, startValue=0.0, endValue=360.0, duration=1400, loopCount=-1)
         self._anim.valueChanged.connect(self._rot)
@@ -253,26 +253,26 @@ class PowerButton(QAbstractButton):
         ring = {"on": C["good"], "busy": C["warn"]}.get(self.state, C["outline_variant"])
         fill = {"on": C["good_container"], "busy": C["warn_container"]}.get(self.state, C["surface_high"])
         fg = {"on": C["good"], "busy": C["warn"]}.get(self.state, C["on_surface_variant"])
-        r = QRectF(6, 6, 112, 112)
+        r = QRectF(4, 4, S - 8, S - 8)
         if self.underMouse() and self.isEnabled():
             p.setPen(Qt.NoPen)
             p.setBrush(_alpha(fg, .10))
-            p.drawEllipse(QRectF(0, 0, 124, 124))
-        p.setPen(QPen(QColor(ring), 4))
+            p.drawEllipse(QRectF(0, 0, S, S))
+        p.setPen(QPen(QColor(ring), 3))
         p.setBrush(QColor(fill))
         p.drawEllipse(r)
         if self.state == "busy":  # a moving arc: work in progress
-            p.setPen(QPen(QColor(C["warn"]), 4, Qt.SolidLine, Qt.RoundCap))
+            p.setPen(QPen(QColor(C["warn"]), 3, Qt.SolidLine, Qt.RoundCap))
             p.setBrush(Qt.NoBrush)
             p.drawArc(r, int(-self._spin * 16), 90 * 16)
         if self.hasFocus() and self._kbd:  # ring only for keyboard focus, not on start / after a click
             p.setPen(QPen(QColor(C["primary"]), 2))
             p.setBrush(Qt.NoBrush)
-            p.drawEllipse(QRectF(1, 1, 122, 122))
-        pen = QPen(QColor(fg), 6, Qt.SolidLine, Qt.RoundCap)
+            p.drawEllipse(QRectF(1, 1, S - 2, S - 2))
+        pen = QPen(QColor(fg), 4.5, Qt.SolidLine, Qt.RoundCap)
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
-        cx, cy, rr = 62.0, 64.0, 22.0
+        cx, cy, rr = S / 2, S / 2 + 2, S * .17
         p.drawArc(QRectF(cx - rr, cy - rr, 2 * rr, 2 * rr), 125 * 16, 290 * 16)
         p.drawLine(QPointF(cx, cy - rr - 5), QPointF(cx, cy - 4))
         p.end()
