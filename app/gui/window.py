@@ -27,7 +27,8 @@ from app.paths import ROOT
 TASK = "ZapretAuto"
 AUTO = "Авто (результат подбора)"
 UPDATE_EVERY = 6 * 3600  # s between background update checks
-from app.gui.style import COLORS, STYLE, app_icon, init_fonts  # noqa: E402
+from app.gui import style  # noqa: E402
+from app.gui.style import COLORS, app_icon, init_fonts  # noqa: E402
 from app.gui.widgets import InputRow, PowerButton, Pages, Rail, SettingRow, StatusChip, Switch  # noqa: E402
 from app.gui.worker import Bridge, Worker  # noqa: E402
 
@@ -102,7 +103,8 @@ class MainWindow(QWidget):
     def _build(self):
         QApplication.instance().setStyle("Fusion")
         init_fonts()
-        QApplication.instance().setStyleSheet(STYLE)
+        self._light = None
+        self.apply_theme(force=True)
         self.setObjectName("root")
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -565,16 +567,34 @@ class MainWindow(QWidget):
 
     def showEvent(self, e):
         super().showEvent(e)
-        if not getattr(self, "_dark_title", False):
-            self._dark_title = True
-            try:
-                import ctypes
-                hwnd, on = int(self.winId()), ctypes.c_int(1)
-                for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (new / pre-20H1 builds)
-                    if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(on), 4) == 0:
-                        break
-            except Exception:  # noqa: BLE001
-                pass
+        self._title_bar()
+
+    def _title_bar(self):
+        """Dark or light window title bar to match the theme."""
+        try:
+            import ctypes
+            hwnd, on = int(self.winId()), ctypes.c_int(0 if self._light else 1)
+            for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (new / pre-20H1 builds)
+                if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(on), 4) == 0:
+                    break
+        except Exception:  # noqa: BLE001
+            pass
+
+    def apply_theme(self, force: bool = False):
+        """Follow the Windows light/dark setting (checked at start and every ~10 s)."""
+        light = style.windows_light()
+        if style.set_theme(light) or force:
+            self._light = light
+            QApplication.instance().setStyleSheet(style.build_style())
+            self._title_bar()
+            self.update()
+            for w in self.findChildren(QWidget):
+                w.update()  # custom-painted widgets read the tokens on paint
+            if hasattr(self, "diag_table"):  # colors baked into items / rich text: refill them
+                if getattr(self, "_last_diag", None):
+                    self.on_diag_done(self._last_diag)
+                self.fill_games()
+                self.fill_stats()
 
     def set_chips(self, res: dict):
         """Service status chips after an access check: a dot and the name, and the words when it fails."""
@@ -722,7 +742,7 @@ class MainWindow(QWidget):
         if s["switches"]:
             rows.append(("Смены стратегии", ", ".join(f"{time.strftime('%d.%m %H:%M', time.localtime(t))} — {n}"
                                                       for t, n in s["switches"][-3:])))
-        muted = "#c3c6cf"
+        muted = style.C["on_surface_variant"]
         self.lbl_stats.setText(
             f"<div style='font-weight:600; margin-bottom:6px'>За последние {s['days']} дней</div>"
             "<table cellspacing='0' cellpadding='3'>"
@@ -877,6 +897,8 @@ class MainWindow(QWidget):
             self._next_update_check = now + UPDATE_EVERY  # the app runs for weeks: don't update only at start
             self._auto_check = True
             self.check_update()
+        if self._ticks % 5 == 0:
+            self.apply_theme()  # Windows light/dark switched: follow it live
         if self._ticks % 30 == 0 and self.runner.running and not self.busy:  # ~1 min: VPN may have moved
             from app import vpn
             self._run(lambda log: vpn.write_exclude(), lambda _: None)  # winws reloads the file itself
@@ -1302,9 +1324,9 @@ class MainWindow(QWidget):
         for exe, g in top:
             name = gamewatch.display_name(exe, g.get("path"))
             ping = g.get("ping_ms")
-            state = ("<span style='color:#6dd58c'>играете</span>" + (f", {ping:.0f} мс" if ping else "")
+            state = (f"<span style='color:{style.C["good"]}'>играете</span>" + (f", {ping:.0f} мс" if ping else "")
                      if g.get("active") else f"{len(g.get('ips', ()))} адресов в обходе")
-            lines.append(f"<span style='color:#e2e2e9'>{name}</span> — {state}")
+            lines.append(f"<span style='color:{style.C["on_surface"]}'>{name}</span> — {state}")
         more = len(rows) - len(top)
         self.lbl_games.setText("<br>".join(lines) + (f"<br>и ещё {more}" if more > 0 else ""))
 

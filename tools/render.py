@@ -109,3 +109,17 @@ area = w.tabs.currentWidget().findChild(__import__("PySide6.QtWidgets", fromlist
 area.verticalScrollBar().setValue(area.verticalScrollBar().maximum())
 app.processEvents()
 w.grab().save(str(out / "settings_bottom.png"))
+# light theme (Windows «light» apps mode)
+from app.gui import style as _st  # noqa: E402
+
+_st.windows_light = lambda: True
+w.apply_theme()
+w.runner.proc = type("P", (), {"poll": lambda self: None})()
+w.set_chips({"Discord": True, "YouTube": True, "Голос Discord": False})
+w.refresh()
+for i, name in ((0, "light_home"), (2, "light_settings"), (3, "light_diag")):
+    w.tabs.setCurrentIndex(i)
+    app.processEvents()
+    app.processEvents()
+    w.grab().save(str(out / f"{name}.png"))
+w.runner.proc = None

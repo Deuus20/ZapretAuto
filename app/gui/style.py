@@ -13,7 +13,40 @@ C = {
     "warn": "#f9bc4d", "warn_container": "#3f2e00",
     "error": "#ffb4ab", "error_container": "#601410", "on_error_container": "#ffdad6",
 }
+DARK = dict(C)
+# the same roles from the light scheme (primary tone 40, containers 90, surfaces 98–90)
+LIGHT = {
+    "surface": "#f9f9ff", "surface_low": "#f2f3fa", "surface_cont": "#ededf4", "surface_high": "#e7e8ee",
+    "surface_highest": "#e2e2e9", "on_surface": "#191c20", "on_surface_variant": "#44474e",
+    "outline": "#74777f", "outline_variant": "#c4c6d0",
+    "primary": "#415f91", "on_primary": "#ffffff", "primary_container": "#d6e3ff",
+    "on_primary_container": "#001b3e", "secondary_container": "#dae2f9", "on_secondary_container": "#131c2b",
+    "good": "#1b6d32", "good_container": "#c5f0cd", "on_good_container": "#00210a",
+    "warn": "#7a5900", "warn_container": "#ffdea4",
+    "error": "#ba1a1a", "error_container": "#ffdad6", "on_error_container": "#410002",
+}
 COLORS = {"on": "#22c55e", "off": "#9aa3b5", "busy": "#f59e0b"}  # tray/taskbar icon fills: small, need punch
+
+
+def windows_light() -> bool:
+    """Windows «apps» theme: light (True) or dark."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 1
+    except OSError:
+        return False
+
+
+def set_theme(light: bool) -> bool:
+    """Switch the tokens in place (widgets read C when they paint). True if it changed."""
+    new = LIGHT if light else DARK
+    if C == new:
+        return False
+    C.clear()
+    C.update(new)
+    return True
 
 # Segoe Fluent Icons (Win11) and Segoe MDL2 Assets (Win10) share these code points
 ICONS = {"home": "", "games": "", "settings": "", "diag": "", "log": "",
@@ -65,12 +98,26 @@ def app_icon(color: str = "#3b82f6") -> QIcon:
     return icon
 
 
-_HOVER = "rgba(168, 199, 250, 0.08)"
-_PRESS = "rgba(168, 199, 250, 0.12)"
-_OFF_FG = "rgba(226, 226, 233, 0.38)"
-_OFF_BG = "rgba(226, 226, 233, 0.12)"
+def _rgba(color: str, a: float) -> str:
+    c = QColor(color)
+    return f"rgba({c.red()}, {c.green()}, {c.blue()}, {a})"
 
-STYLE = f"""
+
+def _mix(base: str, layer: str, t: float) -> str:
+    """M3 state layer: `layer` at opacity t over `base`, as an opaque color."""
+    b, l_ = QColor(base), QColor(layer)
+    return QColor(round(b.red() + (l_.red() - b.red()) * t), round(b.green() + (l_.green() - b.green()) * t),
+                  round(b.blue() + (l_.blue() - b.blue()) * t)).name()
+
+
+def build_style() -> str:
+    """The app stylesheet from the current tokens C (rebuilt when the Windows theme changes)."""
+    hover, press = _rgba(C["primary"], .08), _rgba(C["primary"], .12)
+    off_fg, off_bg = _rgba(C["on_surface"], .38), _rgba(C["on_surface"], .12)
+    primary_hover = _mix(C["primary"], C["on_primary"], .08)
+    tonal_hover = _mix(C["secondary_container"], C["on_secondary_container"], .08)
+    menu_hover = _rgba(C["on_surface"], .08)
+    return f"""
 * {{ font-family: "Segoe UI Variable Text", "Segoe UI"; font-size: 9.5pt; color: {C['on_surface']}; }}
 QWidget {{ background: transparent; }}
 QWidget#root, QWidget#rail, QStackedWidget, QWidget#page {{ background: {C['surface']}; }}
@@ -93,23 +140,23 @@ QWidget#row:hover {{ background: {C['surface_cont']}; }}
 
 QPushButton {{ border-radius: 15px; padding: 5px 14px; font-weight: 600; min-height: 20px;
               background: transparent; border: 1px solid {C['outline']}; color: {C['primary']}; }}
-QPushButton:hover {{ background: {_HOVER}; }}
-QPushButton:pressed {{ background: {_PRESS}; }}
+QPushButton:hover {{ background: {hover}; }}
+QPushButton:pressed {{ background: {press}; }}
 QPushButton:focus {{ border: 2px solid {C['primary']}; }}
-QPushButton:disabled {{ color: {_OFF_FG}; border-color: {_OFF_BG}; }}
+QPushButton:disabled {{ color: {off_fg}; border-color: {off_bg}; }}
 QPushButton#primary {{ background: {C['primary']}; color: {C['on_primary']}; border: none; }}
-QPushButton#primary:hover {{ background: #b6d0fb; }}
-QPushButton#primary:disabled, QPushButton#tonal:disabled {{ background: {_OFF_BG}; color: {_OFF_FG}; }}
+QPushButton#primary:hover {{ background: {primary_hover}; }}
+QPushButton#primary:disabled, QPushButton#tonal:disabled {{ background: {off_bg}; color: {off_fg}; }}
 QPushButton#tonal {{ background: {C['secondary_container']}; color: {C['on_secondary_container']}; border: none; }}
-QPushButton#tonal:hover {{ background: #46526a; }}
+QPushButton#tonal:hover {{ background: {tonal_hover}; }}
 QPushButton#text {{ border: none; padding: 5px 10px; color: {C['primary']}; }}
-QPushButton#text:hover {{ background: {_HOVER}; }}
+QPushButton#text:hover {{ background: {hover}; }}
 
 QComboBox {{ background: transparent; border: 1px solid {C['outline']}; border-radius: 8px; padding: 5px 10px;
             min-height: 20px; }}
 QComboBox:hover {{ border-color: {C['on_surface']}; }}
 QComboBox:focus {{ border: 2px solid {C['primary']}; }}
-QComboBox:disabled {{ color: {_OFF_FG}; border-color: {_OFF_BG}; }}
+QComboBox:disabled {{ color: {off_fg}; border-color: {off_bg}; }}
 QComboBox::drop-down {{ border: none; width: 28px; }}
 QComboBox QAbstractItemView {{ background: {C['surface_cont']}; border: none; padding: 6px; outline: none;
                                selection-background-color: {C['secondary_container']}; }}
@@ -145,7 +192,7 @@ QToolTip {{ background: {C['surface_highest']}; color: {C['on_surface']}; border
 QMessageBox, QInputDialog, QDialog {{ background: {C['surface_high']}; }}
 QMenu {{ background: {C['surface_cont']}; padding: 6px 0; }}
 QMenu::item {{ padding: 8px 24px; }}
-QMenu::item:selected {{ background: rgba(226, 226, 233, 0.08); }}
+QMenu::item:selected {{ background: {menu_hover}; }}
 QLineEdit {{ background: transparent; border: 1px solid {C['outline']}; border-radius: 8px; padding: 5px 8px; }}
 QLineEdit:focus {{ border: 2px solid {C['primary']}; }}
 QLineEdit[error="yes"] {{ border: 2px solid {C['error']}; }}

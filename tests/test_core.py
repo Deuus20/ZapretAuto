@@ -905,3 +905,18 @@ def test_gui_pick_summary(tmp_path, monkeypatch):
         assert w.chips.count() >= 3
     finally:
         _close(app, w)
+
+
+def test_gui_follows_windows_theme(tmp_path, monkeypatch):
+    from app.gui import style
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        monkeypatch.setattr(style, "windows_light", lambda: True)
+        w.apply_theme()
+        assert style.C["surface"] == style.LIGHT["surface"] and style.LIGHT["surface"] in app.styleSheet()
+        monkeypatch.setattr(style, "windows_light", lambda: False)
+        w.apply_theme()
+        assert style.C == style.DARK and style.DARK["surface"] in app.styleSheet()
+    finally:
+        style.set_theme(False)  # tokens are global: leave the dark ones for other tests
+        _close(app, w)
