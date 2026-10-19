@@ -41,6 +41,15 @@
      "score": 34,
      "total": 36,
      "app": "1.0.8"
+    },
+    {
+     "choice": {
+      "base": "ALT8",
+      "picks": {}
+     },
+     "score": 37,
+     "total": 40,
+     "app": "1.0.19"
     }
    ],
    "choice": {
