@@ -1353,7 +1353,7 @@ class MainWindow(QWidget):
         from app import __version__
         auto = self.settings.get("auto_update", True)
         self._show_upd("app", f"ZapretAuto {__version__}: " + (
-            "не удалось проверить (нет связи с GitHub)" if not tag else
+            f"не удалось проверить ({getattr(updater, 'APP_CHECK_ERROR', '') or 'нет связи с GitHub'})" if not tag else
             f"найдена версия {tag}" + (", устанавливаю" if auto else "") if newer else "последняя версия"))
         if not newer or getattr(self, "_app_updating", False):
             return
