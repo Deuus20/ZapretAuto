@@ -89,3 +89,16 @@ w.refresh()
 app.processEvents()
 w.grab().save(str(out / "main_on.png"))
 w.runner.proc = None
+w.on_diag_done([
+    {"label": "Base Filtering Engine", "level": "ok", "detail": "Running"},
+    {"label": "Файлы обхода", "level": "ok", "detail": "winws.exe, WinDivert на месте"},
+    {"label": "Подмена DNS", "level": "err", "detail": "провайдер подменяет адреса: youtube.com — обход не поможет "
+     "без защищённого DNS. «Исправить» включит его в Chrome, Edge и Яндекс.Браузере", "fix": "browser_doh"},
+    {"label": "QUIC в браузерах", "level": "warn", "detail": "QUIC до YouTube не проходит — «Исправить» отключит QUIC",
+     "fix": "disable_quic"},
+    {"label": "Кэш Discord", "level": "ok", "detail": "если Discord висит на загрузке — «Исправить» очистит кэш",
+     "fix": "discord_cache"}])
+w.tabs.setCurrentIndex(3)
+app.processEvents()
+app.processEvents()
+w.grab().save(str(out / "diag_rows.png"))

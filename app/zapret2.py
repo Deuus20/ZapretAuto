@@ -11,7 +11,7 @@ from pathlib import Path
 
 import requests
 
-from . import paths
+from . import paths, strategies
 
 COMMIT = "6eb463a6758fb48cd101bc55dfd057e6e9d98af1"
 BASE = f"https://raw.githubusercontent.com/bol-van/zapret-win-bundle/{COMMIT}/zapret-winws/"
@@ -133,7 +133,7 @@ class Strategy2:
 
     def argv(self, game_tcp: bool = False, game_udp: bool = False, auto_hostlist: bool = False) -> list[str]:
         r, ls = root(), paths.LISTS
-        gt = "1024-65535" if game_tcp else GAME_OFF
+        gt = strategies.GAME_TCP if game_tcp else GAME_OFF
         gu = "1024-65535" if game_udp else GAME_OFF
         hosts = [f"--hostlist={ls / 'list-general.txt'}", f"--hostlist={ls / 'list-general-user.txt'}",
                  f"--hostlist={ls / 'list-google.txt'}"]

@@ -89,7 +89,8 @@ class MainWindow(QWidget):
         ("game_udp", "Обход UDP для игр",
          "Обход UDP-трафика игр на портах 1024–65535. Включается сам, когда найдена игра.", False, "adv"),
         ("game_tcp", "Обход TCP для игр",
-         "То же для TCP: некоторые игры входят в онлайн по TCP. Включается сам, когда найдена игра.", False, "adv"),
+         "То же для TCP: некоторые игры входят в онлайн по TCP. Включается сам, когда найдена игра. "
+         "Порт 1935 (трансляции OBS) не трогает.", False, "adv"),
         ("telegram", "Telegram (эксперимент)",
          "Добавить подсети Telegram в обход. Помогает не всем провайдерам: при блокировке по IP нужен прокси или VPN.",
          False, "adv"),
@@ -389,9 +390,11 @@ class MainWindow(QWidget):
         hh = self.diag_table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
-        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.Fixed)
+        hh.resizeSection(2, 124)  # room for «Исправить»: ResizeToContents ignored cell widgets and clipped it
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.diag_table.verticalHeader().hide()
+        self.diag_table.verticalHeader().setMinimumSectionSize(40)  # fits the «Исправить» button
         self.diag_table.setShowGrid(False)
         self.diag_table.setWordWrap(True)
         self.diag_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -455,23 +458,37 @@ class MainWindow(QWidget):
         self._last_diag = res
         t = self.diag_table
         t.setRowCount(0)
-        col = {"ok": "#4ade80", "warn": "#fbbf24", "err": "#f87171"}
-        for r in res or []:
+        from app.gui.style import C
+        col = {"ok": C["good"], "warn": C["warn"], "err": C["error"]}
+        order = {"err": 0, "warn": 1}
+        for r in sorted(res or [], key=lambda r: order.get(r["level"], 2)):  # problems first
             i = t.rowCount()
             t.insertRow(i)
-            a = QTableWidgetItem(r["label"])
-            a.setForeground(QColor(col.get(r["level"], "#888")))
+            a = QTableWidgetItem(("●  " if r["level"] != "ok" else "") + r["label"])
+            a.setForeground(QColor(col.get(r["level"], C["outline"])))
             t.setItem(i, 0, a)
             t.setItem(i, 1, QTableWidgetItem(r["detail"]))
             if r.get("fix"):
-                b = QPushButton("Исправить")
+                b = QPushButton("Исправить", objectName="tonal" if r["level"] != "ok" else "text")
+                b.setCursor(Qt.PointingHandCursor)
                 b.clicked.connect(lambda _=False, f=r["fix"]: self.apply_fix(f))
-                t.setCellWidget(i, 2, b)
+                cell = QWidget()  # centered, natural height: a bare cell widget stretched over a tall row
+                cl = QHBoxLayout(cell)
+                cl.setContentsMargins(4, 2, 4, 2)
+                cl.addWidget(b, 0, Qt.AlignVCenter)
+                t.setCellWidget(i, 2, cell)
         t.resizeRowsToContents()
 
     def apply_fix(self, fix):
-        self.log(f"исправление {fix}:\n{diag.apply_fix(fix)}")
-        self.run_diag()
+        """Fixes may hit the network or kill processes: run them off the UI thread, then show the result."""
+        self.btn_diag.setEnabled(False)
+
+        def done(msg):
+            msg = msg or "не удалось — подробности в журнале"
+            self.log(f"исправление {fix}: {msg}")
+            QMessageBox.information(self, "Диагностика", msg)
+            self.run_diag()
+        self._run(lambda log: diag.apply_fix(fix), done)
 
     def load_list(self, *_):
         p = lists.user_list_paths()[self.list_combo.currentData()]
@@ -729,6 +746,19 @@ class MainWindow(QWidget):
             t = tester.Target("site", f"https://{dom}")
             if not self.runner.running:
                 return "Сначала включите обход (большая кнопка), потом проверьте сайт."
+            import socket
+            try:
+                socket.gethostbyname(dom)
+            except socket.gaierror:
+                from app import diag
+                try:
+                    exists = bool(diag._doh(dom))
+                except OSError:
+                    exists = False
+                if exists:  # ISPs answer "no such domain" for blocked sites: the bypass can't fix DNS
+                    return (f"Провайдер не даёт найти {dom}: DNS отвечает, что такого сайта нет, хотя он есть. "
+                            "Включите защищённый DNS: «Диагностика» → «Найти проблемы» → «Подмена DNS» → «Исправить».")
+                return f"Сайт {dom} не найден — проверьте адрес."
             before = tester.probe(t) is not None
             if before:
                 return f"{dom} уже открывается — обход для него не нужен."
