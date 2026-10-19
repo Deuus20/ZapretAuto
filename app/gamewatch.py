@@ -1,6 +1,7 @@
 """Detect game processes and collect their remote IPs into data/lists/ipset-games.txt."""
 import ctypes
 import ipaddress
+import json
 import os
 import re
 import statistics
@@ -179,6 +180,7 @@ class GameWatcher(threading.Thread):
         self._base: dict[str, tuple[int, float, str]] = {}  # ip -> (port, ms, exe) baseline before desync
         self._measuring: set[str] = set()
         self._checked: dict = {}
+        self._db_games: dict[str, set[str]] = {}  # shared base (games-db.json): servers others have seen
         self.rollback_delay = 15.0
         self.measure = tcp_latency
         st = load_settings()
@@ -222,6 +224,14 @@ class GameWatcher(threading.Thread):
             self._base.pop(ip, None)
         self._persist_settings()
         self._flush()
+
+    def web_nets(self) -> list[str]:
+        """Login/web nets learned on this PC (for sharing; shipped and shared ones are left out)."""
+        with self._lock:
+            return sorted(self._web_nets - KNOWN_WEB_NETS)
+
+    def _seed(self, exe: str) -> set[str]:
+        return set(known_games.GAME_IPS.get(exe, ())) | self._db_games.get(exe, set())
 
     def add_manual(self, path: str) -> str:
         """Add a game picked by hand (shown at once; its servers are collected when it runs)."""
@@ -410,8 +420,8 @@ class GameWatcher(threading.Thread):
             seen_active.add(exe)
             with self._lock:
                 if exe not in self._games:  # first sight of a known game: its servers are known already
-                    new_ip = new_ip or exe in known_games.GAME_IPS
-                g = self._games.setdefault(exe, {"path": path, "ips": set(known_games.GAME_IPS.get(exe, ())),
+                    new_ip = new_ip or bool(self._seed(exe))
+                g = self._games.setdefault(exe, {"path": path, "ips": set(list(self._seed(exe))[:MAX_IPS_PER_GAME]),
                                                  "active": True, "ping_ms": None})
                 g.setdefault("started", time.time())
                 g["path"] = path
@@ -508,11 +518,42 @@ class GameWatcher(threading.Thread):
                     nets.add(sa[0].rsplit(".", 1)[0] + ".0/24")
             except OSError:
                 pass
+        db = self._shared_db()
+        nets |= set(db.get("web", []))
         with self._lock:
             new = nets - self._web_nets
-            self._web_nets |= new
+            if len(self._web_nets) < MAX_WEB_NETS:
+                self._web_nets |= new
+            self._db_games = {exe.lower(): set(ips) for exe, ips in db.get("games", {}).items()}
+            for exe, g in self._games.items():  # games already known here get the servers others have seen
+                add = self._db_games.get(exe, set()) - g["ips"]
+                if add and len(g["ips"]) < MAX_IPS_PER_GAME:
+                    g["ips"] |= set(list(add)[:MAX_IPS_PER_GAME - len(g["ips"])])
+                    new = True
         if new:
+            self._persist_settings()
             self._pending_since = time.time()
+
+    @staticmethod
+    def _shared_db() -> dict:
+        """games-db.json from the repo; the last good copy when offline. Only valid public IPv4 entries pass."""
+        from . import sharedb
+        cache = paths.DATA / "games-db.json"
+        db = sharedb.games_db()
+        if db is not None:
+            try:
+                cache.write_text(json.dumps(db), encoding="utf-8")
+            except OSError:
+                pass
+        else:
+            try:
+                db = json.loads(cache.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {}
+        games = {exe: [ip for ip in ips if public_ipv4(ip)][:MAX_IPS_PER_GAME]
+                 for exe, ips in (db.get("games") or {}).items() if isinstance(ips, list)}
+        web = [n for n in (db.get("web") or []) if isinstance(n, str) and n.endswith(".0/24") and public_ipv4(n[:-3])]
+        return {"games": games, "web": web[:MAX_WEB_NETS]}
 
     def run(self) -> None:
         self._pending_since = time.time()  # write ipset-exclude-games.txt with the known nets right away
