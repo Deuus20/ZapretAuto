@@ -180,8 +180,7 @@ class MainWindow(QWidget):
         col.addWidget(self.substatus)
         self.chips = QHBoxLayout()
         self.chips.setSpacing(6)
-        self.chips.setContentsMargins(0, 4, 0, 0)
-        col.addLayout(self.chips)
+        self.chips.setContentsMargins(0, 0, 0, 0)
         col.addStretch()
         hero.addLayout(col, 1)
         acts = QVBoxLayout()
@@ -207,6 +206,7 @@ class MainWindow(QWidget):
         acts.addStretch()
         hero.addLayout(acts)
         lay.addLayout(hero)
+        lay.addLayout(self.chips)  # own full-width row: next to the action buttons they got squeezed and clipped
         self.progress = QProgressBar(objectName="thin")
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 0)
