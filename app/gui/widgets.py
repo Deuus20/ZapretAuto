@@ -306,6 +306,7 @@ class StatusChip(QWidget):
     def __init__(self, name: str, ok: bool | None, note: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("chip")
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)  # never squeezed into a clipped label
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setProperty("ok", "none" if ok is None else ("yes" if ok else "no"))
         lay = QHBoxLayout(self)
