@@ -1147,6 +1147,7 @@ class MainWindow(QWidget):
             self.tray.showMessage("ZapretAuto", f"Обход починен: {self.describe()}" if res else
                                   "Починить автоматически не удалось — откройте окно программы")
         if res:
+            self._pick_summary()
             self._offer_autostart()
             self._offer_share()
         elif not cancelled and self.isVisible() and QMessageBox.question(
@@ -1155,6 +1156,22 @@ class MainWindow(QWidget):
                 == QMessageBox.Yes:
             self.send_report()
         self.refresh()
+
+    def _pick_summary(self):
+        """What the pick achieved, in one line (log + tray), and the service chips from its final runs."""
+        lp = self.settings.get("last_pick") or {}
+        if not lp.get("total") or time.time() - lp.get("time", 0) > 600:
+            return
+        line = f"Готово: {self.describe()} — проходит {lp['score']} из {lp['total']} проверок"
+        if lp.get("before") is not None:
+            line += f" (было {lp['before']})"
+        if lp.get("services"):
+            self.set_chips(lp["services"])
+            bad = [k for k, v in lp["services"].items() if not v and k != "Скорость YouTube"]
+            if bad:
+                line += ". Не открывается: " + ", ".join(bad)
+        self.log(line)
+        self.tray.showMessage("ZapretAuto", line)
 
     def _offer_autostart(self):
         """After the first successful setup: most people want the bypass to come up with Windows."""

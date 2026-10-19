@@ -319,6 +319,8 @@ def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
     logs = []
     assert tester.auto_pick(logs.append, use_shared=False) == {"base": "ALT11", "picks": {}}
     assert any("оставляю текущую" in m for m in logs)
+    lp = settings.load_settings()["last_pick"]
+    assert lp["before"] == lp["score"] and lp["time"] > 0 and "services" in lp   # summary data for the GUI
 
 
 def test_dns_poison_detection(monkeypatch):
@@ -887,5 +889,19 @@ def test_game_ports_custom_and_validated(tmp_path, monkeypatch):
         w.ports["tcp"].setText("")
         w.on_ports("tcp")                                                      # empty: back to the default
         assert any("1024-1934,1936-65535" in a for a in s.argv(True))
+    finally:
+        _close(app, w)
+
+
+def test_gui_pick_summary(tmp_path, monkeypatch):
+    app, w = _gui(tmp_path, monkeypatch, last_pick={"score": 26, "total": 28, "before": 18, "time": time.time(),
+                                                    "services": {"Discord": True, "YouTube": True,
+                                                                 "Голос Discord": False}})
+    try:
+        shown = []
+        monkeypatch.setattr(w.tray, "showMessage", lambda *a: shown.append(a[1]))
+        w._pick_summary()
+        assert shown and "26 из 28" in shown[0] and "было 18" in shown[0] and "Голос Discord" in shown[0]
+        assert w.chips.count() >= 3
     finally:
         _close(app, w)
