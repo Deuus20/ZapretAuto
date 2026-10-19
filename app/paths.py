@@ -44,6 +44,7 @@ USER_LISTS = {
     "ipset-games.txt": "203.0.113.113/32\n",
     "ipset-telegram.txt": "203.0.113.113/32\n",
     "ipset-exclude-vpn.txt": "203.0.113.113/32\n",
+    "ipset-exclude-games.txt": "203.0.113.113/32\n",
     "list-auto.txt": "domain.example.abc\n",
 }
 

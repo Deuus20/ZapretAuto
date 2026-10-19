@@ -19,6 +19,7 @@ from .settings import load_settings, save_settings
 
 PLACEHOLDER = "203.0.113.113/32"
 SKIP_PORTS = {80, 443}  # web/CDN traffic (launchers, login APIs) is covered by hostlists/ipset; desyncing it broke launchers
+MAX_WEB_NETS = 512      # /24s of games' web/login servers kept out of the ipset-all profiles
 LOGIN_GRACE = 120.0  # s after a game starts: no winws restarts, so logins are not cut off
 GAME_DIRS = ("steamapps\\common", "\\epic games\\", "\\riot games\\", "\\battle.net\\", "\\ubisoft",
              "\\ea games\\", "\\gog games\\", "\\xboxgames\\", "\\windowsapps\\")
@@ -70,6 +71,16 @@ def classify(path: str | None, settings: dict | None = None) -> bool:
     if any(d in p for d in SYSTEM_DIRS):
         return False
     return any(d in p for d in GAME_DIRS)
+
+
+def web_client(path: str | None, settings: dict | None = None) -> bool:
+    """Game or its launcher (anything in a game dir): its 80/443 servers must not be desynced."""
+    if classify(path, settings):
+        return True
+    p = (path or "").lower().replace("/", "\\")
+    exe = p.rsplit("\\", 1)[-1]
+    return (exe not in NON_GAME_EXES and exe not in {x.lower() for x in (settings or {}).get("games_ignore", [])}
+            and not any(d in p for d in SYSTEM_DIRS) and any(d in p for d in GAME_DIRS))
 
 
 def public_ipv4(ip: str) -> bool:
@@ -154,6 +165,7 @@ class GameWatcher(threading.Thread):
         self.flow_count = 0
         self._pending_since: float | None = None
         self._last_written: str | None = None
+        self._last_web: str | None = None
         self._pid_cache: dict[int, tuple[tuple[str | None, str | None], float]] = {}
         self._pool = ThreadPoolExecutor(4, thread_name_prefix="gamewatch")
         self._flush_lock = threading.Lock()
@@ -171,11 +183,13 @@ class GameWatcher(threading.Thread):
         if st.get("games_schema", 1) < 2:  # v1 collected 80/443 CDN addresses too: start over once
             save_settings(games={k: {"path": v.get("path", ""), "ips": []} for k, v in st.get("games", {}).items()},
                           games_schema=2)
+        self._web_nets: set[str] = set(load_settings().get("games_web", []))
         for exe, g in load_settings().get("games", {}).items():
             self._games[exe] = {"path": g.get("path", ""), "ips": set(g.get("ips", [])),
                                 "active": False, "ping_ms": None}
         try:
             self._last_written = (paths.LISTS / "ipset-games.txt").read_text(encoding="utf-8")
+            self._last_web = (paths.LISTS / "ipset-exclude-games.txt").read_text(encoding="utf-8")
         except OSError:
             pass
 
@@ -359,14 +373,23 @@ class GameWatcher(threading.Thread):
     def _process(self, events: list[tuple[int, str, int, int]]) -> None:
         settings = load_settings()
         seen_active: set[str] = set()
-        new_ip = False
+        new_ip = new_web = False
         banned = set(settings.get("games_bad_ips", []))
         if len(self._udp_hits) > 500:
             self._udp_hits.clear()
         if len(self._ping) > 5000:
             self._ping.clear()
         for pid, ip, port, proto in set(events):
-            if port in SKIP_PORTS or not public_ipv4(ip) or ip in banned:
+            if port in SKIP_PORTS and public_ipv4(ip):
+                net = ip.rsplit(".", 1)[0] + ".0/24"
+                if net not in self._web_nets and len(self._web_nets) < MAX_WEB_NETS:
+                    exe, path = self._proc(pid)
+                    if exe and web_client(path, settings):
+                        with self._lock:
+                            self._web_nets.add(net)
+                        new_web = True
+                continue
+            if not public_ipv4(ip) or ip in banned:
                 continue
             exe, path = self._proc(pid)
             if not exe or not (classify(path, settings) or self._udp_game(exe, path, ip, port, proto, settings)):
@@ -402,7 +425,7 @@ class GameWatcher(threading.Thread):
                     if names is None:  # one process scan per tick, only when needed
                         names = self._running_names()
                     g["active"] = exe in names
-        if new_ip:
+        if new_ip or new_web:
             self._pending_since = time.time()
             self._persist_settings()
 
@@ -416,7 +439,24 @@ class GameWatcher(threading.Thread):
     def _persist_settings(self) -> None:
         with self._lock:
             data = {k: {"path": v["path"], "ips": sorted(v["ips"])} for k, v in self._games.items()}
-        save_settings(games=data)
+            web = sorted(self._web_nets)
+        save_settings(games=data, games_web=web)
+
+    def _render_web(self) -> str:
+        """ipset-exclude-games.txt; settings games_web_bypass=true keeps desyncing them (opt-out)."""
+        with self._lock:
+            nets = sorted(self._web_nets, key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
+        if not nets or load_settings().get("games_web_bypass"):
+            nets = [PLACEHOLDER]
+        return "\n".join(nets) + "\n"
+
+    @staticmethod
+    def _write(name: str, text: str) -> None:
+        paths.LISTS.mkdir(parents=True, exist_ok=True)
+        f = paths.LISTS / name
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, f)  # winws must never read a half-written list
 
     def _render(self) -> str:
         with self._lock:
@@ -434,14 +474,14 @@ class GameWatcher(threading.Thread):
 
     def _flush(self) -> None:
         with self._flush_lock:
+            web = self._render_web()
+            if web != self._last_web:
+                self._write("ipset-exclude-games.txt", web)
+                self._last_web = web
             text = self._render()
             if text == self._last_written:
                 return
-            paths.LISTS.mkdir(parents=True, exist_ok=True)
-            f = paths.LISTS / "ipset-games.txt"
-            tmp = f.with_suffix(".tmp")
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, f)  # winws must never read a half-written list
+            self._write("ipset-games.txt", text)
             self._last_written = text
             self._last_restart = time.time()
         try:
