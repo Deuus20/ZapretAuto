@@ -1029,6 +1029,13 @@ class MainWindow(QWidget):
         if path:
             exe = path.replace("/", "\\")
             name = exe.rsplit("\\", 1)[-1].lower()
+            ignored = name in {x.lower() for x in self.settings.get("games_ignore", [])}
+            if self.watcher and name in self.watcher.games() and not ignored:
+                rows = [self.table.item(i, 0).text() for i in range(self.table.rowCount())]
+                if name in rows:
+                    self.table.selectRow(rows.index(name))
+                QMessageBox.information(self, "ZapretAuto", f"{name} уже есть в списке игр.")
+                return
             self.save(games_force=sorted(set(self.settings.get("games_force", [])) | {exe}),
                       games_ignore=[x for x in self.settings.get("games_ignore", []) if x.lower() != name],
                       game_watch=True)  # adding a game by hand means "watch it": also undo an earlier «Игнорировать»
