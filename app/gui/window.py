@@ -25,7 +25,7 @@ except Exception:  # noqa: BLE001
 
 from app.paths import ROOT
 TASK = "ZapretAuto"
-AUTO = "Авто (микс)"
+AUTO = "Авто (результат подбора)"
 from app.gui.style import COLORS, STYLE, app_icon, power_icon  # noqa: E402
 from app.gui.worker import Bridge, Worker  # noqa: E402
 
@@ -499,7 +499,8 @@ class MainWindow(QWidget):
         self.act_toggle.setText("Выключить" if run else "Включить")
         self.btn_auto.setEnabled(not self.busy)
         c = self.settings.get("strategy")
-        self.combo.setCurrentIndex(0 if not c or c.get("picks") else max(0, self.combo.findText(c["base"])))
+        manual = c and not c.get("picks") and c != self._auto_choice()
+        self.combo.setCurrentIndex(max(0, self.combo.findText(c["base"])) if manual else 0)
 
     def save(self, **kw):
         tester.save_settings(**kw)
@@ -811,14 +812,26 @@ class MainWindow(QWidget):
         elif not self.start_runner() and not self.settings.get("strategy"):
             self.ask_autopick()
 
+    def _auto_choice(self) -> dict | None:
+        """Result of the last auto-pick (a single strategy or a mix). Older versions did not store it: then the
+        current strategy counts as auto when it came from a pick (last_pick present) or is a mix."""
+        c = self.settings.get("auto_choice")
+        if c:
+            return c
+        cur = self.settings.get("strategy")
+        return cur if cur and (self.settings.get("last_pick") or cur.get("picks")) else None
+
     def on_combo(self, i):
         if i == 0:
-            if not self.settings.get("strategy", {}).get("picks"):
-                QMessageBox.information(self, "ZapretAuto", "Комбинация ещё не подобрана. "
+            auto = self._auto_choice()
+            if not auto:
+                QMessageBox.information(self, "ZapretAuto", "Стратегия ещё не подбиралась. "
                                         "Нажмите «Подобрать лучшую стратегию».")
                 self.refresh()
-            return
-        self.save(strategy={"base": self.combo.itemText(i), "picks": {}})
+                return
+            self.save(strategy=auto)
+        else:
+            self.save(strategy={"base": self.combo.itemText(i), "picks": {}})
         if self.runner.running:
             self.start_runner()
         self.refresh()

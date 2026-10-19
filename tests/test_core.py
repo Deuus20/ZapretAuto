@@ -490,3 +490,31 @@ def test_gui_workers_do_not_leak_handles(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
+
+
+def test_gui_auto_item_returns_to_last_pick(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(strategy={"base": "ALT8", "picks": {}}, auto_choice={"base": "ALT8", "picks": {}},
+                           ipset_updated=time.time())
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a)))
+    w = MainWindow()
+    try:
+        assert w.combo.currentIndex() == 0                     # single-strategy pick still shows as «Авто»
+        w.on_combo(w.combo.findText("EXP"))
+        assert w.settings["strategy"]["base"] == "EXP" and w.combo.currentText() == "EXP"
+        w.on_combo(0)                                          # back to the pick result, no "not picked" message
+        assert w.settings["strategy"] == {"base": "ALT8", "picks": {}} and not shown
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
