@@ -378,11 +378,16 @@ class MainWindow(QWidget):
         self.btn_diag = QPushButton("Найти проблемы", objectName="primary")
         self.btn_diag.clicked.connect(self.run_diag)
         drow.addWidget(self.btn_diag)
-        self.btn_report = QPushButton("Сохранить отчёт об ошибке…")
+        self.btn_report = QPushButton("Сохранить в zip…")
         self.btn_report.setToolTip("Собрать журнал, диагностику и настройки в zip, чтобы отправить разработчику. "
                                    "Имя пользователя Windows в отчёте скрыто.")
         self.btn_report.clicked.connect(self.save_report)
         drow.addWidget(self.btn_report)
+        self.btn_send = QPushButton("Отправить отчёт разработчику…", objectName="tonal")
+        self.btn_send.setToolTip("Не помогло? Откроется страница GitHub с готовым отчётом: версии, найденные "
+                                 "проблемы и конец журнала. Имя пользователя и IP-адреса скрыты. Нужен аккаунт GitHub.")
+        self.btn_send.clicked.connect(lambda: self.send_report())
+        drow.addWidget(self.btn_send)
         drow.addStretch()
         lay.addLayout(drow)
         self.diag_table = QTableWidget(0, 3)
@@ -529,7 +534,9 @@ class MainWindow(QWidget):
         a6.triggered.connect(lambda: self.pause(15))
         a4 = QAction("Выход", m)
         a4.triggered.connect(self.quit)
-        for a in (self.act_toggle, a6, a5, a2, a3, a4):
+        a7 = QAction("Не работает? Отправить отчёт…", m)
+        a7.triggered.connect(lambda: (self.show_window(), self.send_report()))
+        for a in (self.act_toggle, a6, a5, a2, a3, a7, a4):
             m.addAction(a)
         self._menu = m
         self.tray.setContextMenu(m)
@@ -662,6 +669,18 @@ class MainWindow(QWidget):
             self._explain_failure()
         self.refresh()
         return self.runner.running
+
+    def send_report(self, what: str | None = None):
+        """Publish the problem as a GitHub issue (the user confirms it on the page)."""
+        if what is None:
+            what, ok = QInputDialog.getText(self, "Отправить отчёт",
+                                            "Коротко: что не работает? (например: Discord не грузится)")
+            if not ok:
+                return
+        import webbrowser
+        url = logs.issue_url(what, getattr(self, "_last_diag", None))
+        webbrowser.open(url)
+        self.log("открыта страница отправки отчёта на GitHub")
 
     def save_report(self):
         default = str(Path.home() / "Desktop" / f"ZapretAuto-report-{time.strftime('%Y%m%d-%H%M')}.zip")
@@ -1099,6 +1118,11 @@ class MainWindow(QWidget):
         if res:
             self._offer_autostart()
             self._offer_share()
+        elif not cancelled and self.isVisible() and QMessageBox.question(
+                self, "ZapretAuto", "Подбор не помог. Отправить отчёт разработчику?\n\nОткроется страница GitHub "
+                "с готовым отчётом (версии и конец журнала, имя пользователя и IP скрыты). Нужен аккаунт GitHub.") \
+                == QMessageBox.Yes:
+            self.send_report()
         self.refresh()
 
     def _offer_autostart(self):

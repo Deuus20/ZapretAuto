@@ -42,9 +42,52 @@ def _excepthook(t, v, tb) -> None:
 
 
 def _redact(text: str) -> str:
-    """Hide the Windows user name and public IPv4 addresses (except well-known service IPs)."""
+    """Hide the Windows user name."""
     text = re.sub(r"(?i)(c:[\\/]+users[\\/]+)[^\\/\"']+", r"\1<user>", text)
     return text
+
+
+def _redact_public(text: str) -> str:
+    """For a public GitHub issue: also hide every non-local IPv4 (VPN servers, the user's own address)."""
+    import ipaddress
+
+    def ip(m):
+        try:
+            a = ipaddress.IPv4Address(m.group(0))
+        except ValueError:
+            return m.group(0)
+        return m.group(0) if a.is_private or a.is_loopback else "<ip>"
+    return re.sub(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", ip, _redact(text))
+
+
+ISSUE_URL_MAX = 7500  # GitHub drops prefilled issue text beyond ~8 KB of URL
+
+
+def issue_url(what: str = "", diag_results: list | None = None) -> str:
+    """Prefilled GitHub issue: versions, the user's words, problems found by diagnostics and the log tail
+    (as many last lines as fit). Opened in the browser; the user presses «Create»."""
+    from urllib.parse import quote
+    from . import __version__, tester, updater
+    from .updater import APP_REPO
+    s = tester.chosen_strategy()
+    head = [f"**Что не работает:** {what.strip() or '(не указано)'}", "",
+            f"ZapretAuto {__version__} · zapret {updater.current_version()} · Windows {platform.version()}",
+            f"Стратегия: {s.name if s else 'не выбрана'} · VPN: {tester.vpn_active() or 'нет'}"]
+    probs = [f"- {r['label']}: {r['detail']}" for r in diag_results or [] if r.get("level") != "ok"]
+    if probs:
+        head += ["", "**Диагностика:**"] + probs
+    try:
+        lines = (LOG_DIR / "zapretauto.log").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        lines = []
+    title = quote(f"[log] ZapretAuto {__version__}: {(what.strip() or 'не работает')[:60]}")
+    n = min(len(lines), 80)
+    while True:
+        body = "\n".join(head) + "\n\n**Журнал (последние строки):**\n```\n" + "\n".join(lines[-n:] if n else []) + "\n```\n"
+        url = f"https://github.com/{APP_REPO}/issues/new?title={title}&body={quote(_redact_public(body))}"
+        if len(url) <= ISSUE_URL_MAX or n == 0:
+            return url
+        n = max(0, n - 10)
 
 
 def make_report(dest: Path, diag_results: list | None = None) -> Path:
