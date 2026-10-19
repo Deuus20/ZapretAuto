@@ -243,13 +243,15 @@ class MainWindow(QWidget):
         r = QHBoxLayout()
         self.btn_check = QPushButton("Проверить обновления")
         self.btn_check.setToolTip("Проверить, есть ли новые версии zapret и ZapretAuto")
-        self.btn_check.clicked.connect(self.check_update)
+        self.btn_check.clicked.connect(lambda: self.check_update(manual=True))
         self.btn_update = QPushButton("Обновить")
         self.btn_update.setToolTip("Скачать и установить новую версию zapret")
         self.btn_update.clicked.connect(lambda: self.do_update(False))
         r.addWidget(self.btn_check)
         r.addWidget(self.btn_update)
         ul.addLayout(r)
+        self.lbl_upd = QLabel(wordWrap=True)  # result of the last check: the button used to only write the log
+        ul.addWidget(self.lbl_upd)
         ul.addStretch()
         self.tabs.addTab(u, "Обновления")
         d = QWidget()
@@ -1050,29 +1052,50 @@ class MainWindow(QWidget):
             self.fill_games()
 
     # ---------- updates ----------
-    def check_update(self):
+    def check_update(self, manual: bool = False):
         if updater:
             self.log("проверка обновлений…")
+            self._upd = {}
+            if manual:
+                self.lbl_upd.setText("Проверяю…")
+                self.btn_check.setEnabled(False)
             updater.check_async(lambda tag, newer: self.bridge.update_checked.emit(tag, newer))
             if hasattr(updater, "app_check_async"):
                 updater.app_check_async(lambda tag, newer: self.bridge.app_checked.emit(tag, newer))
 
+    def _show_upd(self, key, text):
+        self._upd = {**getattr(self, "_upd", {}), key: text}
+        if len(self._upd) == 2:  # both answers in (zapret + app)
+            self.lbl_upd.setText(f"{self._upd['app']}. {self._upd['zapret']}. Проверено в {time.strftime('%H:%M')}.")
+            self.btn_check.setEnabled(True)
+
     def on_app_checked(self, tag, newer):
-        if not newer:
+        from app import __version__
+        auto = self.settings.get("auto_update", True)
+        self._show_upd("app", f"ZapretAuto {__version__}: " + (
+            "не удалось проверить (нет связи с GitHub)" if not tag else
+            f"найдена версия {tag}" + (", устанавливаю" if auto else "") if newer else "последняя версия"))
+        if not newer or getattr(self, "_app_updating", False):
             return
         self.log(f"доступна новая версия ZapretAuto: {tag}")
         if self.settings.get("auto_update", True) or QMessageBox.question(
                 self, "ZapretAuto", f"Установить ZapretAuto {tag}?") == QMessageBox.Yes:
             def done(ok):
+                self._app_updating = False
                 if ok is True:  # installer replaces files and restarts the app
                     self.tray.showMessage("ZapretAuto", f"Устанавливаю версию {tag}, программа перезапустится…")
                     QTimer.singleShot(1500, self.quit)
                 else:
                     self.log("самообновление не выполнено")
+                    self.lbl_upd.setText(f"Не удалось установить ZapretAuto {tag} — подробности в журнале.")
+            self._app_updating = True  # two checks at once downloaded and ran the installer twice
             self._run(lambda log: updater.app_update(log), done)
 
     def on_update_checked(self, tag, newer):
         self.log(f"последняя версия: {tag}" + (" (есть обновление)" if newer else " (актуально)" if tag else " (не удалось проверить)"))
+        self._show_upd("zapret", "zapret: " + ("не удалось проверить" if not tag else
+                                              f"есть версия {tag} — нажмите «Обновить»" if newer and not self._auto_check
+                                              else f"обновляю до {tag}" if newer else f"{tag}, последняя версия"))
         if self._auto_check:
             self._auto_check = False
             if newer:
