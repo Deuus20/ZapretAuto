@@ -920,3 +920,37 @@ def test_gui_follows_windows_theme(tmp_path, monkeypatch):
     finally:
         style.set_theme(False)  # tokens are global: leave the dark ones for other tests
         _close(app, w)
+
+
+def test_user_exclude_list_never_empty(tmp_path, monkeypatch):
+    from app import lists
+    monkeypatch.setattr(paths, "LISTS", tmp_path)
+    assert lists.add_user_domain("bank.ru", "list-exclude-user.txt")
+    assert (tmp_path / "list-exclude-user.txt").read_text(encoding="utf-8") == "bank.ru\n"
+    lists.remove_user_domain("bank.ru", "list-exclude-user.txt")
+    assert (tmp_path / "list-exclude-user.txt").read_text(encoding="utf-8") == "domain.example.abc\n"  # winws needs 1
+
+
+def test_gui_site_broken_by_bypass_gets_excluded(tmp_path, monkeypatch):
+    from app import lists
+    from PySide6.QtWidgets import QInputDialog, QMessageBox
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        paths.sync_lists()
+        excl = paths.LISTS / "list-exclude-user.txt"
+        monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("https://bank.example.ru/x", True)))
+        shown = []
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        monkeypatch.setattr("socket.gethostbyname", lambda d: "1.2.3.4")
+        w.runner.proc = type("P", (), {"poll": lambda self: None})()
+        # opens only while excluded from the bypass
+        monkeypatch.setattr(tester, "probe", lambda t: 0.1 if "bank.example.ru" in excl.read_text(encoding="utf-8")
+                            and t.url.startswith("https") else None)
+        w.check_site()
+        assert shown and "ломался из-за обхода" in shown[-1] and "bank.example.ru" in excl.read_text(encoding="utf-8")
+        assert "bank.example.ru" not in (paths.LISTS / "list-general-user.txt").read_text(encoding="utf-8")
+        w.runner.proc = None
+    finally:
+        _close(app, w)
