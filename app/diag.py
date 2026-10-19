@@ -203,12 +203,33 @@ def run_checks() -> list[dict]:
     else:
         res.append(_item("VPN", "ok", ("раздельный туннель или VPN выключен" if srv else "нет") +
                          (f"; серверы VPN исключены из обхода: {', '.join(sorted(srv))}" if srv else "")))
+    caches = _discord_caches()
+    if caches:
+        res.append(_item("Кэш Discord", "ok", "если Discord висит на загрузке или проверке обновлений — «Исправить» "
+                                              "закроет его и очистит кэш", "discord_cache"))
     quic_off = _quic_disabled()
-    res.append(_item("QUIC в браузерах", "ok",
-                     "отключён политикой" if quic_off else
-                     "включён — если YouTube в браузере тормозит, а «Проверить доступ» показывает ✓, нажмите «Исправить»",
-                     None if quic_off else "disable_quic"))
+    if quic_off:
+        res.append(_item("QUIC в браузерах", "ok", "отключён политикой — браузеры открывают YouTube по TCP"))
+    else:
+        blocked = _quic_blocked()
+        res.append(_item("QUIC в браузерах", "warn" if blocked else "ok",
+                         "QUIC до YouTube не проходит (так ТСПУ режет HTTP/3 с 2026 года): браузер сначала ждёт, "
+                         "потом переходит на TCP — видео стартует медленно. «Исправить» отключит QUIC в браузерах"
+                         if blocked else "включён и проходит; если YouTube в браузере всё же тормозит — «Исправить»",
+                         "disable_quic"))
     return res
+
+
+def _quic_blocked() -> bool:
+    """HTTP/3 to YouTube fails while HTTPS over TCP works (checked through the running bypass)."""
+    try:
+        from . import tester
+        h3 = tester.probe(tester.Target("YouTubeQUIC", "h3://www.youtube.com/"))
+        if h3 is not None:
+            return False
+        return tester.probe(tester.Target("YouTubeWeb", "https://www.youtube.com/")) is not None
+    except Exception:  # noqa: BLE001 (no curl_cffi / no network: no verdict)
+        return False
 
 
 QUIC_POLICIES = (r"SOFTWARE\Policies\Google\Chrome", r"SOFTWARE\Policies\Microsoft\Edge",
@@ -231,6 +252,35 @@ def _disable_quic() -> str:
         with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as k:
             winreg.SetValueEx(k, "QuicAllowed", 0, winreg.REG_DWORD, 0)
     return "QUIC отключён для Chrome, Edge и Яндекс.Браузера — перезапустите браузер"
+
+
+DISCORD_BUILDS = {"discord": "Discord.exe", "discordptb": "DiscordPTB.exe", "discordcanary": "DiscordCanary.exe",
+                  "discorddevelopment": "DiscordDevelopment.exe"}
+CACHE_DIRS = ("Cache", "Code Cache", "GPUCache")
+
+
+def _discord_caches() -> list:
+    """Cache folders of installed Discord builds (%APPDATA%\\discord*): a stale cache after blocks kept
+    Discord stuck at loading/updating; Flowseal's service.bat clears the same folders."""
+    import os
+    from pathlib import Path
+    base = Path(os.environ.get("APPDATA", ""))
+    return [base / b / c for b in DISCORD_BUILDS for c in CACHE_DIRS if (base / b / c).is_dir()]
+
+
+def _clear_discord_cache() -> str:
+    import shutil
+    for exe in DISCORD_BUILDS.values():
+        _run(["taskkill", "/F", "/IM", exe])
+    import time
+    time.sleep(1)  # let Discord release its files
+    left = []
+    for d in _discord_caches():
+        shutil.rmtree(d, ignore_errors=True)
+        if d.exists():
+            left.append(d.name)
+    return ("кэш Discord очищен — запустите Discord заново" if not left else
+            "часть кэша не удалилась (" + ", ".join(left) + ") — закройте Discord и нажмите ещё раз")
 
 
 def _browser_doh_on() -> bool:
@@ -267,9 +317,10 @@ def _browser_doh() -> str:
 
 
 def apply_fix(fix_id: str) -> str:
-    if fix_id in ("disable_quic", "browser_doh"):
+    funcs = {"disable_quic": _disable_quic, "browser_doh": _browser_doh, "discord_cache": _clear_discord_cache}
+    if fix_id in funcs:
         try:
-            return _disable_quic() if fix_id == "disable_quic" else _browser_doh()
+            return funcs[fix_id]()
         except OSError as e:
             return f"не удалось: {e}"
     cmds = {

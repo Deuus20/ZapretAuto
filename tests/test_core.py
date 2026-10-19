@@ -681,7 +681,7 @@ def test_zapret2_argv_and_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
     settings._cache = None
     a = zapret2.Strategy2().argv(True, False, True)
-    assert a[0].endswith("winws2.exe") and "--wf-tcp-out=80,443,2053,2083,2087,2096,8443,1024-65535" in a
+    assert a[0].endswith("winws2.exe") and "--wf-tcp-out=80,443,2053,2083,2087,2096,8443,1024-1934,1936-65535" in a
     assert "--wf-udp-out=443,12" in a                                   # UDP game filter off
     circ = [x for x in a if x.startswith("--lua-desync=") and ":strategy=" in x]
     nums = {int(x.rsplit("=", 1)[1]) for x in circ}
@@ -798,3 +798,17 @@ def test_gui_known_games_show_after_restart(tmp_path, monkeypatch):
     finally:
         w.stop_watcher()
         _close(app, w)
+
+
+def test_discord_cache_fix(tmp_path, monkeypatch):
+    from app import diag
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    for d in ("discord/Cache", "discord/Code Cache", "discordptb/GPUCache", "discord/Local Storage"):
+        (tmp_path / d).mkdir(parents=True)
+    killed = []
+    monkeypatch.setattr(diag, "_run", lambda c, timeout=20: killed.append(c[-1]) or (0, ""))
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    assert len(diag._discord_caches()) == 3
+    assert "очищен" in diag.apply_fix("discord_cache")
+    assert not diag._discord_caches() and (tmp_path / "discord" / "Local Storage").exists()  # login kept
+    assert "Discord.exe" in killed

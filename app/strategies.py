@@ -7,6 +7,7 @@ from pathlib import Path
 from . import paths
 
 GAME_OFF = "12"  # upstream uses a dummy port when the game filter is disabled
+GAME_TCP = "1024-1934,1936-65535"  # game filter TCP minus RTMP (1935): desyncing it broke OBS streams (Flowseal 1.10.3)
 
 
 @dataclass
@@ -41,7 +42,7 @@ class Strategy:
         subs = {
             "%BIN%": str(paths.BIN) + "\\",
             "%LISTS%": str(paths.LISTS) + "\\",
-            "%GameFilterTCP%": "1024-65535" if game_tcp else GAME_OFF,
+            "%GameFilterTCP%": GAME_TCP if game_tcp else GAME_OFF,
             "%GameFilterUDP%": "1024-65535" if game_udp else GAME_OFF,
         }
 
