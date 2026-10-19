@@ -80,11 +80,10 @@ QScrollArea > QWidget > QWidget {{ background: {C['surface']}; }}
 QLabel#h1 {{ font-size: 14pt; font-weight: 600; }}
 QLabel#title {{ font-size: 15pt; font-weight: 600; }}
 QLabel#h2 {{ font-size: 10.5pt; font-weight: 600; }}
-QLabel#sub, QLabel#rowText, QLabel#muted {{ color: {C['on_surface_variant']}; }}
+QLabel#sub, QLabel#muted {{ color: {C['on_surface_variant']}; }}
 QLabel#sub[error="yes"] {{ color: {C['error']}; }}
 QLabel#rowTitle {{ font-size: 10pt; }}
-QLabel#rowText {{ font-size: 9pt; }}
-QLabel#rowTitle:disabled, QLabel#rowText:disabled {{ color: {C['outline']}; }}
+QLabel#rowTitle:disabled {{ color: {C['outline']}; }}
 QLabel#section {{ color: {C['primary']}; font-weight: 600; font-size: 9pt; padding: 10px 12px 4px 12px; }}
 QLabel#empty {{ color: {C['on_surface_variant']}; padding: 24px; font-size: 10pt; }}
 
@@ -103,8 +102,8 @@ QPushButton#primary:hover {{ background: #b6d0fb; }}
 QPushButton#primary:disabled, QPushButton#tonal:disabled {{ background: {_OFF_BG}; color: {_OFF_FG}; }}
 QPushButton#tonal {{ background: {C['secondary_container']}; color: {C['on_secondary_container']}; border: none; }}
 QPushButton#tonal:hover {{ background: #46526a; }}
-QPushButton#text, QPushButton#link {{ border: none; padding: 5px 10px; color: {C['primary']}; }}
-QPushButton#text:hover, QPushButton#link:hover {{ background: {_HOVER}; }}
+QPushButton#text {{ border: none; padding: 5px 10px; color: {C['primary']}; }}
+QPushButton#text:hover {{ background: {_HOVER}; }}
 
 QComboBox {{ background: transparent; border: 1px solid {C['outline']}; border-radius: 8px; padding: 5px 10px;
             min-height: 20px; }}
@@ -114,12 +113,6 @@ QComboBox:disabled {{ color: {_OFF_FG}; border-color: {_OFF_BG}; }}
 QComboBox::drop-down {{ border: none; width: 28px; }}
 QComboBox QAbstractItemView {{ background: {C['surface_cont']}; border: none; padding: 6px; outline: none;
                                selection-background-color: {C['secondary_container']}; }}
-
-QTabWidget::pane {{ border: none; }}
-QTabBar::tab {{ background: transparent; padding: 7px 14px; color: {C['on_surface_variant']};
-               border-bottom: 3px solid transparent; font-weight: 600; }}
-QTabBar::tab:selected {{ color: {C['primary']}; border-bottom: 3px solid {C['primary']}; }}
-QTabBar::tab:hover {{ background: rgba(226, 226, 233, 0.08); }}
 
 QPlainTextEdit, QTableWidget {{ background: {C['surface_low']}; border: none; border-radius: 12px; padding: 6px;
                                selection-background-color: {C['primary_container']}; }}
