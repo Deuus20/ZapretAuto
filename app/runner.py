@@ -2,11 +2,14 @@
 import ctypes
 import subprocess
 import threading
+from pathlib import Path
 
 import psutil
 
 from . import paths, vpn
 from .strategies import Strategy
+
+EXES = ("winws.exe", "winws2.exe")  # winws2: experimental zapret2 mode
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -20,7 +23,7 @@ def is_admin() -> bool:
 
 def _stray_winws() -> bool:
     try:
-        return any((p.info["name"] or "").lower() == "winws.exe" for p in psutil.process_iter(["name"]))
+        return any((p.info["name"] or "").lower() in EXES for p in psutil.process_iter(["name"]))
     except psutil.Error:
         return True
 
@@ -45,8 +48,9 @@ class Runner:
                 vpn.write_exclude()
             except Exception:  # noqa: BLE001
                 pass
+            argv = s.argv(game_tcp, game_udp, auto_hostlist)
             self.proc = subprocess.Popen(
-                s.argv(game_tcp, game_udp, auto_hostlist), cwd=paths.BIN, creationflags=CREATE_NO_WINDOW,
+                argv, cwd=Path(argv[0]).parent, creationflags=CREATE_NO_WINDOW,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,  # an undrained PIPE would block winws
             )
             self.current = s
@@ -61,9 +65,10 @@ class Runner:
                 except subprocess.TimeoutExpired:
                     p.kill()
             if _stray_winws():  # instances started by upstream .bat files or a previous run
-                try:
-                    subprocess.run(["taskkill", "/F", "/IM", "winws.exe"], capture_output=True,
-                                   creationflags=CREATE_NO_WINDOW, timeout=10)
-                except subprocess.TimeoutExpired:
-                    pass
+                for exe in EXES:
+                    try:
+                        subprocess.run(["taskkill", "/F", "/IM", exe], capture_output=True,
+                                       creationflags=CREATE_NO_WINDOW, timeout=10)
+                    except subprocess.TimeoutExpired:
+                        pass
             self.proc = self.current = None

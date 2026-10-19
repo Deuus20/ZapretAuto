@@ -61,3 +61,11 @@ def sync_lists() -> None:
         p = LISTS / name
         if not p.exists():
             p.write_text(default, encoding="utf-8")
+
+
+def write_list(p: Path, text: str) -> None:
+    """Replace a list atomically: winws re-reads lists live and must never see a half-written file."""
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, p)

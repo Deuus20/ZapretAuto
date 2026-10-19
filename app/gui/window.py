@@ -38,7 +38,6 @@ class MainWindow(QWidget):
         self.resize(700, 680)
         self.runner = Runner()
         self.watcher = None
-        self.worker: Worker | None = None
         self.busy = False
         self._cancel = False  # set by «Отменить» during a pick
         self._cancellable = False
@@ -183,6 +182,10 @@ class MainWindow(QWidget):
             ("telegram", "Telegram (экспериментально)", False,
              "Добавить подсети Telegram в обход. Помогает не всем провайдерам: если Telegram "
              "заблокирован по IP, zapret бессилен — нужен прокси.", True),
+            ("zapret2", "zapret2 (эксперимент)", False,
+             "Новый движок zapret2: если сайт начинает блокироваться, обход сам переключает для него "
+             "другую стратегию — без перезапуска и без подбора на 2–4 минуты. Скачивается при включении (~4 МБ).",
+             True),
         ]:
             c = QCheckBox(text)
             c.setToolTip(tip)
@@ -378,7 +381,8 @@ class MainWindow(QWidget):
             text = text.rstrip() + ("\n" if text.strip() else "") + (
                 "203.0.113.113/32" if p.name.startswith("ipset") else "domain.example.abc") + "\n"
             self.list_edit.setPlainText(text)
-        p.write_text(text, encoding="utf-8")
+        from app import paths
+        paths.write_list(p, text)
         self.log(f"сохранён {p.name}")
 
     def update_ipset(self):
@@ -452,6 +456,9 @@ class MainWindow(QWidget):
                                   "Выход — правый клик по значку → «Выход».")
 
     def describe(self) -> str:
+        if self._zapret2_on():
+            from app import zapret2
+            return zapret2.NAME
         c = self.settings.get("strategy")
         if not c:
             return "не выбрана"
@@ -490,6 +497,8 @@ class MainWindow(QWidget):
         self.btn_toggle.setAccessibleName(title)
         for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site):
             w.setEnabled(not self.busy)
+        if self._zapret2_on():  # zapret2 picks strategies per site itself: the winws list does not apply
+            self.combo.setEnabled(False)
         self.btn_toggle.setProperty("state", state)
         self.btn_toggle.setIcon(power_icon({"on": "#22c55e", "busy": "#f59e0b"}.get(state, "#9aa3b5")))
         self.btn_toggle.style().unpolish(self.btn_toggle)
@@ -653,6 +662,10 @@ class MainWindow(QWidget):
             bad = ", ".join(k for k, v in res.items() if not v)
             self.log(f"проверка: не работает {bad} ({self._health_fails}/2)")
             self._next_health = time.time() + 60  # re-check soon
+            if self._health_fails >= 2 and self._zapret2_on():
+                self._health_fails = 0  # a pick would test winws strategies: not what runs now
+                self.log("режим zapret2: стратегии для сайтов переключаются сами, автоподбор не запускаю")
+                return
             if self._health_fails >= 2 and self.settings.get("auto_repick", True):
                 self._health_fails = 0
                 if self._game_running():
@@ -818,8 +831,38 @@ class MainWindow(QWidget):
         elif key == "telegram":
             from app import lists
             self._run(lambda log: lists.set_telegram(v, log), lambda _: None)  # winws reloads the file itself
+        elif key == "zapret2":
+            self.set_zapret2(v)
         elif key in ("game_tcp", "game_udp", "auto_hostlist") and self.runner.running and not self.busy:
             self.start_runner()
+
+    def _zapret2_on(self) -> bool:
+        """zapret2 mode is what runs (or would run): enabled and its files are in place."""
+        if not self.settings.get("zapret2"):
+            return False
+        from app import zapret2
+        return zapret2.installed()
+
+    def set_zapret2(self, on: bool):
+        """Switch the engine: download winws2 on first use, then restart the bypass with it (or back)."""
+        from app import zapret2
+
+        def switched(ok):
+            if not ok:
+                self.error = "Не удалось скачать zapret2 — подробности в журнале."
+                self.cb["zapret2"].blockSignals(True)
+                self.cb["zapret2"].setChecked(False)
+                self.cb["zapret2"].blockSignals(False)
+                self.save(zapret2=False)
+            self.log("режим zapret2 " + ("включён: стратегии переключаются сами для каждого сайта" if on and ok
+                                         else "выключен"))
+            if self.runner.running or self._expect_running:
+                self.start_runner()
+            self.refresh()
+        if on and not zapret2.installed():
+            self._run(lambda log: zapret2.install(log), switched)
+        else:
+            switched(True)
 
     def set_autostart(self, on: bool):
         if on:
@@ -844,6 +887,13 @@ class MainWindow(QWidget):
 
     def autopick(self, *_):
         if self.busy:
+            return
+        if self._zapret2_on():  # the pick tests winws strategies: it would not change anything in zapret2 mode
+            self.log("режим zapret2: стратегии переключаются сами, подбор не нужен")
+            if self.isVisible():
+                QMessageBox.information(self, "ZapretAuto", "Включён режим zapret2: он сам переключает стратегии для "
+                                        "каждого сайта, подбор не нужен. Чтобы подобрать стратегию обычным способом, "
+                                        "выключите «zapret2 (эксперимент)» в разделе «Дополнительно».")
             return
         vpn = tester.vpn_active()
         if vpn:
@@ -879,7 +929,7 @@ class MainWindow(QWidget):
                 self.substatus.setText("Финальная проверка лучших вариантов…")
                 self.progress.setValue(self.progress.maximum() - 2)
         self._cancel, self._cancellable = False, True
-        self.worker = self._run(lambda log: tester.auto_pick(log, stop=lambda: self._cancel), self._autopick_done, line)
+        self._run(lambda log: tester.auto_pick(log, stop=lambda: self._cancel), self._autopick_done, line)
 
     def _autopick_done(self, res):
         self.busy = False
@@ -1139,8 +1189,8 @@ class MainWindow(QWidget):
         self.busy_text = "Обновляю zapret…"
         self._expect_running = False
         self.refresh()
-        self.worker = self._run(lambda log: updater.update(log, self.runner.stop),
-                                lambda ok: self._update_done(ok, was, auto))
+        self._run(lambda log: updater.update(log, self.runner.stop),
+                  lambda ok: self._update_done(ok, was, auto))
 
     def _update_done(self, ok, was, auto):
         self.busy = False

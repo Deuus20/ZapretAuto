@@ -118,11 +118,11 @@ def _v4(a) -> str | None:
     return str(ipaddress.IPv4Address(v))
 
 
-def _group(ips: set[str], web_only: set[str] = frozenset()) -> set[str]:
-    """Collapse >=4 IPs of one /24 into the /24, except IPs seen only on 80/443 (CDNs: keep exact)."""
+def _group(ips: set[str]) -> set[str]:
+    """Collapse >=4 IPs of one /24 into the /24."""
     by24 = defaultdict(list)
-    out = set(ips & web_only)
-    for ip in ips - web_only:
+    out = set()
+    for ip in ips:
         by24[ip.rsplit(".", 1)[0]].append(ip)
     for pre, lst in by24.items():
         if len(lst) >= 4:
@@ -134,7 +134,6 @@ def _group(ips: set[str], web_only: set[str] = frozenset()) -> set[str]:
 
 def tcp_latency(ip: str, port: int, timeout: float = 2.0, n: int = 3) -> float | None:
     """Median TCP connect time in ms over n tries; None if no try succeeded."""
-    import socket
     vals = []
     for _ in range(n):
         t0 = time.perf_counter()
@@ -167,7 +166,6 @@ class GameWatcher(threading.Thread):
         self._ev_lock = threading.Lock()
         self._handle = None
         self._dll = None
-        self.flow_count = 0
         self._pending_since: float | None = None
         self._last_written: str | None = None
         self._last_web: str | None = None
@@ -213,17 +211,6 @@ class GameWatcher(threading.Thread):
         with self._lock:
             return {k: {"path": v["path"], "ips": set(v["ips"]), "active": v["active"],
                         "ping_ms": v["ping_ms"], "started": v.get("started", 0)} for k, v in self._games.items()}
-
-    def remove_ip(self, exe: str, ip: str) -> None:
-        """Drop one IP from a game, rewrite the ipset and apply."""
-        with self._lock:
-            g = self._games.get(exe)
-            if not g or ip not in g["ips"]:
-                return
-            g["ips"].discard(ip)
-            self._base.pop(ip, None)
-        self._persist_settings()
-        self._flush()
 
     def web_nets(self) -> list[str]:
         """Login/web nets learned on this PC (for sharing; shipped and shared ones are left out)."""
@@ -328,7 +315,6 @@ class GameWatcher(threading.Thread):
             ip = _v4(a.RemoteAddr)
             if ip is None:
                 continue
-            self.flow_count += 1
             with self._ev_lock:
                 self._events.append((a.ProcessId, ip, a.RemotePort, a.Protocol))
                 del self._events[:-5000]
