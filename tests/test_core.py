@@ -454,3 +454,39 @@ def test_vpn_exclude_not_rewritten_when_unchanged(tmp_path, monkeypatch):
     os.utime(f, (1, 1))
     vpn.write_exclude()
     assert f.stat().st_mtime == 1  # untouched: winws would otherwise reload it every minute
+
+
+def test_gui_workers_do_not_leak_handles(tmp_path, monkeypatch):
+    """Each finished job must release its thread handle (a reference cycle once leaked ~2 handles per job)."""
+    pytest.importorskip("PySide6")
+    import os
+    import psutil
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    me = psutil.Process()
+
+    def run_batch(n):
+        for _ in range(n):
+            w._run(lambda log: None, lambda r: None)
+            end = time.time() + 5
+            while w._workers and time.time() < end:
+                app.processEvents()
+                time.sleep(0.005)
+        for _ in range(20):
+            app.processEvents()
+    try:
+        run_batch(10)  # warm-up
+        before = me.num_handles()
+        run_batch(30)
+        assert me.num_handles() - before <= 3
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()

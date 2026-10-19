@@ -112,6 +112,17 @@ def _get(url: str, **kw):
     return s.get(url, **kw)
 
 
+def egress_ip() -> str | None:
+    """Local IPv4 used for internet traffic (cheap: one UDP socket, no packets sent). Changes when the network does."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 53))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
 def egress_adapter() -> str | None:
     """Name of the adapter that carries traffic to the internet."""
     import socket
