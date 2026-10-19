@@ -433,7 +433,8 @@ def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> 
         choice = {"base": best.name, "picks": picks} if win == "mix" else {"base": win, "picks": {}}
     paths.DATA.mkdir(exist_ok=True)
     (paths.DATA / "results.json").write_text(json.dumps(results, indent=1), encoding="utf-8")
-    save_settings(strategy=choice, last_pick={"score": totals[win][0], "total": len(targets) * ROUNDS})
+    save_settings(strategy=choice, auto_choice=choice,  # auto_choice: what «Авто» in the GUI switches back to
+                  last_pick={"score": totals[win][0], "total": len(targets) * ROUNDS})
     log(f"Готово. Выбрано: {'комбинация стратегий' if choice['picks'] else choice['base']}")
     return choice
 
@@ -461,7 +462,7 @@ def _try_shared(runner: Runner, targets, log) -> dict | None:
         total = len(targets) * ROUNDS
         log(f"  результат: {ok} из {total}")
         if ok >= 0.92 * total:
-            save_settings(strategy=c, last_pick={"score": ok, "total": total, "shared": True})
+            save_settings(strategy=c, auto_choice=c, last_pick={"score": ok, "total": total, "shared": True})
             log("Готово: взята проверенная комбинация для вашего провайдера.")
             return c
         log("Комбинация из базы здесь работает хуже — запускаю полный подбор.")
