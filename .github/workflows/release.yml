@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build, e.g. v1.0.8"
+        description: "Existing tag to (re)build, e.g. v1.1.0"
         required: true
       publish:
         description: "Publish to the release (false = only upload a build artifact)"
@@ -58,7 +58,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.event.inputs.tag || github.ref_name }}"
-          $notes = "Сборка GitHub Actions. Установка: скачайте ZapretAuto-Setup.exe ниже. Инструкция: https://github.com/${{ github.repository }}/blob/main/docs/install.md"
+          $notes = "**Как установить:** скачайте ZapretAuto-Setup.exe ниже и запустите. Если программа уже стоит, она обновится сама. Подробнее — в [инструкции](https://github.com/${{ github.repository }}/blob/main/docs/install.md)."
           # what changed: this version's section of CHANGELOG.md goes on top of the release page
           $md = Get-Content CHANGELOG.md -Raw -Encoding UTF8
           $v = [regex]::Escape($tag.TrimStart('v'))

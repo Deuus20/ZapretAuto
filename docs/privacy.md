@@ -19,7 +19,7 @@ ZapretAuto не собирает телеметрию и не имеет сво�
  "asn": "AS25513",
  "isp": "PJSC Moscow city telephone network",
  "zapret": "1.10.3",
- "app": "1.0.4",
+ "app": "1.1.0",
  "choice": {"base": "ALT12", "picks": {"tcp:443:list-google": "FAKE TLS AUTO ALT"}},
  "score": 23,
  "total": 28
