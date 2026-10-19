@@ -1015,6 +1015,8 @@ class MainWindow(QWidget):
             return
         exe = self.table.item(r, 0).text()
         self.save(games_ignore=sorted(set(self.settings.get("games_ignore", [])) | {exe}))
+        if self.watcher:  # not a game: its servers must leave the game ipset (and the game filter)
+            self.watcher.reset_game(exe)
         self.fill_games()
 
     def reset_game(self):
@@ -1056,7 +1058,8 @@ class MainWindow(QWidget):
         if updater:
             self.log("проверка обновлений…")
             self._upd = {}
-            if manual:
+            if manual:  # a click only checks; an auto check still in flight must not start an update now
+                self._auto_check = False
                 self.lbl_upd.setText("Проверяю…")
                 self.btn_check.setEnabled(False)
             updater.check_async(lambda tag, newer: self.bridge.update_checked.emit(tag, newer))
