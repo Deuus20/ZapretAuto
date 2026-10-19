@@ -47,14 +47,26 @@ Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden
 [UninstallRun]
 Filename: "taskkill.exe"; Parameters: "/F /IM ZapretAuto.exe"; Flags: runhidden; RunOnceId: "KillApp"
 Filename: "taskkill.exe"; Parameters: "/F /IM winws.exe"; Flags: runhidden; RunOnceId: "KillWinws"
+Filename: "taskkill.exe"; Parameters: "/F /IM winws2.exe"; Flags: runhidden; RunOnceId: "KillWinws2"
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ZapretAuto /F"; Flags: runhidden; RunOnceId: "DelTask"
 Filename: "sc.exe"; Parameters: "stop WinDivert"; Flags: runhidden; RunOnceId: "StopWD"
 Filename: "sc.exe"; Parameters: "delete WinDivert"; Flags: runhidden; RunOnceId: "DelWD"
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Remove-MpPreference -ExclusionPath '{app}'"""; Flags: runhidden; RunOnceId: "DelExcl"
+; browser policies set by diagnostics fixes (QUIC off, secure DNS): otherwise browsers keep saying "managed"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\Google\Chrome"" /v QuicAllowed /f"; Flags: runhidden; RunOnceId: "PolCQ"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\Google\Chrome"" /v DnsOverHttpsMode /f"; Flags: runhidden; RunOnceId: "PolCM"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\Google\Chrome"" /v DnsOverHttpsTemplates /f"; Flags: runhidden; RunOnceId: "PolCT"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\Microsoft\Edge"" /v QuicAllowed /f"; Flags: runhidden; RunOnceId: "PolEQ"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\Microsoft\Edge"" /v DnsOverHttpsMode /f"; Flags: runhidden; RunOnceId: "PolEM"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\Microsoft\Edge"" /v DnsOverHttpsTemplates /f"; Flags: runhidden; RunOnceId: "PolET"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\YandexBrowser"" /v QuicAllowed /f"; Flags: runhidden; RunOnceId: "PolYQ"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\YandexBrowser"" /v DnsOverHttpsMode /f"; Flags: runhidden; RunOnceId: "PolYM"
+Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\YandexBrowser"" /v DnsOverHttpsTemplates /f"; Flags: runhidden; RunOnceId: "PolYT"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}\vendor"
+Type: filesandordirs; Name: "{commonappdata}\ZapretAuto"
 
 [Code]
 procedure RunHidden(const Exe, Params: String);
@@ -69,6 +81,7 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /IM ZapretAuto.exe');
   RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /IM winws.exe');
+  RunHidden(ExpandConstant('{sys}\taskkill.exe'), '/F /IM winws2.exe');
   RunHidden(ExpandConstant('{sys}\sc.exe'), 'stop WinDivert');
   RunHidden(ExpandConstant('{sys}\sc.exe'), 'delete WinDivert');
   Sleep(1500);
