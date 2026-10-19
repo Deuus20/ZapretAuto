@@ -193,11 +193,15 @@ class MainWindow(QWidget):
         self.btn_site = QPushButton("Сайт не открывается…")
         self.btn_site.setToolTip("Проверить конкретный сайт и, если поможет, добавить его в обход")
         self.btn_site.clicked.connect(self.check_site)
+        self.btn_app = QPushButton("Программа не работает…", objectName="text")
+        self.btn_app.setToolTip("Программа (Spotify, лаунчер, мод игры…) работает без обхода, а с обходом нет? "
+                                "Укажите её exe — обход перестанет трогать её серверы")
+        self.btn_app.clicked.connect(self.exclude_app)
         self.btn_cancel = QPushButton("Отменить подбор", objectName="text")
         self.btn_cancel.setToolTip("Остановить подбор; обход вернётся к прежней стратегии")
         self.btn_cancel.clicked.connect(self.cancel_busy)
         self.btn_cancel.hide()
-        for b in (self.btn_check_access, self.btn_site, self.btn_cancel):
+        for b in (self.btn_check_access, self.btn_site, self.btn_app, self.btn_cancel):
             b.setCursor(Qt.PointingHandCursor)
             acts.addWidget(b)
         acts.addStretch()
@@ -444,6 +448,7 @@ class MainWindow(QWidget):
                  "games_manual": "Адреса игровых серверов (вручную)"}
         for key in lists.user_list_paths():
             self.list_combo.addItem(names.get(key, key), key)
+        self.list_combo.addItem("Программы, которые обход не трогает (exe)", "apps_exclude")  # a setting, not a file
         self.list_combo.currentIndexChanged.connect(self.load_list)
         lay.addWidget(self.list_combo)
         self.list_edit = QPlainTextEdit(objectName="editor")
@@ -510,6 +515,9 @@ class MainWindow(QWidget):
         self._run(lambda log: diag.apply_fix(fix), done)
 
     def load_list(self, *_):
+        if self.list_combo.currentData() == "apps_exclude":
+            self.list_edit.setPlainText("".join(x + "\n" for x in self.settings.get("apps_exclude", [])))
+            return
         p = lists.user_list_paths()[self.list_combo.currentData()]
         try:
             self.list_edit.setPlainText(p.read_text(encoding="utf-8"))
@@ -517,6 +525,12 @@ class MainWindow(QWidget):
             self.list_edit.setPlainText("")
 
     def save_list(self):
+        if self.list_combo.currentData() == "apps_exclude":
+            apps = sorted({ln.strip().lower() for ln in self.list_edit.toPlainText().splitlines()
+                           if ln.strip().lower().endswith(".exe")})
+            self.save(apps_exclude=apps)
+            self.log("сохранён список программ, которые обход не трогает")
+            return
         p = lists.user_list_paths()[self.list_combo.currentData()]
         p.parent.mkdir(parents=True, exist_ok=True)
         text = self.list_edit.toPlainText()
@@ -1362,6 +1376,24 @@ class MainWindow(QWidget):
         self.watcher.reset_game(exe)
         self.log(f"IP игры сброшены: {exe}")
         self.fill_games()
+
+    def exclude_app(self):
+        """A program broken by the bypass: its web servers (80/443) leave the IP-list profiles, as launchers'.
+        The watcher learns them from its traffic, so watching turns on."""
+        path, _ = QFileDialog.getOpenFileName(self, "Какая программа не работает с обходом?", "", "Программы (*.exe)")
+        if not path:
+            return
+        exe = path.replace("/", "\\").rsplit("\\", 1)[-1].lower()
+        self.save(apps_exclude=sorted(set(self.settings.get("apps_exclude", [])) | {exe}), game_watch=True)
+        if not self.watcher:
+            self.cb["game_watch"].blockSignals(True)
+            self.cb["game_watch"].setChecked(True)
+            self.cb["game_watch"].blockSignals(False)
+            self.start_watcher()
+        self.log(f"обход не будет трогать серверы {exe}")
+        QMessageBox.information(self, "ZapretAuto", f"Готово: обход перестанет трогать серверы {exe}.\n\n"
+                                "Перезапустите программу — её адреса соберутся сами за пару секунд, и она "
+                                "должна заработать. Отменить: «Списки» → «Программы, которые обход не трогает».")
 
     def add_game(self):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите exe игры", "", "Программы (*.exe)")

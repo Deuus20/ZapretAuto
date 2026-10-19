@@ -94,11 +94,14 @@ def display_name(exe: str, path: str | None = "") -> str:
 
 
 def web_client(path: str | None, settings: dict | None = None) -> bool:
-    """Game or its launcher (anything in a game dir): its 80/443 servers must not be desynced."""
-    if classify(path, settings):
-        return True
+    """Game or its launcher (anything in a game dir), or a program the user said the bypass breaks
+    (settings apps_exclude): its 80/443 servers must not be desynced."""
     p = (path or "").lower().replace("/", "\\")
     exe = p.rsplit("\\", 1)[-1]
+    if exe and exe in {x.lower() for x in (settings or {}).get("apps_exclude", [])}:
+        return True
+    if classify(path, settings):
+        return True
     return (exe not in NON_GAME_EXES and exe not in {x.lower() for x in (settings or {}).get("games_ignore", [])}
             and not any(d in p for d in SYSTEM_DIRS) and any(d in p for d in GAME_DIRS))
 
