@@ -26,6 +26,7 @@ except Exception:  # noqa: BLE001
 from app.paths import ROOT
 TASK = "ZapretAuto"
 AUTO = "Авто (результат подбора)"
+UPDATE_EVERY = 6 * 3600  # s between background update checks
 from app.gui.style import COLORS, STYLE, app_icon, power_icon  # noqa: E402
 from app.gui.worker import Bridge, Worker  # noqa: E402
 
@@ -673,6 +674,11 @@ class MainWindow(QWidget):
             if not self.runner.running and not self.busy:
                 self.start_runner()
                 self.tray.showMessage("ZapretAuto", "Обход снова включён.")
+        if (updater and self.settings.get("auto_update", True) and not self.busy
+                and now >= getattr(self, "_next_update_check", now + 1) and not self._game_running()):
+            self._next_update_check = now + UPDATE_EVERY  # the app runs for weeks: don't update only at start
+            self._auto_check = True
+            self.check_update()
         if self._ticks % 30 == 0 and self.runner.running and not self.busy:  # ~1 min: VPN may have moved
             from app import vpn
             self._run(lambda log: vpn.write_exclude(), lambda _: None)  # winws reloads the file itself
@@ -1089,6 +1095,7 @@ class MainWindow(QWidget):
         if not autostart:
             self.log("ZAPRET_NO_AUTOSTART: автозапуск отключён")
             return
+        self._next_update_check = time.time() + UPDATE_EVERY
         if self.settings.get("auto_update", True) and updater:
             self._auto_check = True
             self.check_update()
