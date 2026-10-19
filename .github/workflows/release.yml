@@ -59,9 +59,14 @@ jobs:
         run: |
           $tag = "${{ github.event.inputs.tag || github.ref_name }}"
           $notes = "Сборка GitHub Actions. Установка: скачайте ZapretAuto-Setup.exe ниже. Инструкция: https://github.com/${{ github.repository }}/blob/main/docs/install.md"
+          # what changed: this version's section of CHANGELOG.md goes on top of the release page
+          $md = Get-Content CHANGELOG.md -Raw -Encoding UTF8
+          $v = [regex]::Escape($tag.TrimStart('v'))
+          if ($md -match "(?ms)^## $v\b[^\n]*\n(.*?)(?=^## |\z)") { $notes = $Matches[1].Trim() + "`n`n" + $notes }
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag dist\ZapretAuto-Setup.exe dist\ZapretAuto-Setup.exe.sha256 --clobber
+            gh release edit $tag --notes $notes
           } else {
             gh release create $tag dist\ZapretAuto-Setup.exe dist\ZapretAuto-Setup.exe.sha256 --title "ZapretAuto $($tag.TrimStart('v'))" --notes $notes
           }
