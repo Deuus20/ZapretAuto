@@ -78,6 +78,21 @@ def classify(path: str | None, settings: dict | None = None) -> bool:
     return any(d in p for d in GAME_DIRS)
 
 
+def display_name(exe: str, path: str | None = "") -> str:
+    """Human name of a game: its Steam/Epic folder ("Wardogs"), else the exe without build suffixes."""
+    p = (path or "").replace("/", "\\")
+    m = re.search(r"\\(?:steamapps\\common|epic games|riot games|gog games|xboxgames)\\([^\\]+)\\", p, re.I)
+    if m:
+        return m.group(1)
+    base = p.rsplit("\\", 1)[-1]
+    if base.lower() == exe.lower():
+        exe = base  # the path keeps the original case ("MyGame.exe"); keys are lower-case
+    name = exe[:-4] if exe.lower().endswith(".exe") else exe
+    name = re.sub(r"(?i)([-_](win(32|64)|x64|x86|shipping|dx1[12]|vulkan))+$", "", name)
+    name = re.sub(r"(?i)client$", "", name) or name
+    return name[:1].upper() + name[1:]
+
+
 def web_client(path: str | None, settings: dict | None = None) -> bool:
     """Game or its launcher (anything in a game dir): its 80/443 servers must not be desynced."""
     if classify(path, settings):

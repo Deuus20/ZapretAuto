@@ -324,10 +324,21 @@ def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
 def test_dns_poison_detection(monkeypatch):
     from app import diag
     import socket
-    fake = {"discord.com": ["10.10.10.10"], "rutracker.org": ["1.2.3.4"], "www.youtube.com": ["142.251.150.4"]}
-    monkeypatch.setattr(socket, "gethostbyname_ex", lambda d: (d, [], fake[d]))
+    fake = {"discord.com": ["10.10.10.10"], "rutracker.org": ["1.2.3.4"], "www.youtube.com": ["142.251.150.4"],
+            "youtube.com": None}
+
+    def resolve(d):
+        if fake[d] is None:  # ISP answers "no such domain" for a blocked site (since August 2026)
+            raise socket.gaierror(11001, "host not found")
+        return d, [], fake[d]
+    monkeypatch.setattr(socket, "gethostbyname_ex", resolve)
+    monkeypatch.setattr(socket, "gethostbyname", lambda d: "87.250.250.242")  # control domain resolves
     monkeypatch.setattr(diag, "_doh", lambda d: {"104.21.32.39"})
-    assert diag.dns_poisoned() == ["discord.com", "rutracker.org"]  # private IP / no overlap with DoH
+    assert diag.dns_poisoned() == ["discord.com", "rutracker.org", "youtube.com"]
+    monkeypatch.setattr(socket, "gethostbyname", lambda d: (_ for _ in ()).throw(socket.gaierror(11001, "x")))
+    assert diag.dns_poisoned() == ["discord.com", "rutracker.org"]  # offline: NXDOMAIN proves nothing
+    monkeypatch.setattr(diag, "_doh", lambda d: (_ for _ in ()).throw(OSError("blocked")))
+    assert diag.dns_poisoned() == ["discord.com"]  # DoH blocked: what is obviously forged still counts
 
 
 def test_quic_targets_grouped_by_profile():
@@ -520,7 +531,8 @@ def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
         assert st["game_watch"] and w.cb["game_watch"].isChecked() and w.watcher
         assert "mygame.exe" not in st["games_ignore"]               # «Игнорировать» undone
         assert "mygame.exe" in st["games"]                          # persisted right away
-        assert w.table.rowCount() == 1 and w.table.item(0, 0).text() == "mygame.exe"  # shown before any traffic
+        from PySide6.QtCore import Qt
+        assert w.table.rowCount() == 1 and w.table.item(0, 0).data(Qt.UserRole) == "mygame.exe" and w.table.item(0, 0).text() == "MyGame"  # shown before any traffic
         assert gamewatch.classify(r"D:\Games\X\MyGame.exe", st)     # its traffic will count as a game
         shown = []
         monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
@@ -778,7 +790,8 @@ def test_gui_known_games_show_after_restart(tmp_path, monkeypatch):
                   games={"deadlock.exe": {"path": "x", "ips": ["9.9.9.9"]}})
     try:
         w.start_watcher()
-        assert w.table.rowCount() == 1 and w.table.item(0, 0).text() == "deadlock.exe" and not w.table.isHidden()
+        from PySide6.QtCore import Qt
+        assert w.table.rowCount() == 1 and w.table.item(0, 0).data(Qt.UserRole) == "deadlock.exe" and "Deadlock" in w.lbl_games.text() and not w.table.isHidden()
         assert not w.btn_reset.isEnabled()                   # nothing selected yet
         w.table.selectRow(0)
         assert w.btn_reset.isEnabled() and w.btn_ignore.isEnabled()
