@@ -954,3 +954,20 @@ def test_gui_site_broken_by_bypass_gets_excluded(tmp_path, monkeypatch):
         w.runner.proc = None
     finally:
         _close(app, w)
+
+
+def test_video_cdn_probe(monkeypatch):
+    import sys
+    import types
+    fake = types.SimpleNamespace(get=lambda url, **k: types.SimpleNamespace(
+        text="109.1.2.3 => comstar-bka2 (109.252.16.0/21)\n"))
+    monkeypatch.setitem(sys.modules, "curl_cffi", types.SimpleNamespace(requests=fake))
+    monkeypatch.setitem(sys.modules, "curl_cffi.requests", fake)
+    seen = []
+    monkeypatch.setattr(tester, "fetch", lambda url, *a, **k: (seen.append(url), (204, url, 0))[1])
+    monkeypatch.setattr(tester, "_CDN_NODE", None)
+    assert tester.probe(tester.Target("YouTubeVideo", "ytcdn://")) is not None
+    assert seen == ["https://rr1---comstar-bka2.googlevideo.com/generate_204"]
+    assert "109.1.2.3" not in repr(vars(tester).get("_CDN_NODE"))      # the user's IP is not kept
+    monkeypatch.setattr(tester, "fetch", lambda *a, **k: (_ for _ in ()).throw(OSError("reset")))
+    assert tester.probe(tester.Target("YouTubeVideo", "ytcdn://")) is None and tester._CDN_NODE is None

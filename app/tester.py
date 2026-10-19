@@ -153,6 +153,7 @@ def load_targets() -> list[Target]:
     out += STUN_TARGETS
     out += _quic_targets()
     out.append(Target("YouTubeSpeed", "speed://youtube", "tcp:443:list-google"))
+    out.append(Target("YouTubeVideo", "ytcdn://", "tcp:443:list-google"))  # the video cache server itself
     if load_settings().get("telegram"):
         out.append(Target("TelegramWeb", "https://web.telegram.org"))
         out.append(Target("TelegramDC2", "tcp://149.154.167.50:443"))
@@ -237,6 +238,31 @@ def probe_speed(t: Target) -> float | None:
     return dt if got >= 400 * 1024 and got / dt >= SPEED_MIN else None
 
 
+_CDN_NODE: str | None = None  # this network's YouTube video cache, e.g. "comstar-bka2" (asked once)
+
+
+def probe_video_cdn() -> float | None:
+    """The server videos actually stream from (rrN---<node>.googlevideo.com, often a cache at the ISP): ISPs
+    slow YouTube down on these hosts, not on www.youtube.com. Seconds for /generate_204, None on failure."""
+    global _CDN_NODE
+    t0 = time.perf_counter()
+    try:
+        if not _CDN_NODE:
+            from curl_cffi import requests as cr
+            kw = {"interface": BIND} if BIND else {}
+            text = cr.get("https://redirector.googlevideo.com/report_mapping?di=no", impersonate="chrome",
+                          timeout=TIMEOUT * 2, **kw).text  # "<your ip> => node (net)": the IP is not kept
+            m = re.search(r"=>\s*([a-z0-9-]+)", text)
+            if not m:
+                return None
+            _CDN_NODE = m.group(1)
+        status, _, _ = fetch(f"https://rr1---{_CDN_NODE}.googlevideo.com/generate_204", 1024, TIMEOUT * 2)
+    except Exception:  # noqa: BLE001
+        _CDN_NODE = None  # another network may map to another cache: ask again next time
+        return None
+    return time.perf_counter() - t0 if status == 204 else None
+
+
 def probe_tcp(t: Target) -> float | None:
     import socket
     host, port = t.url[6:].rsplit(":", 1)
@@ -269,6 +295,8 @@ def probe(t: Target) -> float | None:
     """Seconds to read READ_BYTES (or full body), None on failure."""
     if t.is_stun:
         return probe_stun(t)
+    if t.url == "ytcdn://":
+        return probe_video_cdn()
     if t.is_speed:
         return probe_speed(t)
     if t.url.startswith("tcp://"):
@@ -309,7 +337,7 @@ def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float
 
 # service -> probes; a service counts as working when most of its probes pass (single probes through DPI are noisy)
 QUICK = {"Discord": ("DiscordMain", "DiscordGateway", "DiscordCDN"),
-         "YouTube": ("YouTubeWeb", "YouTubeImage", "YouTubeVideoRedirect"),
+         "YouTube": ("YouTubeWeb", "YouTubeImage", "YouTubeVideoRedirect", "YouTubeVideo"),
          "Скорость YouTube": ("YouTubeSpeed",), "Голос Discord": ("STUN_Google19302",), "Telegram": ("TelegramWeb",)}
 
 
