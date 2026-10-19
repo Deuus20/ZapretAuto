@@ -23,7 +23,7 @@ body:
     attributes:
       label: Версия ZapretAuto
       description: Вкладка «Обновления»
-      placeholder: 1.0.4
+      placeholder: 1.1.0
   - type: textarea
     id: report
     attributes:
