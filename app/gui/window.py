@@ -44,7 +44,7 @@ class MainWindow(QWidget):
         self._profile_exe: str | None = None  # game whose own strategy is active
         self.busy_text = ""
         self.error = ""
-        self._workers: list = []  # keep QThreads alive until finished
+        self._workers: list = []  # keep workers referenced until finished
         self._expect_running = False
         self._hint_shown = False
         self._auto_check = False
@@ -333,7 +333,7 @@ class MainWindow(QWidget):
         self.btn_diag.setText("Проверка...")
         self._diag_w = Worker(lambda log: diag.run_checks())
         self._workers.append(self._diag_w)
-        self._diag_w.finished.connect(lambda w=self._diag_w: self._workers.remove(w) if w in self._workers else None)
+        self._diag_w.finished.connect(lambda w=self._diag_w: self._reap(w))
         self._diag_w.done.connect(self.bridge.diag_done.emit)
         self._diag_w.start()
 
@@ -737,7 +737,7 @@ class MainWindow(QWidget):
             self._repick_pending = False
             self.log("игра закрыта — чиню обход")
             self.autopick()
-        net = tester.egress_adapter() if int(now) % 10 < 2 else self._net  # cheap: ~every 10 s
+        net = tester.egress_ip() if int(now) % 10 < 2 else self._net  # ~every 10 s; psutil-free (it leaked handles)
         if self._net is not None and net != self._net:
             self.log(f"сеть изменилась ({self._net} → {net}), проверю доступ")
             self._next_health = now + 20
@@ -756,12 +756,20 @@ class MainWindow(QWidget):
             self._health()
         self.refresh()
 
+    def _reap(self, w):
+        """A worker finished: join its thread (frees the OS thread handle) and drop the QObject — the signal
+        connections form a reference cycle that otherwise kept both alive (~2 handles per job, every minute)."""
+        if w in self._workers:
+            self._workers.remove(w)
+        w.wait(1000)
+        w.deleteLater()
+
     def _run(self, fn, done, line=None):
         """Start a Worker and keep a reference until its thread has finished."""
         w = Worker(fn)
         w.line.connect(line or self.log)
         w.done.connect(done)
-        w.finished.connect(lambda: self._workers.remove(w) if w in self._workers else None)
+        w.finished.connect(lambda: self._reap(w))
         self._workers.append(w)
         w.start()
         return w
@@ -1172,6 +1180,6 @@ class MainWindow(QWidget):
         self.runner.stop()
         self.stop_watcher()
         self.tray.hide()
-        for w in list(self._workers):  # a QThread destroyed while running aborts the process on exit
+        for w in list(self._workers):  # let running jobs (downloads, picks) end before the process exits
             w.wait(3000)
         QApplication.quit()
