@@ -21,6 +21,7 @@ class Switch(QAbstractButton):
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
+        self.setAttribute(Qt.WA_Hover, True)  # repaint on enter/leave: the hover state layer is drawn by hand
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self._pos = 0.0  # 0 = off, 1 = on (animated)
         self._anim = QVariantAnimation(self, duration=150, easingCurve=QEasingCurve.OutCubic)
@@ -134,6 +135,7 @@ class RailButton(QAbstractButton):
         self.setText(text)
         self._icon = icon
         self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover, True)
         self.setFocusPolicy(Qt.NoFocus)  # Ctrl+1..6 switch pages; a focus pill on start looked like a 2nd selection
         self.setFixedSize(68, 54)
         self.setToolTip(text)
@@ -222,6 +224,7 @@ class PowerButton(QAbstractButton):
         super().__init__(parent)
         self.state = "off"
         self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover, True)
         self.setFixedSize(S, S)
         self._spin = 0.0
         self._anim = QVariantAnimation(self, startValue=0.0, endValue=360.0, duration=1400, loopCount=-1)
@@ -258,7 +261,8 @@ class PowerButton(QAbstractButton):
             p.setPen(Qt.NoPen)
             p.setBrush(_alpha(fg, .10))
             p.drawEllipse(QRectF(0, 0, S, S))
-        p.setPen(QPen(QColor(ring), 3))
+        # busy: a dim ring, so the bright moving arc on it is visible (same color before: no motion was seen)
+        p.setPen(QPen(_alpha(ring, .3) if self.state == "busy" else QColor(ring), 3))
         p.setBrush(QColor(fill))
         p.drawEllipse(r)
         if self.state == "busy":  # a moving arc: work in progress
@@ -281,7 +285,7 @@ class PowerButton(QAbstractButton):
 class StatusChip(QWidget):
     """Service status: a colored dot and the name; the text says the state, the dot repeats it."""
 
-    def __init__(self, name: str, ok: bool | None, parent=None):
+    def __init__(self, name: str, ok: bool | None, note: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("chip")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -292,8 +296,10 @@ class StatusChip(QWidget):
         self.dot = QLabel(objectName="dot")
         self.dot.setFixedSize(8, 8)
         self.dot.setProperty("ok", self.property("ok"))
-        lab = QLabel(name + ("" if ok is None else ("" if ok else " — не открывается")), objectName="chipText")
+        note = note or ("" if ok is None or ok else "нет")  # short: the chips share one row
+        lab = QLabel(name + (f": {note}" if note else ""), objectName="chipText")
         lab.setProperty("ok", self.property("ok"))
         lay.addWidget(self.dot)
         lay.addWidget(lab)
-        self.setToolTip(f"{name}: " + ("не проверено" if ok is None else ("работает" if ok else "не открывается")))
+        self.setToolTip(f"{name}: " + ("не проверено" if ok is None else
+                                       ("работает" if ok else ("медленно" if note == "медленно" else "не открывается"))))
