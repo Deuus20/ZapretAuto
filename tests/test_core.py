@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app import gamewatch, paths, settings, strategies, updater, vpn
+from app import gamewatch, paths, settings, strategies, tester, updater, vpn
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -580,3 +580,33 @@ def test_known_game_seeded_on_first_sight(tmp_path, monkeypatch):
         assert "3.164.206.0/24" in w._web_nets
     finally:
         w.stop()
+
+
+def test_gui_zapret_update_keeps_working_strategy(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(strategy={"base": "ALT8", "picks": {}}, ipset_updated=time.time())
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        picks, res = [], {"Discord": True, "YouTube": True}
+        monkeypatch.setattr(w, "start_runner", lambda: True)
+        monkeypatch.setattr(w, "autopick", lambda *a: picks.append(1))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        monkeypatch.setattr(tester, "quick_check", lambda light=False: dict(res))
+        w._update_done(True, True, True)
+        assert not picks and not w.busy                 # still works: no 2–4 min re-pick
+        res["YouTube"] = False
+        w._update_done(True, True, True)
+        assert picks == [1]                             # broken by the update: re-pick
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
