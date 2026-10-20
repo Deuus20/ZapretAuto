@@ -199,7 +199,7 @@ def test_gamewatch_v1_ips_reset_once(tmp_path, monkeypatch):
     w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
     try:
         assert w.games()["g.exe"]["ips"] == set()
-        assert settings.load_settings()["games_schema"] == 2
+        assert settings.load_settings()["games_schema"] == 3
     finally:
         w.stop()
 
@@ -1118,3 +1118,18 @@ def test_gui_isp_line(tmp_path, monkeypatch):
         assert w.lbl_isp.text() == "Провайдер: Home ISP"
     finally:
         _close(app, w)
+
+
+def test_store_apps_are_not_games(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    store = r"C:\Program Files\WindowsApps\Claude_2.4_x64__pzs8\app\claude.exe"
+    assert not gamewatch.classify(store, {})
+    settings.save_settings(games_schema=2, games={"claude.exe": {"path": store, "ips": ["9.9.9.9"]},
+                                                   "game.exe": {"path": r"D:\Games\game.exe", "ips": []}})
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        assert set(w.games()) == {"game.exe"} and set(settings.load_settings()["games"]) == {"game.exe"}
+    finally:
+        w._pool.shutdown()

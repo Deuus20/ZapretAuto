@@ -27,7 +27,9 @@ KNOWN_WEB_NETS = set(known_games.WEB_NETS) | {"3.164.206.0/24", "3.171.214.0/24"
 KNOWN_WEB_HOSTS = ("game.live.wardogs.bulkhead.pragmaengine.com",)  # CloudFront: resolved at start, IPs rotate
 LOGIN_GRACE = 120.0  # s after a game starts: no winws restarts, so logins are not cut off
 GAME_DIRS = ("steamapps\\common", "\\epic games\\", "\\riot games\\", "\\battle.net\\", "\\ubisoft",
-             "\\ea games\\", "\\gog games\\", "\\xboxgames\\", "\\windowsapps\\")
+             "\\ea games\\", "\\gog games\\", "\\xboxgames\\")
+# not \windowsapps\: every Microsoft Store app lives there (Claude, WhatsApp, ...); Store games are caught by
+# their UDP traffic (_udp_game) like any other game outside launcher folders
 NON_GAME_EXES = {
     "chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe", "vivaldi.exe", "yandex.exe",
     "browser.exe", "discord.exe", "update.exe", "steam.exe", "steamwebhelper.exe", "steamservice.exe",
@@ -203,6 +205,12 @@ class GameWatcher(threading.Thread):
         if st.get("games_schema", 1) < 2:  # v1 collected 80/443 CDN addresses too: start over once
             save_settings(games={k: {"path": v.get("path", ""), "ips": []} for k, v in st.get("games", {}).items()},
                           games_schema=2)
+        st = load_settings()
+        if st.get("games_schema", 1) < 3:  # v2 took every Microsoft Store app for a game: real ones come back by UDP
+            forced = {x.lower().replace("/", "\\").rsplit("\\", 1)[-1] for x in st.get("games_force", [])}
+            save_settings(games={k: v for k, v in st.get("games", {}).items()
+                                 if k in forced or "\\windowsapps\\" not in v.get("path", "").lower()},
+                          games_schema=3)
         self._web_nets: set[str] = set(load_settings().get("games_web", [])) | KNOWN_WEB_NETS
         for exe, g in load_settings().get("games", {}).items():
             self._games[exe] = {"path": g.get("path", ""), "ips": set(g.get("ips", [])),
