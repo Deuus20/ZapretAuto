@@ -1035,6 +1035,9 @@ def test_smart_app_control_reported(monkeypatch):
     monkeypatch.setattr(diag, "flowseal_hosts", lambda: (_ for _ in ()).throw(OSError("offline")))
     monkeypatch.setattr(diag, "dns_poisoned", lambda: None)
     monkeypatch.setattr(diag, "_quic_blocked", lambda: False)
+    monkeypatch.setattr(diag, "_ps", lambda cmd: (0, "0"))            # no real PowerShell / services: fast
+    monkeypatch.setattr(diag, "_run", lambda c, timeout=20: (0, ""))
+    monkeypatch.setattr(diag, "_svc_status", lambda n: "Running" if n == "BFE" else None)
     rows = {r["label"]: r for r in diag.run_checks()}
     assert rows["Smart App Control"]["level"] == "err"
     assert "Smart App Control" in diag.first_problem()            # also the cause shown when winws won't start
