@@ -1018,3 +1018,12 @@ def test_hosts_block_update_and_remove(tmp_path, monkeypatch):
     diag.apply_fix("hosts_remove")
     text = hosts.read_bytes().decode("utf-8-sig")
     assert diag.HOSTS_BEGIN not in text and "telegram" not in text and "myserver.lan" in text
+
+
+def test_autostart_task_has_no_time_limit():
+    pytest.importorskip("PySide6")
+    from app.gui.window import MainWindow
+    ps = MainWindow.autostart_command()[-1]
+    assert "-ExecutionTimeLimit ([TimeSpan]::Zero)" in ps        # schtasks default: killed after 72 h
+    assert "-AllowStartIfOnBatteries" in ps and "-DontStopIfGoingOnBatteries" in ps
+    assert "-RunLevel Highest" in ps and "-AtLogOn" in ps and "--tray" in ps

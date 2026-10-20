@@ -1105,13 +1105,30 @@ class MainWindow(QWidget):
         else:
             switched(True)
 
-    def set_autostart(self, on: bool):
-        if on:
-            tr = (f'"{sys.executable}" --tray' if getattr(sys, "frozen", False)
-                  else f'"{sys.executable}" "{ROOT / "main.py"}" --tray')
-            cmd = ["schtasks", "/Create", "/F", "/TN", TASK, "/TR", tr, "/RL", "HIGHEST", "/SC", "ONLOGON"]
+    @staticmethod
+    def autostart_command() -> list[str]:
+        """PowerShell that (re)creates the logon task. Not schtasks /Create: its defaults kill the task after 72 h
+        (the app runs for weeks), don't start it on battery and stop it when a laptop is unplugged."""
+        import os
+
+        def q(s) -> str:
+            return "'" + str(s).replace("'", "''") + "'"
+        if getattr(sys, "frozen", False):
+            exe, args = sys.executable, "--tray"
         else:
-            cmd = ["schtasks", "/Delete", "/F", "/TN", TASK]
+            exe, args = sys.executable, f'"{ROOT / "main.py"}" --tray'
+        user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".lstrip("\\")
+        ps = (f"$a = New-ScheduledTaskAction -Execute {q(exe)} -Argument {q(args)}; "
+              f"$t = New-ScheduledTaskTrigger -AtLogOn -User {q(user)}; "
+              "$s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries "
+              "-ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew; "
+              f"$p = New-ScheduledTaskPrincipal -UserId {q(user)} -LogonType Interactive -RunLevel Highest; "
+              f"Register-ScheduledTask -TaskName {q(TASK)} -Action $a -Trigger $t -Settings $s -Principal $p "
+              "-Force | Out-Null")
+        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]
+
+    def set_autostart(self, on: bool):
+        cmd = self.autostart_command() if on else ["schtasks", "/Delete", "/F", "/TN", TASK]
         r = subprocess.run(cmd, capture_output=True, text=True, creationflags=0x08000000)
         self.log(f"автозапуск {'вкл' if on else 'выкл'}: " + ("ок" if r.returncode == 0 else (r.stderr or r.stdout).strip()))
 
