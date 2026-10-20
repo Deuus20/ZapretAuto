@@ -35,6 +35,19 @@ def suggestion(asn: str, zapret_version: str) -> dict | None:
     return e.get("choice") if e else None
 
 
+def isp_entry(asn: str, zapret_version: str) -> dict | None:
+    """What other users of this ISP reported for this zapret version: {"votes", "reports", "choice"};
+    None when the base is unreachable."""
+    try:
+        r = requests.get(DB_URL, timeout=8)
+        r.raise_for_status()
+        db = r.json()
+    except (requests.RequestException, ValueError):
+        return None
+    e = db.get(asn, {}).get(zapret_version) or {}
+    return {"votes": e.get("votes", 0), "reports": len(e.get("reports", [])), "choice": e.get("choice")}
+
+
 def report_url(asn: str, name: str, zapret_version: str, app_version: str, choice: dict,
                score: int, total: int) -> str:
     body = {"asn": asn, "isp": name, "zapret": zapret_version, "app": app_version,
