@@ -779,6 +779,14 @@ class MainWindow(QWidget):
                 self.log("причина: " + cause)
                 self.tray.showMessage("ZapretAuto", self.error)
                 self.refresh()
+        from app import runner as runner_mod
+        out = runner_mod.last_output()
+        if out:
+            self.log("вывод обхода:\n" + out)  # winws' own words go to the log/report
+        cause = runner_mod.explain(out)
+        if cause:  # winws said why: no need to guess from diagnostics
+            done(cause)
+            return
         self._run(lambda log: diag.first_problem(), done)
 
     def pause(self, minutes: int):
