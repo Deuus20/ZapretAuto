@@ -163,21 +163,23 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
 
 
 def app_release() -> tuple[str, str, str | None]:
-    """(tag, Setup.exe url, .sha256 url or None) of the latest ZapretAuto release."""
+    """(tag, download url, .sha256 url or None) of the latest ZapretAuto release: the installer, or the zip for a
+    portable copy (it must not install itself into Program Files)."""
     r = requests.get(f"https://api.github.com/repos/{APP_REPO}/releases/latest",
                      headers={"Accept": "application/vnd.github+json"}, timeout=15)
     r.raise_for_status()
     j = r.json()
     assets = {a.get("name", "").lower(): a["browser_download_url"] for a in j.get("assets", [])}
-    setup = next((u for n, u in assets.items() if n.endswith("setup.exe")), None)
-    if not setup:
-        raise RuntimeError("no Setup.exe asset in latest app release")
-    sha = next((u for n, u in assets.items() if n.endswith("setup.exe.sha256")), None)
-    return j["tag_name"], setup, sha
+    kind = "portable.zip" if paths.PORTABLE else "setup.exe"
+    url = next((u for n, u in assets.items() if n.endswith(kind)), None)
+    if not url:
+        raise RuntimeError(f"no {kind} asset in latest app release")
+    sha = next((u for n, u in assets.items() if n.endswith(kind + ".sha256")), None)
+    return j["tag_name"], url, sha
 
 
 def app_update(log=print) -> bool:
-    """Download the new installer, verify it and run it silently; it restarts the app. Caller quits after."""
+    """Download the new version, verify it and install it; the app restarts. Caller quits after."""
     import hashlib
     import subprocess
     from . import __version__
@@ -187,19 +189,41 @@ def app_update(log=print) -> bool:
     if not sha_url:
         raise RuntimeError("в релизе нет файла .sha256 — обновление не проверить")
     d = Path(tempfile.mkdtemp(prefix="zapretauto_upd_"))  # private dir: no TOCTOU via shared %TEMP% name
-    exe = d / "ZapretAuto-Setup.exe"
+    f = d / url.rsplit("/", 1)[-1]
     log(f"скачиваю ZapretAuto {tag}")
-    _download(url, exe, log)
+    _download(url, f, log)
     _check_url(sha_url)
     want = requests.get(sha_url, timeout=15).text.split()[0].strip().lower()
-    have = hashlib.sha256(exe.read_bytes()).hexdigest()
+    have = hashlib.sha256(f.read_bytes()).hexdigest()
     if have != want:
         shutil.rmtree(d, ignore_errors=True)
-        raise RuntimeError("контрольная сумма установщика не совпала")
+        raise RuntimeError("контрольная сумма не совпала")
+    if paths.PORTABLE:
+        new = d / "new"
+        with zipfile.ZipFile(f) as z:
+            _safe_extract(z, new)
+        root = next((p.parent for p in new.rglob("ZapretAuto.exe")), None)
+        if root is None:
+            raise RuntimeError("в архиве нет ZapretAuto.exe")
+        log("архив проверен, обновляю портативную копию…")
+        subprocess.Popen(portable_swap_command(root, paths.ROOT, d), creationflags=0x08000000 | 0x00000008)
+        return True
     log("установщик проверен, запускаю обновление…")
-    subprocess.Popen([str(exe), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/UPDATE=1"],
+    subprocess.Popen([str(f), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/UPDATE=1"],
                      creationflags=0x00000008)  # DETACHED_PROCESS
     return True
+
+
+def portable_swap_command(new: Path, root: Path, tmp: Path) -> list[str]:
+    """Wait until this app has quit, copy the new files over the portable folder (data/ and vendor/ stay: zapret
+    updates itself), then start it again in the tray."""
+    def q(p) -> str:
+        return "'" + str(p).replace("'", "''") + "'"
+    script = (f"Wait-Process -Id {os.getpid()} -Timeout 60 -ErrorAction SilentlyContinue; "
+              f"robocopy {q(new)} {q(root)} /E /IS /IT /XD data vendor /R:5 /W:2 /NFL /NDL /NJH /NJS | Out-Null; "
+              f"Start-Process -FilePath {q(root / 'ZapretAuto.exe')} -ArgumentList '--tray'; "
+              f"Remove-Item -Recurse -Force {q(tmp)} -ErrorAction SilentlyContinue")
+    return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", script]
 
 
 APP_CHECK_ERROR = ""  # why the last app check failed, in words for the Updates section

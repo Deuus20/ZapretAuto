@@ -1079,3 +1079,24 @@ def test_gui_network_change_restores_its_strategy(tmp_path, monkeypatch):
         assert w._new_net and tester.load_settings()["net_asn"] == "AS300"  # unknown: may re-pick without the 6 h pause
     finally:
         _close(app, w)
+
+
+def test_portable_update_uses_zip_and_keeps_data(monkeypatch):
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"tag_name": "v9.9.9", "assets": [
+                {"name": n, "browser_download_url": f"https://github.com/x/{n}"} for n in
+                ("ZapretAuto-Setup.exe", "ZapretAuto-Setup.exe.sha256", "ZapretAuto-portable.zip",
+                 "ZapretAuto-portable.zip.sha256")]}
+    monkeypatch.setattr(updater.requests, "get", lambda *a, **k: R())
+    monkeypatch.setattr(paths, "PORTABLE", False)
+    assert updater.app_release()[1:] == ("https://github.com/x/ZapretAuto-Setup.exe",
+                                         "https://github.com/x/ZapretAuto-Setup.exe.sha256")
+    monkeypatch.setattr(paths, "PORTABLE", True)
+    assert updater.app_release()[1].endswith("ZapretAuto-portable.zip")
+    cmd = updater.portable_swap_command(Path("C:/t/new/ZapretAuto"), Path("D:/Apps/O'Neil/ZapretAuto"), Path("C:/t"))
+    ps = cmd[-1]
+    assert "/XD data vendor" in ps and "'D:\Apps\O''Neil\ZapretAuto'" in ps and "--tray" in ps

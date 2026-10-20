@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor" / "zapret"
 BIN = VENDOR / "bin"
+# portable copy (unpacked zip): updates come as a zip into this folder, not via the installer
+PORTABLE = getattr(sys, "frozen", False) and (ROOT / "portable.txt").exists()
 
 
 def _pick_data() -> Path:
