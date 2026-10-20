@@ -1099,7 +1099,7 @@ def test_portable_update_uses_zip_and_keeps_data(monkeypatch):
     assert updater.app_release()[1].endswith("ZapretAuto-portable.zip")
     cmd = updater.portable_swap_command(Path("C:/t/new/ZapretAuto"), Path("D:/Apps/O'Neil/ZapretAuto"), Path("C:/t"))
     ps = cmd[-1]
-    assert "/XD data vendor" in ps and "'D:\Apps\O''Neil\ZapretAuto'" in ps and "--tray" in ps
+    assert "/XD data vendor" in ps and r"'D:\Apps\O''Neil\ZapretAuto'" in ps and "--tray" in ps
 
 
 def test_gui_isp_line(tmp_path, monkeypatch):
@@ -1133,3 +1133,75 @@ def test_store_apps_are_not_games(tmp_path, monkeypatch):
         assert set(w.games()) == {"game.exe"} and set(settings.load_settings()["games"]) == {"game.exe"}
     finally:
         w._pool.shutdown()
+
+
+def test_stats_daily_counts_problems(tmp_path, monkeypatch):
+    from app import stats
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    stats.record("check", ok=True)
+    stats.record("check", ok=False)
+    stats.record("crash")
+    stats.record("repick", reason="x")
+    days = stats.daily(7)
+    assert len(days) == 7 and days[-1]["day"] == time.strftime("%d.%m")
+    assert {k: days[-1][k] for k in ("checks", "fails", "crashes", "repicks")} == \
+        {"checks": 2, "fails": 1, "crashes": 1, "repicks": 1}
+    assert all(d["checks"] == 0 for d in days[:-1])
+
+
+def test_quiet_detects_calls_not_idle_messengers(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from app import quiet
+
+    class P:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return {1: "Discord.exe", 2: "chrome.exe"}[self.pid]
+    monkeypatch.setattr(quiet.psutil, "Process", P)
+    idle = [NS(pid=1, laddr=NS(ip="0.0.0.0", port=5353)), NS(pid=2, laddr=NS(ip="0.0.0.0", port=50000)),
+            NS(pid=1, laddr=NS(ip="127.0.0.1", port=6000))]
+    assert quiet.call_app(idle) is None
+    assert quiet.call_app(idle + [NS(pid=1, laddr=NS(ip="0.0.0.0", port=61234))]) == "discord"
+    assert quiet.busy_reason(game=True) == "идёт игра"
+
+
+def test_gui_quiet_updates_defer_for_a_day_at_most(tmp_path, monkeypatch):
+    from app import quiet
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        monkeypatch.setattr(quiet, "busy_reason", lambda game=False: "идёт звонок (discord)")
+        assert not w._update_deferred(1000.0)  # setting off: never waits
+        w.save(quiet_updates=True)
+        assert w._update_deferred(1000.0) and w._next_update_check == 1600.0
+        assert w._update_deferred(50000.0)
+        assert not w._update_deferred(1000.0 + 86400)  # a day of waiting: update anyway
+        monkeypatch.setattr(quiet, "busy_reason", lambda game=False: None)
+        assert not w._update_deferred(200000.0) and not w._deferred_since
+    finally:
+        _close(app, w)
+
+
+def test_gui_tray_strategy_and_games(tmp_path, monkeypatch):
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        w._fill_tray_strategies()
+        acts = w.menu_strat.actions()
+        assert acts[0].text().startswith("Авто") and len(acts) == w.combo.count()
+        monkeypatch.setattr(w, "start_runner", lambda: True)
+        acts[1].trigger()
+        assert w.settings["strategy"]["base"] == w.combo.itemText(1) and w.combo.currentIndex() == 1
+        w._fill_tray_games()
+        assert [a.text() for a in w.menu_games.actions()] == ["Слежение за играми выключено"]
+        w.save(game_watch=True, games_ignore=["old.exe"])
+        w._fill_tray_games()
+        a = w.menu_games.actions()[0]
+        assert not a.isChecked()
+        a.trigger()  # check it again: the game is back in the bypass
+        assert w.settings["games_ignore"] == []
+        w.fill_chart()
+        assert w.lbl_stab.text() == "данных пока нет" and len(w.chart.days) == 7
+    finally:
+        _close(app, w)

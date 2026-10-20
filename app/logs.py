@@ -108,6 +108,8 @@ def make_report(dest: Path, diag_results: list | None = None) -> Path:
         if s:
             info["winws_argv"] = s.argv()
         info["strategies"] = [x.name for x in strategies.load_all()]
+        from . import stats
+        info["stability"] = [d for d in stats.daily(14) if d["checks"] or d["crashes"] or d["repicks"]]
         z.writestr("info.json", _redact(json.dumps(info, ensure_ascii=False, indent=1)))
         if diag_results is not None:
             z.writestr("diagnostics.json", _redact(json.dumps(diag_results, ensure_ascii=False, indent=1)))

@@ -20,6 +20,19 @@ settings._cache = None
 settings.save_settings(strategy={"base": "ALT8", "picks": {}}, show_advanced=True, game_watch=True,
                        ipset_updated=9e9)
 
+import json as _json  # noqa: E402
+import time as _time  # noqa: E402
+
+from app import paths as _paths  # noqa: E402
+
+_ev = []  # a sample week for the stability chart: calm days, one bad day, one with a re-pick
+for _d, (_ok, _bad, _crash, _repick) in enumerate([(140, 0, 0, 0), (130, 1, 0, 0), (0, 0, 0, 0), (120, 4, 1, 1),
+                                                    (144, 0, 0, 0), (100, 2, 0, 0), (60, 0, 0, 0)]):
+    _t = _time.time() - (6 - _d) * 86400
+    _ev += [{"t": _t, "k": "check", "ok": True}] * _ok + [{"t": _t, "k": "check", "ok": False}] * _bad
+    _ev += [{"t": _t, "k": "crash"}] * _crash + [{"t": _t, "k": "repick"}] * _repick
+(_paths.DATA / "stats.json").write_text(_json.dumps(_ev), encoding="utf-8")
+
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication(sys.argv[:1])
