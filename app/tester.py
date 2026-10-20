@@ -465,8 +465,24 @@ def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> 
                   last_pick={"score": totals[win][0], "total": len(targets) * ROUNDS, "time": time.time(),
                              "before": totals["current"][0] if cur_s else None,
                              "services": _services(results[f"final:{win}"])})
+    remember_network(choice)
     log(f"Готово. Выбрано: {'комбинация стратегий' if choice['picks'] else choice['base']}")
     return choice
+
+
+def remember_network(choice: dict, who: tuple[str, str] | None = None) -> None:
+    """Remember the pick for this ISP (ASN): back on that network, it is switched on at once, without a pick.
+    Not behind a VPN: the ASN would be the VPN's."""
+    if not choice or vpn_active():
+        return
+    if who is None:
+        from . import sharedb
+        who = sharedb.isp()
+    if not who:
+        return
+    nets = dict(load_settings().get("networks") or {})
+    nets[who[0]] = {"isp": who[1], "choice": choice, "time": time.time()}
+    save_settings(networks=nets, net_asn=who[0])
 
 
 def _services(runs: list[dict]) -> dict[str, bool]:
@@ -504,6 +520,7 @@ def _try_shared(runner: Runner, targets, log) -> dict | None:
         if ok >= 0.92 * total:
             save_settings(strategy=c, auto_choice=c, last_pick={"score": ok, "total": total, "shared": True,
                                                                 "time": time.time(), "services": _services(runs)})
+            remember_network(c, who)
             log("Готово: взята проверенная комбинация для вашего провайдера.")
             return c
         log("Комбинация из базы здесь работает хуже — запускаю полный подбор.")

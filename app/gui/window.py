@@ -886,6 +886,10 @@ class MainWindow(QWidget):
             self.set_chips(res)
             if all(core):
                 self._health_fails = 0
+                if not getattr(self, "_net_remembered", False) and not self._zapret2_on():
+                    self._net_remembered = True  # works here: remember it for this ISP (once per network)
+                    c = self.settings.get("strategy")
+                    self._run(lambda log: tester.remember_network(c), lambda _: None)
                 return
             self._health_fails += 1
             bad = ", ".join(k for k, v in res.items() if not v)
@@ -903,15 +907,44 @@ class MainWindow(QWidget):
                         self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. "
                                               "Починю после игры, чтобы не прерывать матч.")
                     return
-                if time.time() - self.settings.get("last_auto_repick", 0) < 6 * 3600:
+                if (time.time() - self.settings.get("last_auto_repick", 0) < 6 * 3600
+                        and not getattr(self, "_new_net", False)):
                     self.log("автоподбор уже был недавно — жду, чтобы не дёргать обход")
                     return
                 self.save(last_auto_repick=time.time())
+                self._new_net = False
                 stats.record("repick", reason=bad)
                 self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. Подбираю стратегию заново…")
                 self._repair = True
                 self.autopick()
         self._run(lambda log: tester.quick_check(light=True), done)  # no 1 MB speed test every 10 min
+
+    def _network_changed(self):
+        """Another ISP (ASN): switch to the strategy picked there before, without a pick. An unknown ISP may be
+        re-picked at once if checks fail (the 6 h pause between automatic picks is for one network)."""
+        if tester.vpn_active():
+            return
+        from app import sharedb
+
+        def done(who):
+            if not who or who[0] == self.settings.get("net_asn"):
+                return
+            self.save(net_asn=who[0])
+            self._net_remembered = False
+            mem = (self.settings.get("networks") or {}).get(who[0])
+            if not mem:
+                self._new_net = True
+                self.log(f"новая сеть: {who[1]} ({who[0]}) — если что-то не откроется, подберу стратегию для неё")
+                return
+            self._new_net = False
+            if mem["choice"] == self.settings.get("strategy") or self.busy or self._zapret2_on():
+                return
+            self.save(strategy=mem["choice"], auto_choice=mem["choice"])
+            self.log(f"сеть {who[1]}: включаю стратегию, подобранную для неё раньше")
+            if self.runner.running:
+                self.start_runner()
+            self.refresh()
+        self._run(lambda log: sharedb.isp(), done)
 
     def _tick(self):
         """Detect winws dying on its own (antivirus, driver conflict)."""
@@ -961,6 +994,8 @@ class MainWindow(QWidget):
         if self._net is not None and net != self._net:
             self.log(f"сеть изменилась ({self._net} → {net}), проверю доступ")
             self._next_health = now + 20
+            if net:
+                self._network_changed()
         self._net = net
         if (not self.busy and now - self.settings.get("ipset_updated", 0) > 7 * 86400
                 and now - getattr(self, "_ipset_try", 0) > 3600):
