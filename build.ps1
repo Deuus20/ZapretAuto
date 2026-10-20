@@ -1,7 +1,8 @@
 $ver = (Select-String -Path app\__init__.py -Pattern '"(.+)"').Matches[0].Groups[1].Value
 # Build dist\ZapretAuto\ZapretAuto.exe (onedir, admin manifest), prune Qt, bundle vendor/, make installer
 $ErrorActionPreference = 'Continue'
-& .venv\Scripts\python -m pytest -q tests
+# own basetemp: pytest's numbered dirs + "pytest-current" symlink broke the run with access denied at cleanup
+& .venv\Scripts\python -m pytest -q -p no:cacheprovider --basetemp "$env:TEMP\zapretauto-pytest" tests
 if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
 & .venv\Scripts\pyinstaller --noconfirm --clean --windowed --uac-admin --icon assets\icon.ico --collect-all curl_cffi --name ZapretAuto `
   --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.Qt3DCore --exclude-module PySide6.QtQuick `

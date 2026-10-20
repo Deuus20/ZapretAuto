@@ -322,3 +322,58 @@ class StatusChip(QWidget):
         lay.addWidget(lab)
         self.setToolTip(f"{name}: " + ("не проверено" if ok is None else
                                        ("работает" if ok else ("медленно" if note == "медленно" else "не открывается"))))
+
+
+class StabilityChart(QWidget):
+    """A bar per day: how many times the bypass failed (failed checks, crashes, re-picks). A calm day is a low
+    green stub; the bar grows and turns yellow/red with the problems, so a degrading strategy shows at a glance."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.days: list[dict] = []
+        self.setMinimumHeight(46)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    @staticmethod
+    def problems(d: dict) -> int:
+        return d["fails"] + d["crashes"] + d["repicks"]
+
+    def set_days(self, days: list[dict]) -> None:
+        self.days = days
+        self.setToolTip("\n".join(
+            f"{d['day']}: " + (f"проверок {d['checks']}, неудачных {d['fails']}" if d["checks"] else "проверок не было")
+            + (f", падений {d['crashes']}" if d["crashes"] else "") + (f", подборов {d['repicks']}" if d["repicks"] else "")
+            for d in days))
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        if not self.days:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        n = len(self.days)
+        label_h = 16
+        top = 4
+        h = self.height() - label_h - top
+        slot = self.width() / n
+        bw = min(28.0, slot * .55)
+        peak = max(3, *(self.problems(d) for d in self.days))
+        f = QFont(self.font())
+        f.setPointSizeF(max(7.0, f.pointSizeF() - 1.5))
+        p.setFont(f)
+        for i, d in enumerate(self.days):
+            x = i * slot + (slot - bw) / 2
+            bad = self.problems(d)
+            if not d["checks"] and not bad:  # nothing known: an outline stub
+                p.setPen(QPen(QColor(C["outline_variant"]), 1))
+                p.setBrush(Qt.NoBrush)
+                p.drawRoundedRect(QRectF(x, top + h - 4, bw, 4), 2, 2)
+            else:
+                bh = max(4.0, h * bad / peak)
+                color = C["good"] if bad == 0 else C["warn"] if bad <= 2 else C["error"]
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(color))
+                p.drawRoundedRect(QRectF(x, top + h - bh, bw, bh), 3, 3)
+            p.setPen(QColor(C["on_surface_variant"]))
+            p.drawText(QRectF(i * slot, self.height() - label_h, slot, label_h), Qt.AlignCenter, d["day"][:2])
+        p.end()

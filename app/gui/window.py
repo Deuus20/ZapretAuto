@@ -29,7 +29,8 @@ AUTO = "Авто (результат подбора)"
 UPDATE_EVERY = 6 * 3600  # s between background update checks
 from app.gui import style  # noqa: E402
 from app.gui.style import COLORS, app_icon, init_fonts  # noqa: E402
-from app.gui.widgets import InputRow, PowerButton, Pages, Rail, SettingRow, StatusChip, Switch  # noqa: E402
+from app.gui.widgets import (InputRow, PowerButton, Pages, Rail, SettingRow, StabilityChart, StatusChip,  # noqa: E402
+                             Switch)
 from app.gui.worker import Bridge, Worker  # noqa: E402
 
 
@@ -82,6 +83,10 @@ class MainWindow(QWidget):
          "подобрать стратегию заново (не посреди игры).", True, "main"),
         ("auto_update", "Обновляться автоматически",
          "Ставить новые версии zapret и ZapretAuto при запуске и раз в 6 часов, но не во время игры.", True, "main"),
+        ("quiet_updates", "Обновляться только в тишине",
+         "Не ставить обновления, пока идёт звонок (Discord, Telegram, Zoom…) или открыто полноэкранное приложение "
+         "— игра, фильм, презентация. Обновление перезапускает обход, и связь рвётся на минуту. "
+         "Дольше суток не откладывается.", False, "main"),
         ("autostart", "Запускать вместе с Windows",
          "ZapretAuto тихо стартует в трее при входе в Windows.", False, "main"),
         ("auto_hostlist", "Находить заблокированные сайты",
@@ -122,6 +127,7 @@ class MainWindow(QWidget):
         log = self._page_log()
         self.tabs.addTab(log, "Журнал", "log")
         self.tabs.currentChanged.connect(lambda i: self.fill_stats() if self.tabs.widget(i) is log else None)
+        self.tabs.currentChanged.connect(lambda i: self.fill_chart() if i == 0 else None)
         self.tabs.currentChanged.connect(lambda i: self.fill_games() if self.tabs.widget(i) is self.page_games
                                          else None)
         lists_page = self._page_lists()
@@ -258,6 +264,20 @@ class MainWindow(QWidget):
         gl.addStretch()
         grid.addWidget(games, 1)
         lay.addLayout(grid)
+
+        stab = QFrame(objectName="card")
+        stl = QVBoxLayout(stab)
+        stl.setContentsMargins(14, 10, 14, 8)
+        stl.setSpacing(2)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Стабильность за неделю", objectName="h2"))
+        top.addStretch()
+        self.lbl_stab = QLabel(objectName="muted")
+        top.addWidget(self.lbl_stab)
+        stl.addLayout(top)
+        self.chart = StabilityChart()
+        stl.addWidget(self.chart)
+        lay.addWidget(stab)
 
         recent = QFrame(objectName="card")
         rl = QVBoxLayout(recent)
@@ -567,7 +587,20 @@ class MainWindow(QWidget):
         a4.triggered.connect(self.quit)
         a7 = QAction("Не работает? Отправить отчёт…", m)
         a7.triggered.connect(lambda: (self.show_window(), self.send_report()))
-        for a in (self.act_toggle, a6, a5, a2, a3, a7, a4):
+        a8 = QAction("Сохранить отчёт в zip…", m)
+        a8.triggered.connect(lambda: (self.show_window(), self.save_report()))
+        self.menu_strat = QMenu("Стратегия", m)
+        self.menu_strat.aboutToShow.connect(self._fill_tray_strategies)
+        self.menu_games = QMenu("Игры", m)
+        self.menu_games.aboutToShow.connect(self._fill_tray_games)
+        for a in (self.act_toggle, a6, a5):
+            m.addAction(a)
+        m.addSeparator()
+        m.addMenu(self.menu_strat)
+        m.addMenu(self.menu_games)
+        m.addAction(a2)
+        m.addSeparator()
+        for a in (a3, a7, a8, a4):
             m.addAction(a)
         self._menu = m
         self.tray.setContextMenu(m)
@@ -585,6 +618,7 @@ class MainWindow(QWidget):
     def showEvent(self, e):
         super().showEvent(e)
         self._title_bar()
+        self.fill_chart()
 
     def _title_bar(self):
         """Dark or light window title bar to match the theme."""
@@ -722,6 +756,42 @@ class MainWindow(QWidget):
         self.refresh()
         return self.runner.running
 
+    def _fill_tray_strategies(self):
+        m = self.menu_strat
+        m.clear()
+        for i in range(self.combo.count()):
+            a = m.addAction(self.combo.itemText(i))
+            a.setCheckable(True)
+            a.setChecked(i == self.combo.currentIndex())
+            a.setEnabled(not self.busy)  # a pick or an update is running: switching would restart winws mid-way
+            a.triggered.connect(lambda _=False, i=i: self._tray_strategy(i))
+
+    def _tray_strategy(self, i: int):
+        if self.busy or i == self.combo.currentIndex():
+            return
+        self.combo.setCurrentIndex(i)
+        self.on_combo(i)
+        self.log(f"стратегия из трея: {self.combo.itemText(i)}")
+
+    def _fill_tray_games(self):
+        """Found games with a check mark: unchecking stops the bypass for that game's servers, checking returns it."""
+        m = self.menu_games
+        m.clear()
+        games = self.watcher.games() if self.watcher else {}
+        ign = set(self.settings.get("games_ignore", []))
+        if not self.settings.get("game_watch"):
+            m.addAction("Слежение за играми выключено").setEnabled(False)
+            return
+        games = {**{exe: {} for exe in ign}, **games}  # switched off ones stay listed: a click turns them back on
+        if not games:
+            m.addAction("Игр пока не найдено").setEnabled(False)
+            return
+        for exe, g in sorted(games.items(), key=lambda kv: (not kv[1].get("active"), kv[0] in ign, kv[0])):
+            a = m.addAction(gamewatch.display_name(exe, g.get("path")) + (" — играете" if g.get("active") else ""))
+            a.setCheckable(True)
+            a.setChecked(exe not in ign)
+            a.triggered.connect(lambda on, exe=exe: self.set_game_ignored(exe, not on))
+
     def send_report(self, what: str | None = None):
         """Publish the problem as a GitHub issue (the user confirms it on the page)."""
         if what is None:
@@ -745,7 +815,13 @@ class MainWindow(QWidget):
             if p:
                 self.log(f"отчёт сохранён: {p}")
                 QMessageBox.information(self, "ZapretAuto", f"Отчёт сохранён:\n{p}\n\nОтправьте этот файл разработчику.")
-        self._run(lambda log: logs.make_report(Path(path), diag_rows), done)
+        def work(log):
+            rows = diag_rows
+            if rows is None:  # diagnostics not run yet: the report is much less useful without them
+                log("отчёт: запускаю диагностику…")
+                rows = diag.run_checks()
+            return logs.make_report(Path(path), rows)
+        self._run(work, done)
 
     def fill_stats(self):
         s = stats.summary(7)
@@ -765,6 +841,13 @@ class MainWindow(QWidget):
             "<table cellspacing='0' cellpadding='3'>"
             + "".join(f"<tr><td style='color:{muted}; padding-right:18px'>{k}</td><td>{v}</td></tr>" for k, v in rows)
             + "</table>")
+
+    def fill_chart(self):
+        days = stats.daily(7)
+        self.chart.set_days(days)
+        bad = sum(StabilityChart.problems(d) for d in days)
+        self.lbl_stab.setText("сбоев не было" if not bad and any(d["checks"] for d in days) else
+                              "данных пока нет" if not bad else f"сбоев: {bad}")
 
     def set_advanced(self, on: bool, save: bool = True):
         """Show/hide expert settings and the raw lists editor."""
@@ -961,10 +1044,13 @@ class MainWindow(QWidget):
                 self.start_runner()
                 self.tray.showMessage("ZapretAuto", "Обход снова включён.")
         if (updater and self.settings.get("auto_update", True) and not self.busy
-                and now >= getattr(self, "_next_update_check", now + 1) and not self._game_running()):
+                and now >= getattr(self, "_next_update_check", now + 1) and not self._game_running()
+                and not self._update_deferred(now)):
             self._next_update_check = now + UPDATE_EVERY  # the app runs for weeks: don't update only at start
             self._auto_check = True
             self.check_update()
+        if self._ticks % 30 == 0 and self.isVisible() and self.tabs.currentIndex() == 0:
+            self.fill_chart()
         if self._ticks % 5 == 0:
             self.apply_theme()  # Windows light/dark switched: follow it live
         if self._ticks % 30 == 0 and self.runner.running and not self.busy:  # ~1 min: VPN may have moved
@@ -1460,9 +1546,14 @@ class MainWindow(QWidget):
         exe = self._selected_game()
         if not exe:
             return
-        self.save(games_ignore=sorted(set(self.settings.get("games_ignore", [])) | {exe}))
-        if self.watcher:  # not a game: its servers must leave the game ipset (and the game filter)
+        self.set_game_ignored(exe, True)
+
+    def set_game_ignored(self, exe: str, on: bool):
+        ign = set(self.settings.get("games_ignore", []))
+        self.save(games_ignore=sorted(ign | {exe} if on else ign - {exe}))
+        if on and self.watcher:  # not a game: its servers must leave the game ipset (and the game filter)
             self.watcher.reset_game(exe)
+        self.log(f"{exe}: обход для игры " + ("выключен" if on else "снова включён"))
         self.fill_games()
 
     def reset_game(self):
@@ -1546,6 +1637,23 @@ class MainWindow(QWidget):
             updater.check_async(lambda tag, newer: self.bridge.update_checked.emit(tag, newer))
             if hasattr(updater, "app_check_async"):
                 updater.app_check_async(lambda tag, newer: self.bridge.app_checked.emit(tag, newer))
+
+    def _update_deferred(self, now: float) -> bool:
+        """«Обновляться только в тишине»: put the update off while a call or a full-screen app runs, re-checking
+        every 10 min; after a day of waiting it goes anyway (old versions break as upstream moves on)."""
+        if not self.settings.get("quiet_updates"):
+            return False
+        since = getattr(self, "_deferred_since", 0) or now
+        from app import quiet
+        why = quiet.busy_reason() if now - since < 86400 else None
+        if not why:
+            self._deferred_since = 0
+            return False
+        if not getattr(self, "_deferred_since", 0):
+            self.log(f"обновление отложено: {why}")
+        self._deferred_since = since
+        self._next_update_check = now + 600
+        return True
 
     def _show_upd(self, key, text):
         self._upd = {**getattr(self, "_upd", {}), key: text}
@@ -1639,8 +1747,9 @@ class MainWindow(QWidget):
             return
         self._next_update_check = time.time() + UPDATE_EVERY
         if self.settings.get("auto_update", True) and updater:
-            self._auto_check = True
-            self.check_update()
+            if not self._update_deferred(time.time()):  # deferred: the timer retries in 10 min
+                self._auto_check = True
+                self.check_update()
         if tester.chosen_strategy():
             self.start_runner()
         else:

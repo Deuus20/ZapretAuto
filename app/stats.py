@@ -55,3 +55,28 @@ def summary(days: int = 7) -> dict:
             "crashes": sum(1 for e in ev if e["k"] == "crash"),
             "ipset": sum(1 for e in ev if e["k"] == "ipset"), "uptime_h": round(up / 3600, 1),
             "switches": [(e["t"], e.get("to", "?")) for e in ev if e["k"] == "switch"]}
+
+
+def daily(days: int = 7) -> list[dict]:
+    """Per local day, oldest first: background checks, failed ones, bypass crashes and re-picks (the home chart)."""
+    today = time.localtime()
+    start = time.mktime((today.tm_year, today.tm_mon, today.tm_mday - days + 1, 0, 0, 0, 0, 0, -1))
+    out = []
+    for i in range(days):
+        t = time.localtime(start + i * 86400 + 3 * 3600)  # +3 h: a DST jump can't slip into the previous day
+        out.append({"day": time.strftime("%d.%m", t), "checks": 0, "fails": 0, "crashes": 0, "repicks": 0})
+    for e in _load():
+        t = time.localtime(e.get("t", 0))
+        key = time.strftime("%d.%m", t)
+        d = next((d for d in out if d["day"] == key), None)
+        if d is None or e.get("t", 0) < start:
+            continue
+        k = e.get("k")
+        if k == "check":
+            d["checks"] += 1
+            d["fails"] += 0 if e.get("ok") else 1
+        elif k == "crash":
+            d["crashes"] += 1
+        elif k == "repick":
+            d["repicks"] += 1
+    return out
