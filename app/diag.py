@@ -1,4 +1,5 @@
 """Environment diagnostics for winws/WinDivert."""
+import re
 import subprocess
 
 import psutil
@@ -27,8 +28,11 @@ def _svc_status(name: str) -> str | None:
     return out.strip() or None
 
 
-def _item(label, level, detail="", fix=None):
-    return {"label": label, "level": level, "detail": detail, "fix": fix}
+def _item(label, level, detail="", fix=None, fix_label=None):
+    r = {"label": label, "level": level, "detail": detail, "fix": fix}
+    if fix_label:
+        r["fix_label"] = fix_label  # button text when "Исправить" would mislead (e.g. «Убрать»)
+    return r
 
 
 def _procs() -> set[str]:
@@ -203,6 +207,25 @@ def run_checks() -> list[dict]:
     else:
         res.append(_item("VPN", "ok", ("раздельный туннель или VPN выключен" if srv else "нет") +
                          (f"; серверы VPN исключены из обхода: {', '.join(sorted(srv))}" if srv else "")))
+    try:
+        entries = flowseal_hosts()
+        have, ours = hosts_state(entries)
+    except Exception:  # noqa: BLE001 (GitHub unreachable / hosts unreadable: no verdict)
+        entries = None
+    if entries:
+        dns_bad = bool(bad) and "discord.com" in bad
+        if have == len(entries):
+            res.append(_item("Адреса Flowseal в hosts", "ok",
+                             f"записаны и актуальны ({have})" + ("" if ours else " — добавлены не этой программой"),
+                             "hosts_remove" if ours else None, "Убрать"))
+        else:
+            res.append(_item("Адреса Flowseal в hosts", "warn" if dns_bad else "ok",
+                             (f"актуальных записей {have} из {len(entries)}. " if have else "") +
+                             ("Провайдер подменяет DNS для Discord — приложение Discord не использует защищённый DNS "
+                              "браузера; «Исправить» запишет в hosts правильные адреса Discord, Telegram и GitHub "
+                              "(список Flowseal)" if dns_bad else
+                              "если Discord, Telegram или GitHub не находятся — «Исправить» запишет в hosts их "
+                              "адреса (список Flowseal)"), "hosts_update"))
     caches = _discord_caches()
     if caches:
         res.append(_item("Кэш Discord", "ok", "если Discord висит на загрузке или проверке обновлений — «Исправить» "
@@ -252,6 +275,98 @@ def _disable_quic() -> str:
         with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as k:
             winreg.SetValueEx(k, "QuicAllowed", 0, winreg.REG_DWORD, 0)
     return "QUIC отключён для Chrome, Edge и Яндекс.Браузера — перезапустите браузер"
+
+
+FLOWSEAL_HOSTS_URL = ("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/"
+                      ".service/hosts")
+HOSTS_BEGIN = "# ZapretAuto: адреса от Flowseal (Discord, Telegram, GitHub) — начало"
+HOSTS_END = "# ZapretAuto: адреса от Flowseal — конец"
+_HOST_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z]{2,63}$")
+
+
+def _hosts_file():
+    import os
+    from pathlib import Path
+    return Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "drivers" / "etc" / "hosts"
+
+
+def flowseal_hosts() -> list[tuple[str, str]]:
+    """(ip, host) pairs Flowseal maintains: right addresses for Discord, Telegram and GitHub when the ISP's DNS
+    lies. Only valid IPs and host names pass."""
+    import ipaddress
+    import requests
+    text = requests.get(FLOWSEAL_HOSTS_URL, timeout=15).text
+    out = []
+    for ln in text.splitlines():
+        f = ln.split("#", 1)[0].split()
+        if len(f) != 2:
+            continue
+        try:
+            ipaddress.ip_address(f[0])
+        except ValueError:
+            continue
+        if _HOST_RE.match(f[1].lower()):
+            out.append((f[0], f[1].lower()))
+    if len(out) < 10:
+        raise ValueError("список Flowseal пустой или повреждён")
+    return out
+
+
+def _read_hosts() -> tuple[list[str], bool]:
+    raw = _hosts_file().read_bytes()
+    bom = raw.startswith(b"\xef\xbb\xbf")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1251", errors="replace")
+    return text.splitlines(), bom
+
+
+def _write_hosts(lines: list[str], bom: bool) -> None:
+    _hosts_file().write_bytes(("\ufeff" if bom else "").encode("utf-8") + ("\r\n".join(lines) + "\r\n").encode())
+    _run(["ipconfig", "/flushdns"])
+
+
+def _strip_block(lines: list[str]) -> list[str]:
+    out, inside = [], False
+    for ln in lines:
+        if ln.strip() == HOSTS_BEGIN:
+            inside = True
+        elif ln.strip() == HOSTS_END:
+            inside = False
+        elif not inside:
+            out.append(ln)
+    return out
+
+
+def hosts_state(entries: list[tuple[str, str]]) -> tuple[int, bool]:
+    """(how many of Flowseal's pairs are in hosts, whether our block is there)."""
+    lines, _ = _read_hosts()
+    have = {tuple(ln.split("#", 1)[0].split()[:2]) for ln in lines if len(ln.split("#", 1)[0].split()) >= 2}
+    return sum(1 for e in entries if e in have), any(ln.strip() == HOSTS_BEGIN for ln in lines)
+
+
+def _hosts_update() -> str:
+    """Write Flowseal's pairs as our marked block; older lines for the same names (ours or Flowseal's own
+    service.bat) are replaced, everything else in hosts stays."""
+    entries = flowseal_hosts()
+    names = {h for _, h in entries}
+    lines, bom = _read_hosts()
+    keep = [ln for ln in _strip_block(lines)
+            if not (len(ln.split("#", 1)[0].split()) >= 2 and ln.split("#", 1)[0].split()[1].lower() in names)]
+    while keep and not keep[-1].strip():
+        keep.pop()
+    _write_hosts(keep + ["", HOSTS_BEGIN] + [f"{ip} {h}" for ip, h in entries] + [HOSTS_END], bom)
+    return (f"в hosts записаны адреса от Flowseal ({len(entries)}): Discord, Telegram и GitHub откроются, даже если "
+            "провайдер подменяет DNS. Перезапустите Discord. Убрать — здесь же, «Убрать»")
+
+
+def _hosts_remove() -> str:
+    lines, bom = _read_hosts()
+    if not any(ln.strip() == HOSTS_BEGIN for ln in lines):
+        return "в hosts нет записей этой программы"  # don't touch the file for nothing
+    _write_hosts(_strip_block(lines), bom)
+    return "адреса от Flowseal убраны из hosts"
 
 
 DISCORD_BUILDS = {"discord": "Discord.exe", "discordptb": "DiscordPTB.exe", "discordcanary": "DiscordCanary.exe",
@@ -317,7 +432,8 @@ def _browser_doh() -> str:
 
 
 def apply_fix(fix_id: str) -> str:
-    funcs = {"disable_quic": _disable_quic, "browser_doh": _browser_doh, "discord_cache": _clear_discord_cache}
+    funcs = {"disable_quic": _disable_quic, "browser_doh": _browser_doh, "discord_cache": _clear_discord_cache,
+             "hosts_update": _hosts_update, "hosts_remove": _hosts_remove}
     if fix_id in funcs:
         try:
             return funcs[fix_id]()

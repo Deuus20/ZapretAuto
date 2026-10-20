@@ -994,3 +994,27 @@ def test_gui_exclude_app(tmp_path, monkeypatch):
     finally:
         w.stop_watcher()
         _close(app, w)
+
+
+def test_hosts_block_update_and_remove(tmp_path, monkeypatch):
+    from app import diag
+    hosts = tmp_path / "hosts"
+    hosts.write_bytes(b"\xef\xbb\xbf# Copyright Microsoft\r\n88.210.52.47 zapret-tracker.duckdns.org\r\n"
+                      b"1.1.1.1 discord.com\r\n10.0.0.5 myserver.lan\r\n")
+    monkeypatch.setattr(diag, "_hosts_file", lambda: hosts)
+    monkeypatch.setattr(diag, "_run", lambda c, timeout=20: (0, ""))
+    entries = [("162.159.135.232", "discord.com")] + [(f"149.154.167.{i}", f"t{i}.telegram.org") for i in range(12)]
+    monkeypatch.setattr(diag, "flowseal_hosts", lambda: entries)
+    assert diag.hosts_state(entries) == (0, False)
+    assert "13" in diag.apply_fix("hosts_update")
+    raw = hosts.read_bytes()
+    text = raw.decode("utf-8-sig")
+    assert raw.startswith(b"\xef\xbb\xbf") and "\r\n" in text                    # encoding and line ends kept
+    assert "1.1.1.1 discord.com" not in text and "162.159.135.232 discord.com" in text  # stale line replaced
+    assert "zapret-tracker.duckdns.org" in text and "myserver.lan" in text       # foreign lines untouched
+    assert diag.hosts_state(entries) == (13, True)
+    diag.apply_fix("hosts_update")                                                # twice: still one block
+    assert hosts.read_bytes().decode("utf-8-sig").count(diag.HOSTS_BEGIN) == 1
+    diag.apply_fix("hosts_remove")
+    text = hosts.read_bytes().decode("utf-8-sig")
+    assert diag.HOSTS_BEGIN not in text and "telegram" not in text and "myserver.lan" in text

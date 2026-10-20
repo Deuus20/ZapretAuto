@@ -26,9 +26,21 @@ def selftest() -> int:
     return code
 
 
+def cleanup() -> int:
+    """`ZapretAuto.exe --cleanup` (run by the uninstaller, elevated): take our block out of the hosts file."""
+    try:
+        from app import diag
+        diag._hosts_remove()
+        return 0
+    except Exception:  # noqa: BLE001 (no hosts / no block: nothing to undo)
+        return 1
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
+    if "--cleanup" in sys.argv:
+        return cleanup()
     from app.runner import is_admin
     if not is_admin():
         args = " ".join(f'"{a}"' for a in sys.argv[1:])
