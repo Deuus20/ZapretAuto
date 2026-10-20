@@ -1027,3 +1027,14 @@ def test_autostart_task_has_no_time_limit():
     assert "-ExecutionTimeLimit ([TimeSpan]::Zero)" in ps        # schtasks default: killed after 72 h
     assert "-AllowStartIfOnBatteries" in ps and "-DontStopIfGoingOnBatteries" in ps
     assert "-RunLevel Highest" in ps and "-AtLogOn" in ps and "--tray" in ps
+
+
+def test_smart_app_control_reported(monkeypatch):
+    from app import diag
+    monkeypatch.setattr(diag, "_smart_app_control", lambda: 1)
+    monkeypatch.setattr(diag, "flowseal_hosts", lambda: (_ for _ in ()).throw(OSError("offline")))
+    monkeypatch.setattr(diag, "dns_poisoned", lambda: None)
+    monkeypatch.setattr(diag, "_quic_blocked", lambda: False)
+    rows = {r["label"]: r for r in diag.run_checks()}
+    assert rows["Smart App Control"]["level"] == "err"
+    assert "Smart App Control" in diag.first_problem()            # also the cause shown when winws won't start

@@ -207,6 +207,12 @@ def run_checks() -> list[dict]:
     else:
         res.append(_item("VPN", "ok", ("раздельный туннель или VPN выключен" if srv else "нет") +
                          (f"; серверы VPN исключены из обхода: {', '.join(sorted(srv))}" if srv else "")))
+    sac = _smart_app_control()
+    if sac == 1:  # Windows 11 Smart App Control "on" blocks unsigned programs: winws.exe is unsigned
+        res.append(_item("Smart App Control", "err",
+                         "включён — Windows блокирует неподписанные программы, в том числе winws.exe, и обход не "
+                         "запускается. Отключите: Параметры → Конфиденциальность и защита → Безопасность Windows → "
+                         "Управление приложениями и браузером → Интеллектуальное управление приложениями"))
     try:
         entries = flowseal_hosts()
         have, ours = hosts_state(entries)
@@ -275,6 +281,16 @@ def _disable_quic() -> str:
         with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as k:
             winreg.SetValueEx(k, "QuicAllowed", 0, winreg.REG_DWORD, 0)
     return "QUIC отключён для Chrome, Edge и Яндекс.Браузера — перезапустите браузер"
+
+
+def _smart_app_control() -> int | None:
+    """Windows 11 Smart App Control: 0 off, 1 on (enforced), 2 evaluation; None where it doesn't exist."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\CI\Policy") as k:
+            return int(winreg.QueryValueEx(k, "VerifiedAndReputablePolicyState")[0])
+    except (OSError, ValueError):
+        return None
 
 
 FLOWSEAL_HOSTS_URL = ("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/"
