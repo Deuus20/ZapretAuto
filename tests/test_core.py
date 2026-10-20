@@ -276,6 +276,8 @@ def _fake_pick_env(monkeypatch, tmp_path, baseline_ok, vpn=None, bind=None):
     monkeypatch.setattr(paths, "sync_lists", lambda: None)
     from app import diag
     monkeypatch.setattr(diag, "dns_poisoned", lambda: [])  # keep tests offline
+    from app import sharedb
+    monkeypatch.setattr(sharedb, "isp", lambda: ("AS100", "Home ISP"))
     return tester
 
 
@@ -321,6 +323,7 @@ def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
     assert any("оставляю текущую" in m for m in logs)
     lp = settings.load_settings()["last_pick"]
     assert lp["before"] == lp["score"] and lp["time"] > 0 and "services" in lp   # summary data for the GUI
+    assert settings.load_settings()["networks"]["AS100"]["choice"] == {"base": "ALT11", "picks": {}}
 
 
 def test_dns_poison_detection(monkeypatch):
@@ -1055,3 +1058,24 @@ def test_winws_errors_explained(tmp_path, monkeypatch):
     (tmp_path / "logs").mkdir()
     (tmp_path / "logs" / "winws.log").write_bytes(b"\n".join(b"line %d" % i for i in range(50)))
     assert runner.last_output(3) == "line 47\nline 48\nline 49"
+
+
+def test_gui_network_change_restores_its_strategy(tmp_path, monkeypatch):
+    from app import sharedb
+    mobile = {"base": "ALT3", "picks": {}}
+    app, w = _gui(tmp_path, monkeypatch, net_asn="AS100",
+                  networks={"AS200": {"isp": "Mobile", "choice": mobile, "time": 1}})
+    try:
+        monkeypatch.setattr(tester, "vpn_active", lambda: None)
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
+        started = []
+        monkeypatch.setattr(w, "start_runner", lambda: started.append(1) or True)
+        monkeypatch.setattr(type(w.runner), "running", property(lambda self: True))
+        monkeypatch.setattr(sharedb, "isp", lambda: ("AS200", "Mobile"))
+        w._network_changed()
+        assert tester.load_settings()["strategy"] == mobile and started    # known network: its pick, no re-pick
+        monkeypatch.setattr(sharedb, "isp", lambda: ("AS300", "Cafe"))
+        w._network_changed()
+        assert w._new_net and tester.load_settings()["net_asn"] == "AS300"  # unknown: may re-pick without the 6 h pause
+    finally:
+        _close(app, w)
