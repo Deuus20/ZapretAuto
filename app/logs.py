@@ -95,7 +95,7 @@ def make_report(dest: Path, diag_results: list | None = None) -> Path:
     from . import __version__, strategies, tester, updater
     dest = Path(dest)
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in sorted(LOG_DIR.glob("zapretauto.log*")):
+        for f in sorted(LOG_DIR.glob("zapretauto.log*")) + sorted(LOG_DIR.glob("winws.log")):
             z.writestr(f"logs/{f.name}", _redact(f.read_text(encoding="utf-8", errors="replace")))
         for name in ("settings.json", "results.json", "stats.json"):
             f = paths.DATA / name
