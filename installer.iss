@@ -48,6 +48,7 @@ Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden
 Filename: "taskkill.exe"; Parameters: "/F /IM ZapretAuto.exe"; Flags: runhidden; RunOnceId: "KillApp"
 Filename: "taskkill.exe"; Parameters: "/F /IM winws.exe"; Flags: runhidden; RunOnceId: "KillWinws"
 Filename: "taskkill.exe"; Parameters: "/F /IM winws2.exe"; Flags: runhidden; RunOnceId: "KillWinws2"
+Filename: "{app}\ZapretAuto.exe"; Parameters: "--cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "Cleanup"
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ZapretAuto /F"; Flags: runhidden; RunOnceId: "DelTask"
 Filename: "sc.exe"; Parameters: "stop WinDivert"; Flags: runhidden; RunOnceId: "StopWD"
 Filename: "sc.exe"; Parameters: "delete WinDivert"; Flags: runhidden; RunOnceId: "DelWD"

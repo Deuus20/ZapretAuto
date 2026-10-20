@@ -493,7 +493,7 @@ class MainWindow(QWidget):
             t.setItem(i, 0, a)
             t.setItem(i, 1, QTableWidgetItem(r["detail"]))
             if r.get("fix"):
-                b = QPushButton("Исправить", objectName="tonal" if r["level"] != "ok" else "text")
+                b = QPushButton(r.get("fix_label") or "Исправить", objectName="tonal" if r["level"] != "ok" else "text")
                 b.setCursor(Qt.PointingHandCursor)
                 b.clicked.connect(lambda _=False, f=r["fix"]: self.apply_fix(f))
                 cell = QWidget()  # centered, natural height: a bare cell widget stretched over a tall row
