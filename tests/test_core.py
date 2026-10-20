@@ -1100,3 +1100,21 @@ def test_portable_update_uses_zip_and_keeps_data(monkeypatch):
     cmd = updater.portable_swap_command(Path("C:/t/new/ZapretAuto"), Path("D:/Apps/O'Neil/ZapretAuto"), Path("C:/t"))
     ps = cmd[-1]
     assert "/XD data vendor" in ps and "'D:\Apps\O''Neil\ZapretAuto'" in ps and "--tray" in ps
+
+
+def test_gui_isp_line(tmp_path, monkeypatch):
+    from app import sharedb
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        monkeypatch.setattr(tester, "vpn_active", lambda: None)
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
+        monkeypatch.setattr(sharedb, "isp", lambda: ("AS100", "Home ISP"))
+        monkeypatch.setattr(sharedb, "isp_entry",
+                            lambda a, v: {"votes": 3, "reports": 4, "choice": {"base": "ALT8", "picks": {}}})
+        w.fill_isp()
+        assert "Home ISP" in w.lbl_isp.text() and "отчётов: 4" in w.lbl_isp.text() and "та же" in w.lbl_isp.text()
+        monkeypatch.setattr(sharedb, "isp_entry", lambda a, v: None)  # base unreachable (GitHub down)
+        w.fill_isp()
+        assert w.lbl_isp.text() == "Провайдер: Home ISP"
+    finally:
+        _close(app, w)

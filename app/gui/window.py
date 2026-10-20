@@ -226,6 +226,9 @@ class MainWindow(QWidget):
         self.combo.addItems([s.name for s in strategies.load_all()])
         self.combo.activated.connect(self.on_combo)
         cl.addWidget(self.combo)
+        self.lbl_isp = QLabel(objectName="muted", wordWrap=True)  # the ISP and what the shared base knows about it
+        self.lbl_isp.hide()
+        cl.addWidget(self.lbl_isp)
         self.btn_auto = QPushButton("Подобрать заново", objectName="primary")
         self.btn_auto.setCursor(Qt.PointingHandCursor)
         self.btn_auto.setToolTip("Проверить все стратегии на Discord, YouTube и голосе и собрать лучшую "
@@ -931,6 +934,7 @@ class MainWindow(QWidget):
                 return
             self.save(net_asn=who[0])
             self._net_remembered = False
+            self.fill_isp()
             mem = (self.settings.get("networks") or {}).get(who[0])
             if not mem:
                 self._new_net = True
@@ -1257,12 +1261,42 @@ class MainWindow(QWidget):
             self._pick_summary()
             self._offer_autostart()
             self._offer_share()
+            self.fill_isp()
         elif not cancelled and self.isVisible() and QMessageBox.question(
                 self, "ZapretAuto", "Подбор не помог. Отправить отчёт разработчику?\n\nОткроется страница GitHub "
                 "с готовым отчётом (версии и конец журнала, имя пользователя и IP скрыты). Нужен аккаунт GitHub.") \
                 == QMessageBox.Yes:
             self.send_report()
         self.refresh()
+
+    def fill_isp(self):
+        """«Провайдер: X · в общей базе N отчётов», and whether most of them use the same combination."""
+        if tester.vpn_active():
+            self.lbl_isp.hide()
+            return
+        from app import sharedb
+
+        def work(log):
+            who = sharedb.isp()
+            return (who, sharedb.isp_entry(who[0], updater.current_version())) if who else None
+
+        def done(r):
+            if not r:
+                self.lbl_isp.hide()
+                return
+            (asn, name), e = r
+            text = f"Провайдер: {name or asn}"
+            if e is None:  # the base is unreachable: say nothing about it
+                pass
+            elif e.get("reports"):
+                same = e.get("choice") == self.settings.get("strategy")
+                text += (f" · в общей базе отчётов: {e['reports']}"
+                         + (", у вас та же комбинация, что у большинства" if same else ""))
+            else:
+                text += " · в общей базе пока нет отчётов"
+            self.lbl_isp.setText(text)
+            self.lbl_isp.show()
+        self._run(work, done)
 
     def _pick_summary(self):
         """What the pick achieved, in one line (log + tray), and the service chips from its final runs."""
@@ -1611,6 +1645,8 @@ class MainWindow(QWidget):
             self.start_runner()
         else:
             self.ask_autopick()
+        if updater:
+            QTimer.singleShot(5000, self.fill_isp)
         if self.settings.get("game_watch"):
             self.start_watcher()
 

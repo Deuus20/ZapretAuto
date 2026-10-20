@@ -36,6 +36,9 @@ w = MainWindow()
 if len(sys.argv) > 3:
     w.resize(int(sys.argv[2]), int(sys.argv[3]))
 w.set_chips({"Discord": True, "YouTube": True, "Голос Discord": False})
+w.lbl_isp.setText("Провайдер: PJSC Moscow city telephone network · в общей базе отчётов: 4, у вас та же комбинация, "
+                  "что у большинства")
+w.lbl_isp.show()
 w.show()
 for i in range(w.tabs.count()):
     w.tabs.setCurrentIndex(i)
@@ -116,6 +119,9 @@ _st.windows_light = lambda: True
 w.apply_theme()
 w.runner.proc = type("P", (), {"poll": lambda self: None})()
 w.set_chips({"Discord": True, "YouTube": True, "Голос Discord": False})
+w.lbl_isp.setText("Провайдер: PJSC Moscow city telephone network · в общей базе отчётов: 4, у вас та же комбинация, "
+                  "что у большинства")
+w.lbl_isp.show()
 w.refresh()
 for i, name in ((0, "light_home"), (2, "light_settings"), (3, "light_diag")):
     w.tabs.setCurrentIndex(i)
