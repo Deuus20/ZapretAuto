@@ -943,7 +943,9 @@ class MainWindow(QWidget):
             stats.record("crash")
             self._crashes = [t for t in self._crashes if now - t < 600] + [now]
             if len(self._crashes) <= 3:
-                self.log(f"winws завершился сам — перезапуск ({len(self._crashes)}/3)")
+                from app import runner as runner_mod
+                why = runner_mod.explain(runner_mod.last_output())
+                self.log(f"winws завершился сам — перезапуск ({len(self._crashes)}/3)" + (f": {why}" if why else ""))
                 self.start_runner()
             else:
                 self._expect_running = False
