@@ -217,7 +217,12 @@ def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
         assert g["ips"] == {"9.9.9.10"}  # 443 skipped, game port kept
         assert w._web_nets == {"9.9.9.0/24"} | gamewatch.KNOWN_WEB_NETS  # its /24 is kept out of ipset-all profiles
         w._flush()
-        assert "9.9.9.0/24" in (tmp_path / "lists" / "ipset-exclude-games.txt").read_text().split()
+        excl = tmp_path / "lists" / "ipset-exclude-games.txt"
+        assert excl.read_text().split() == [paths.USER_LISTS["ipset-exclude-games.txt"].strip()]  # off by default
+        settings.save_settings(games_web_bypass=False)
+        w._pending_since, w._last_web = None, None
+        w._flush()
+        assert "9.9.9.0/24" in excl.read_text().split()
         assert "3.164.206.0/24" in settings.load_settings()["games_web"]  # Wardogs login: known before 1st launch
         assert time.time() - w._games["game.exe"]["started"] < gamewatch.LOGIN_GRACE
         w._games["game.exe"]["active"] = False
@@ -1262,3 +1267,17 @@ def test_game_ip_burst_does_not_delay_the_ipset(tmp_path, monkeypatch):
         assert gamewatch.DEBOUNCE + gamewatch.FAST_INTERVAL <= 1.0
     finally:
         w.stop()
+
+
+def test_auto_hostlist_is_its_own_last_profile():
+    """A --hostlist-auto profile takes every 80/443 connection: inside the general profile it kept Cloudflare/AWS
+    from the ipset-all profile and the «16 KB» block stalled them (Wardogs' Epic login)."""
+    s = strategies.Strategy("t", "80,443", "443", [
+        strategies.Profile(["--filter-tcp=80,443", "--hostlist=%LISTS%list-general.txt", "--dpi-desync=fake"]),
+        strategies.Profile(["--filter-tcp=80,443", "--ipset=%LISTS%ipset-all.txt", "--dpi-desync=multisplit"])])
+    a = s.argv(auto_hostlist=True)
+    profiles = " ".join(a).split(" --new ")
+    assert "--hostlist-auto" not in profiles[0] and "ipset-all" in profiles[1]
+    last = profiles[-1]
+    assert "--hostlist-auto=" in last and "list-general" not in last and "--dpi-desync=fake" in last
+    assert "--hostlist-auto" not in " ".join(s.argv(auto_hostlist=False))
