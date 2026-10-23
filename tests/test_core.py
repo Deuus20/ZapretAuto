@@ -1231,3 +1231,15 @@ def test_gui_tray_strategy_and_games(tmp_path, monkeypatch):
         assert w.lbl_stab.text() == "данных пока нет" and len(w.chart.days) == 7
     finally:
         _close(app, w)
+
+
+def test_known_sdr_game_gets_valve_nets_after_reset(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(games_schema=3, games={"wardogsclient-win64-shipping.exe": {"path": "x", "ips": []}})
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        assert "155.133.224.0/19" in w._render()
+    finally:
+        w.stop()
