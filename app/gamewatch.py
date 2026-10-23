@@ -245,7 +245,8 @@ class GameWatcher(threading.Thread):
         now = time.time()
         for exe, g in load_settings().get("games", {}).items():
             ips = set(g.get("ips", []))
-            sdr = bool(g.get("sdr")) or any(valve_sdr(ip) for ip in ips)
+            sdr = (bool(g.get("sdr")) or any(valve_sdr(ip) for ip in ips)  # shipped SDR games: even after a reset
+                   or any(valve_sdr(ip) for ip in known_games.GAME_IPS.get(exe, ())))
             ips = {ip for ip in ips if not valve_sdr(ip) and not cdn(ip)}  # SDR: whole nets; CDN: never
             seen = g.get("seen") or {}
             self._games[exe] = {"path": g.get("path", ""), "ips": ips, "sdr": sdr, "active": False, "ping_ms": None,
