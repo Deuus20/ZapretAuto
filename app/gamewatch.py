@@ -53,6 +53,20 @@ UDP_GAME_MIN_IPS = 3     # distinct public UDP peers before an unknown exe is tr
 DEBOUNCE = 5.0           # s of quiet after the last new IP before rewriting the ipset
 MIN_RESTART_GAP = 5.0    # s between ipset rewrites (winws reloads the file itself, no restart needed)
 MAX_IPS_PER_GAME = 256
+IP_TTL = 7 * 86400       # s; a server the game has not talked to for a week leaves its list (servers rotate)
+# Valve's Steam Datagram Relay networks (AS32590). SDR games (Wardogs, Deadlock, CS2, Dota 2) ping many relays
+# whose addresses rotate: learned one by one, a new relay went without the bypass until a few relaunches had
+# collected it. The whole nets go in once a game is seen using them.
+VALVE_SDR_NETS = ("103.10.124.0/23", "103.28.54.0/23", "146.66.152.0/21", "155.133.224.0/19", "162.254.192.0/21",
+                  "185.25.180.0/22", "205.196.6.0/24")
+# CDN fronts (Cloudflare, Fastly) are web/login servers, never game servers, and desync breaks them: Wardogs'
+# login (Cloudflare) learned on a non-443 port hung the login until the list was cleared. Never learned.
+CDN_NETS = ("103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "104.16.0.0/13", "104.24.0.0/14",
+            "108.162.192.0/18", "131.0.72.0/22", "141.101.64.0/18", "162.158.0.0/15", "172.64.0.0/13",
+            "173.245.48.0/20", "188.114.96.0/20", "190.93.240.0/20", "197.234.240.0/22", "198.41.128.0/17",
+            "151.101.0.0/16", "199.232.0.0/16")
+_SDR = [ipaddress.ip_network(n) for n in VALVE_SDR_NETS]
+_CDN = [ipaddress.ip_network(n) for n in CDN_NETS]
 PID_TTL = 30.0           # s; Windows reuses PIDs, so cached exe names expire
 SYSTEM_DIRS = ("\\windows\\", "\\microsoft\\edge\\", "\\google\\chrome\\", "\\windowsapps\\microsoft.",
                "\\windowsapps\\microsoftcorporationii.", "\\windowsapps\\spotifyab.",
@@ -138,6 +152,22 @@ def _v4(a) -> str | None:
     return str(ipaddress.IPv4Address(v))
 
 
+def _in(ip: str, nets: list) -> bool:
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(a in n for n in nets)
+
+
+def valve_sdr(ip: str) -> bool:
+    return _in(ip, _SDR)
+
+
+def cdn(ip: str) -> bool:
+    return _in(ip, _CDN)
+
+
 def _group(ips: set[str]) -> set[str]:
     """Collapse >=4 IPs of one /24 into the /24."""
     by24 = defaultdict(list)
@@ -212,9 +242,16 @@ class GameWatcher(threading.Thread):
                                  if k in forced or "\\windowsapps\\" not in v.get("path", "").lower()},
                           games_schema=3)
         self._web_nets: set[str] = set(load_settings().get("games_web", [])) | KNOWN_WEB_NETS
+        now = time.time()
         for exe, g in load_settings().get("games", {}).items():
-            self._games[exe] = {"path": g.get("path", ""), "ips": set(g.get("ips", [])),
-                                "active": False, "ping_ms": None}
+            ips = set(g.get("ips", []))
+            sdr = bool(g.get("sdr")) or any(valve_sdr(ip) for ip in ips)
+            ips = {ip for ip in ips if not valve_sdr(ip) and not cdn(ip)}  # SDR: whole nets; CDN: never
+            seen = g.get("seen") or {}
+            self._games[exe] = {"path": g.get("path", ""), "ips": ips, "sdr": sdr, "active": False, "ping_ms": None,
+                                "seen": {ip: float(seen.get(ip, now)) for ip in ips}}  # older lists: from now
+        self._expire(now)
+        self._last_expire = self._last_seen_save = now
         try:
             self._last_written = (paths.LISTS / "ipset-games.txt").read_text(encoding="utf-8")
             self._last_web = (paths.LISTS / "ipset-exclude-games.txt").read_text(encoding="utf-8")
@@ -255,6 +292,43 @@ class GameWatcher(threading.Thread):
         self._persist_settings()
         return exe
 
+    @staticmethod
+    def _add_ip(g: dict, ip: str, now: float) -> bool:
+        """Remember a game server (caller holds the lock); True if the ipset must change. A full list drops the
+        server unseen the longest instead of refusing the new one."""
+        if cdn(ip):
+            return False
+        if valve_sdr(ip):
+            new = not g.get("sdr")
+            g["sdr"] = True
+            return new
+        seen = g.setdefault("seen", {})
+        if ip in g["ips"]:
+            seen[ip] = now
+            return False
+        if len(g["ips"]) >= MAX_IPS_PER_GAME:
+            old = min(g["ips"], key=lambda i: seen.get(i, 0))
+            g["ips"].discard(old)
+            seen.pop(old, None)
+        g["ips"].add(ip)
+        seen[ip] = now
+        return True
+
+    def _expire(self, now: float) -> bool:
+        """Drop servers no game has talked to for IP_TTL. True if any went."""
+        gone = False
+        with self._lock:
+            for g in self._games.values():
+                seen = g.setdefault("seen", {})
+                old = {ip for ip in g["ips"] if now - seen.get(ip, now) > IP_TTL}
+                if old:
+                    g["ips"] -= old
+                    for ip in old:
+                        seen.pop(ip, None)
+                        self._base.pop(ip, None)
+                    gone = True
+        return gone
+
     def reset_game(self, exe: str) -> None:
         """Drop all learned IPs of a game."""
         with self._lock:
@@ -264,6 +338,7 @@ class GameWatcher(threading.Thread):
             for ip in g["ips"]:
                 self._base.pop(ip, None)
             g["ips"].clear()
+            g.get("seen", {}).clear()
         self._persist_settings()
         self._flush()
 
@@ -303,6 +378,7 @@ class GameWatcher(threading.Thread):
             for ip, exe in bad:
                 banned.add(ip)
                 self._games[exe]["ips"].discard(ip)
+                self._games[exe].get("seen", {}).pop(ip, None)
                 self.log(f"откат IP {ip} для {exe}")
         save_settings(games_bad_ips=sorted(banned))
         self._persist_settings()
@@ -430,17 +506,20 @@ class GameWatcher(threading.Thread):
             if not exe or not (classify(path, settings) or self._udp_game(exe, path, ip, port, proto, settings)):
                 continue
             seen_active.add(exe)
+            now = time.time()
             with self._lock:
                 if exe not in self._games:  # first sight of a known game: its servers are known already
-                    new_ip = new_ip or bool(self._seed(exe))
-                g = self._games.setdefault(exe, {"path": path, "ips": set(list(self._seed(exe))[:MAX_IPS_PER_GAME]),
-                                                 "active": True, "ping_ms": None})
-                g.setdefault("started", time.time())
+                    g = self._games[exe] = {"path": path, "ips": set(), "seen": {}, "active": True, "ping_ms": None}
+                    for sip in list(self._seed(exe))[:MAX_IPS_PER_GAME]:
+                        self._add_ip(g, sip, now)
+                    new_ip = new_ip or bool(g["ips"] or g.get("sdr"))
+                g = self._games[exe]
+                g.setdefault("started", now)
                 g["path"] = path
-                if ip not in g["ips"] and len(g["ips"]) < MAX_IPS_PER_GAME:
-                    g["ips"].add(ip)
+                if self._add_ip(g, ip, now):
                     new_ip = True
-                    if ip not in self._base and ip not in self._measuring and ip not in self._checked:
+                    if (ip in g["ips"] and ip not in self._base and ip not in self._measuring
+                            and ip not in self._checked):
                         self._measuring.add(ip)
                         self._pool.submit(self._measure_base, ip, port, exe)
             if ip not in self._ping and ip not in self._pinging:
@@ -470,7 +549,9 @@ class GameWatcher(threading.Thread):
 
     def _persist_settings(self) -> None:
         with self._lock:
-            data = {k: {"path": v["path"], "ips": sorted(v["ips"])} for k, v in self._games.items()}
+            data = {k: {"path": v["path"], "ips": sorted(v["ips"]),
+                        "seen": {ip: int(v.get("seen", {}).get(ip, 0)) for ip in v["ips"]},
+                        **({"sdr": True} if v.get("sdr") else {})} for k, v in self._games.items()}
             web = sorted(self._web_nets)
         save_settings(games=data, games_web=web)
 
@@ -493,7 +574,9 @@ class GameWatcher(threading.Thread):
     def _render(self) -> str:
         with self._lock:
             ips = set().union(*[g["ips"] for g in self._games.values()]) if self._games else set()
-        lines = sorted(_group(ips), key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
+            sdr = any(g.get("sdr") for g in self._games.values())
+        lines = sorted(_group(ips) | (set(VALVE_SDR_NETS) if sdr else set()),
+                       key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
         man = paths.DATA / "games_manual.txt"
         if man.exists():
             for ln in man.read_text(encoding="utf-8").splitlines():
@@ -539,9 +622,10 @@ class GameWatcher(threading.Thread):
             self._db_games = {exe.lower(): set(ips) for exe, ips in db.get("games", {}).items()}
             for exe, g in self._games.items():  # games already known here get the servers others have seen
                 add = self._db_games.get(exe, set()) - g["ips"]
-                if add and len(g["ips"]) < MAX_IPS_PER_GAME:
-                    g["ips"] |= set(list(add)[:MAX_IPS_PER_GAME - len(g["ips"])])
-                    new = True
+                if add and len(g["ips"]) < MAX_IPS_PER_GAME:  # the base never evicts what this PC saw
+                    now = time.time()
+                    for ip in list(add)[:MAX_IPS_PER_GAME - len(g["ips"])]:
+                        new = self._add_ip(g, ip, now) or new
         if new:
             self._persist_settings()
             self._pending_since = time.time()
@@ -589,6 +673,14 @@ class GameWatcher(threading.Thread):
                     ev = self._poll_psutil()
                 self._process(ev)
                 now = time.time()
+                if now - self._last_expire > 3600:
+                    self._last_expire = now
+                    if self._expire(now):
+                        self._pending_since = now
+                        self._persist_settings()
+                if now - self._last_seen_save > 1800:  # «last seen» of known servers: no write per packet
+                    self._last_seen_save = now
+                    self._persist_settings()
                 if (self._pending_since and now - self._pending_since >= DEBOUNCE
                         and now - self._last_restart >= MIN_RESTART_GAP):
                     self._pending_since = None
