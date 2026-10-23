@@ -52,10 +52,11 @@ UDP_NON_GAME_EXES = {
 UDP_GAME_MIN_IPS = 3     # distinct public UDP peers before an unknown exe is treated as a game
 # A new server must reach the ipset before the game gives up on it. It was «5 s of quiet after the last new
 # IP» on a 3 s loop: a login burst kept resetting the wait, the list lagged behind the game and it took several
-# relaunches to get in. Now: the first new IP is written within ~0.5 s, later ones batched at most once a second.
-DEBOUNCE = 0.3           # s from the first new IP of a burst to writing the ipset (collects the same burst)
-MIN_RESTART_GAP = 1.0    # s between ipset rewrites (winws reloads the file itself, no restart needed)
-FAST_INTERVAL = 0.5      # s, loop with WinDivert flow capture (events are queued, cheap to process)
+# relaunches to get in. Now a captured flow wakes the loop at once and the ipset is written first (settings.json
+# after it); a burst is batched by MIN_RESTART_GAP. winws re-reads a changed ipset file by itself.
+DEBOUNCE = 0.0           # s from the first new IP of a burst to writing the ipset
+MIN_RESTART_GAP = 0.25   # s between ipset rewrites
+FAST_INTERVAL = 0.5      # s, idle loop with WinDivert flow capture (new flows wake it earlier)
 PSUTIL_EVERY = 60.0      # s, flow layer sees only new flows: pick up already-open connections
 MAX_IPS_PER_GAME = 256
 IP_TTL = 7 * 86400       # s; a server the game has not talked to for a week leaves its list (servers rotate)
@@ -222,6 +223,8 @@ class GameWatcher(threading.Thread):
         self._handle = None
         self._dll = None
         self._pending_since: float | None = None
+        self._wake = threading.Event()  # set by the flow capture: process new servers now, not at the next tick
+        self._dirty = False             # settings.json is behind the in-memory lists (written after the ipset)
         self._last_written: str | None = None
         self._last_web: str | None = None
         self._pid_cache: dict[int, tuple[tuple[str | None, str | None], float]] = {}
@@ -267,6 +270,7 @@ class GameWatcher(threading.Thread):
     # ---- public
     def stop(self) -> None:
         self._stop_ev.set()
+        self._wake.set()
         self._pool.shutdown(wait=False, cancel_futures=True)
         h, dll = self._handle, self._dll
         if h is not None and dll is not None:
@@ -426,6 +430,7 @@ class GameWatcher(threading.Thread):
             with self._ev_lock:
                 self._events.append((a.ProcessId, ip, a.RemotePort, a.Protocol))
                 del self._events[:-5000]
+            self._wake.set()
 
     def _poll_psutil(self) -> list[tuple[int, str, int, int]]:
         out = []
@@ -545,7 +550,7 @@ class GameWatcher(threading.Thread):
         if new_ip or new_web:
             if not self._pending_since:  # the first new IP sets the deadline; more of the burst don't push it
                 self._pending_since = time.time()
-            self._persist_settings()
+            self._dirty = True  # saved after the ipset is written: the disk write must not delay the bypass
 
     @staticmethod
     def _running_names() -> set[str]:
@@ -576,7 +581,14 @@ class GameWatcher(threading.Thread):
         f = paths.LISTS / name
         tmp = f.with_suffix(".tmp")
         tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, f)  # winws must never read a half-written list
+        for i in range(50):  # winws reading the list blocks the swap for a moment (access denied): retry ~1 s
+            try:
+                os.replace(tmp, f)  # winws must never read a half-written list
+                return
+            except PermissionError:
+                if i == 49:
+                    raise
+                time.sleep(0.02)
 
     def _render(self) -> str:
         with self._lock:
@@ -606,6 +618,9 @@ class GameWatcher(threading.Thread):
             self._write("ipset-games.txt", text)
             self._last_written = text
             self._last_restart = time.time()
+        if self._dirty:  # the ipset is out: now the lists can go to settings.json
+            self._dirty = False
+            self._persist_settings()
         try:
             self.on_change()
         except Exception as e:
@@ -668,7 +683,17 @@ class GameWatcher(threading.Thread):
         else:
             self.log("gamewatch: fallback to psutil.net_connections (TCP/connected UDP only)")
         last_poll = 0.0
-        while not self._stop_ev.wait(min(self.interval, FAST_INTERVAL) if use_divert else self.interval):
+        while not self._stop_ev.is_set():
+            wait = min(self.interval, FAST_INTERVAL) if use_divert else self.interval
+            if self._pending_since:  # a write held back by MIN_RESTART_GAP: come back exactly when it is due
+                wait = min(wait, max(0.01, self._last_restart + MIN_RESTART_GAP - time.time()))
+            if use_divert:
+                self._wake.wait(wait)
+                self._wake.clear()
+            elif self._stop_ev.wait(wait):
+                break
+            if self._stop_ev.is_set():
+                break
             try:
                 if use_divert:
                     with self._ev_lock:
@@ -692,5 +717,8 @@ class GameWatcher(threading.Thread):
                         and now - self._last_restart >= MIN_RESTART_GAP):
                     self._pending_since = None
                     self._flush()
+                if self._dirty and not self._pending_since:
+                    self._dirty = False
+                    self._persist_settings()
             except Exception as e:
                 self.log(f"gamewatch: loop error: {e}")
