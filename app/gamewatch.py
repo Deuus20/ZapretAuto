@@ -568,10 +568,11 @@ class GameWatcher(threading.Thread):
         save_settings(games=data, games_web=web)
 
     def _render_web(self) -> str:
-        """ipset-exclude-games.txt; settings games_web_bypass=true keeps desyncing them (opt-out)."""
+        """ipset-exclude-games.txt. Off by default now (games_web_bypass=false turns it on): the «16 KB» whitelist
+        block stalls these very servers (Wardogs' Epic login on Cloudflare) unless they are desynced."""
         with self._lock:
             nets = sorted(self._web_nets, key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
-        if not nets or load_settings().get("games_web_bypass"):
+        if not nets or load_settings().get("games_web_bypass", True):
             nets = [PLACEHOLDER]
         return "\n".join(nets) + "\n"
 

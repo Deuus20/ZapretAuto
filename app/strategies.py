@@ -76,14 +76,14 @@ class Strategy:
             return s
 
         out = [str(paths.BIN / "winws.exe"), f"--wf-tcp={sub(self.wf_tcp)}", f"--wf-udp={sub(self.wf_udp)}"]
+        auto_src = None
         for i, p in enumerate(self.profiles):
             if i:
                 out.append("--new")
             args = [sub(a).replace('"', "") for a in p.args]
             args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-vpn.txt'}")  # never touch VPN tunnels
             if auto_hostlist and p.group == "tcp:80,443:list-general":
-                # winws adds domains whose connections fail (RST / retransmits) and desyncs them from then on
-                args += [f"--hostlist-auto={paths.LISTS / 'list-auto.txt'}", "--hostlist-auto-fail-threshold=3"]
+                auto_src = list(args)
             if "ipset-all" in p.group:  # route game ipset through every ipset profile (game ports + 80/443)
                 args.insert(1, f"--ipset={paths.LISTS / 'ipset-games.txt'}")
                 args.insert(1, f"--ipset={paths.LISTS / 'ipset-telegram.txt'}")
@@ -91,6 +91,13 @@ class Strategy:
                 # desyncing them hung Wardogs at "logging in" — gamewatch collects them here
                 args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-games.txt'}")
             out += args
+        if auto_src:
+            # winws adds domains whose connections fail (RST / retransmits) and desyncs them from then on. Its own
+            # profile, last: a --hostlist-auto profile takes every 80/443 connection, so inside the general profile
+            # it kept Cloudflare/AWS from the ipset-all profile below it — and the «16 KB» whitelist block (no RST,
+            # the transfer just stalls) hung Wardogs' Epic login and any Cloudflare site off the lists
+            out += ["--new"] + [a for a in auto_src if not a.startswith(("--hostlist=", "--hostlist-domains="))]
+            out += [f"--hostlist-auto={paths.LISTS / 'list-auto.txt'}", "--hostlist-auto-fail-threshold=3"]
         left = sorted({v for a in out for v in re.findall(r"%[\w~]+%", a)})
         if left:
             raise ValueError(f"{self.name}: unknown variables {left}")
