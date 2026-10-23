@@ -50,8 +50,13 @@ UDP_NON_GAME_EXES = {
     "nekoray.exe", "v2rayn.exe", "xray.exe", "sing-box.exe", "hiddify.exe", "claude.exe", "node.exe",
 }
 UDP_GAME_MIN_IPS = 3     # distinct public UDP peers before an unknown exe is treated as a game
-DEBOUNCE = 5.0           # s of quiet after the last new IP before rewriting the ipset
-MIN_RESTART_GAP = 5.0    # s between ipset rewrites (winws reloads the file itself, no restart needed)
+# A new server must reach the ipset before the game gives up on it. It was «5 s of quiet after the last new
+# IP» on a 3 s loop: a login burst kept resetting the wait, the list lagged behind the game and it took several
+# relaunches to get in. Now: the first new IP is written within ~0.5 s, later ones batched at most once a second.
+DEBOUNCE = 0.3           # s from the first new IP of a burst to writing the ipset (collects the same burst)
+MIN_RESTART_GAP = 1.0    # s between ipset rewrites (winws reloads the file itself, no restart needed)
+FAST_INTERVAL = 0.5      # s, loop with WinDivert flow capture (events are queued, cheap to process)
+PSUTIL_EVERY = 60.0      # s, flow layer sees only new flows: pick up already-open connections
 MAX_IPS_PER_GAME = 256
 IP_TTL = 7 * 86400       # s; a server the game has not talked to for a week leaves its list (servers rotate)
 # Valve's Steam Datagram Relay networks (AS32590). SDR games (Wardogs, Deadlock, CS2, Dota 2) ping many relays
@@ -538,7 +543,8 @@ class GameWatcher(threading.Thread):
                         names = self._running_names()
                     g["active"] = exe in names
         if new_ip or new_web:
-            self._pending_since = time.time()
+            if not self._pending_since:  # the first new IP sets the deadline; more of the burst don't push it
+                self._pending_since = time.time()
             self._persist_settings()
 
     @staticmethod
@@ -661,15 +667,15 @@ class GameWatcher(threading.Thread):
             self.log("gamewatch: WinDivert flow capture active")
         else:
             self.log("gamewatch: fallback to psutil.net_connections (TCP/connected UDP only)")
-        tick = 0
-        while not self._stop_ev.wait(self.interval):
+        last_poll = 0.0
+        while not self._stop_ev.wait(min(self.interval, FAST_INTERVAL) if use_divert else self.interval):
             try:
                 if use_divert:
                     with self._ev_lock:
                         ev, self._events = self._events, []
-                    if tick % 20 == 0:  # flow layer sees only new flows: pick up already-open connections (~1/min)
+                    if time.time() - last_poll >= PSUTIL_EVERY:
+                        last_poll = time.time()
                         ev += self._poll_psutil()
-                    tick += 1
                 else:
                     ev = self._poll_psutil()
                 self._process(ev)

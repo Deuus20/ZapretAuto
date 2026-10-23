@@ -1492,7 +1492,10 @@ class MainWindow(QWidget):
                 msg = f"Найдена игра: {names}. Обход для её серверов включён."
                 self.tray.showMessage("ZapretAuto", msg)
             else:
+                if time.time() - getattr(self, "_games_logged", 0) < 60:
+                    return  # the list is written within a second of each new server: one line a minute is enough
                 msg = "обновлены адреса игровых серверов"
+            self._games_logged = time.time()
             self.log(msg)
 
     def fill_games(self):

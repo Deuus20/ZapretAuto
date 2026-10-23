@@ -1243,3 +1243,22 @@ def test_known_sdr_game_gets_valve_nets_after_reset(tmp_path, monkeypatch):
         assert "155.133.224.0/19" in w._render()
     finally:
         w.stop()
+
+
+def test_game_ip_burst_does_not_delay_the_ipset(tmp_path, monkeypatch):
+    """New servers in a login burst: the first one sets the write deadline, the rest don't push it back."""
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        exe = "game.exe"
+        monkeypatch.setattr(w, "_proc", lambda pid: (exe, rf"D:\steamapps\common\G\{exe}"))
+        monkeypatch.setattr(w, "_pool", type("P", (), {"submit": lambda *a, **k: None, "shutdown": lambda *a, **k: None})())
+        w._process([(1, "9.9.9.10", 27015, 17)])
+        first = w._pending_since
+        w._process([(1, "9.9.9.11", 27015, 17)])
+        assert first and w._pending_since == first
+        assert gamewatch.DEBOUNCE + gamewatch.FAST_INTERVAL <= 1.0
+    finally:
+        w.stop()
