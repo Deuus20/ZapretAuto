@@ -593,8 +593,34 @@ def test_known_game_seeded_on_first_sight(tmp_path, monkeypatch):
         monkeypatch.setattr(w, "_proc", lambda pid: (exe, rf"C:\Steam\steamapps\common\Wardogs\{exe}"))
         monkeypatch.setattr(w, "_pool", type("P", (), {"submit": lambda *a, **k: None, "shutdown": lambda *a, **k: None})())
         w._process([(1, "9.9.9.10", 27015, 17)])
-        assert len(w.games()[exe]["ips"]) > 100  # shipped servers + the new one
+        ips = w.games()[exe]["ips"]
+        assert "9.9.9.10" in ips and "54.115.9.225" in ips and not any(gamewatch.valve_sdr(i) for i in ips)
+        assert "155.133.224.0/19" in w._render()  # shipped Valve relays: their whole nets
         assert "3.164.206.0/24" in w._web_nets
+    finally:
+        w.stop()
+
+
+def test_game_servers_rotate_cdn_never_learned(tmp_path, monkeypatch):
+    """Servers unseen for a week leave; a full list drops the oldest; Cloudflare (login) is never desynced."""
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    exe = "game.exe"
+    settings.save_settings(games_schema=3, games={exe: {"path": "x", "ips": ["9.9.9.1", "9.9.9.2", "104.21.5.5"],
+                                                        "seen": {"9.9.9.1": 1000}}})
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        g = w._games[exe]
+        assert g["ips"] == {"9.9.9.2"}  # 9.9.9.1 unseen since 1970-ish: expired; Cloudflare dropped
+        now = time.time()
+        assert not w._add_ip(g, "104.18.125.108", now) and "104.18.125.108" not in g["ips"]
+        monkeypatch.setattr(gamewatch, "MAX_IPS_PER_GAME", 3)
+        g["seen"]["9.9.9.2"] = now - 100
+        for ip in ("8.8.8.1", "8.8.8.2"):
+            w._add_ip(g, ip, now)
+        assert w._add_ip(g, "8.8.8.3", now) and g["ips"] == {"8.8.8.1", "8.8.8.2", "8.8.8.3"}  # oldest went
+        assert w._expire(now + gamewatch.IP_TTL + 1) and not g["ips"]
     finally:
         w.stop()
 
