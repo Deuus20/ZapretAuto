@@ -58,6 +58,7 @@ DEBOUNCE = 0.0           # s from the first new IP of a burst to writing the ips
 MIN_RESTART_GAP = 0.25   # s between ipset rewrites
 FAST_INTERVAL = 0.5      # s, idle loop with WinDivert flow capture (new flows wake it earlier)
 PSUTIL_EVERY = 60.0      # s, flow layer sees only new flows: pick up already-open connections
+NAMES_EVERY = 5.0        # s, process scan to notice a game has exited (a full scan every 0.5 s ate ~3% CPU)
 MAX_IPS_PER_GAME = 256
 IP_TTL = 7 * 86400       # s; a server the game has not talked to for a week leaves its list (servers rotate)
 # Valve's Steam Datagram Relay networks (AS32590). SDR games (Wardogs, Deadlock, CS2, Dota 2) ping many relays
@@ -220,6 +221,7 @@ class GameWatcher(threading.Thread):
         self._udp_hits: dict[str, set[str]] = {}
         self._events: list[tuple[int, str, int]] = []
         self._ev_lock = threading.Lock()
+        self._names: tuple[float, set[str]] = (0.0, set())
         self._handle = None
         self._dll = None
         self._pending_since: float | None = None
@@ -552,12 +554,16 @@ class GameWatcher(threading.Thread):
                 self._pending_since = time.time()
             self._dirty = True  # saved after the ipset is written: the disk write must not delay the bypass
 
-    @staticmethod
-    def _running_names() -> set[str]:
+    def _running_names(self) -> set[str]:
+        at, names = self._names
+        if time.time() - at < NAMES_EVERY:
+            return names
         try:
-            return {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
+            names = {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
         except Exception:
-            return set()
+            names = set()
+        self._names = (time.time(), names)
+        return names
 
     def _persist_settings(self) -> None:
         with self._lock:
