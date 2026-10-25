@@ -119,7 +119,11 @@ def test_vpn_route_parsing(monkeypatch):
     monkeypatch.setattr(vpn, "_direct_blocked", lambda ip: True)  # kill switch: no way around the VPN
     assert vpn.bind_ip() is None
     monkeypatch.setattr(tester, "vpn_active", lambda: "AmneziaVPN")
+    monkeypatch.setattr(tester, "egress_ip", lambda: "10.8.1.4")
     assert tester.quick_check() == {}  # no false «не работает» while the VPN blocks the direct path
+    monkeypatch.setattr(tester, "egress_ip", lambda: None)
+    monkeypatch.setattr(tester, "vpn_active", lambda: None)
+    assert tester.quick_check() == {}  # offline: nothing to check
     assert vpn.VPN_RE.search("AmneziaVPN") and not vpn.VPN_RE.search("Laptop LAN")
 
 
