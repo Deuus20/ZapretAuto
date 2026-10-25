@@ -1286,3 +1286,12 @@ def test_auto_hostlist_is_its_own_last_profile():
     last = profiles[-1]
     assert "--hostlist-auto=" in last and "list-general" not in last and "--dpi-desync=fake" in last
     assert "--hostlist-auto" not in " ".join(s.argv(auto_hostlist=False))
+
+
+def test_process_scan_is_throttled(monkeypatch):
+    calls = []
+    monkeypatch.setattr(gamewatch.psutil, "process_iter", lambda attrs: calls.append(1) or [])
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    for _ in range(10):  # a running game with no new flows asks every 0.5 s tick
+        w._running_names()
+    assert len(calls) == 1
