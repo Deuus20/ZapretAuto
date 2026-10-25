@@ -1128,7 +1128,8 @@ class MainWindow(QWidget):
         def done(res):
             self.btn_check_access.setEnabled(True)
             if not res:
-                self.substatus.setText("Не удалось проверить")
+                self.substatus.setText("VPN не пускает трафик мимо себя — проверка невозможна, пока он включён"
+                                       if tester.vpn_active() else "Не удалось проверить")
                 return
             txt = "   ".join(f"{k} {'✓' if ok else '✗'}" for k, ok in res.items())
             self.set_chips(res)

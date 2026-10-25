@@ -75,4 +75,17 @@ def bind_ip() -> str | None:
             name = _adapter_of(ifip) or ""
             if not VPN_RE.search(name) and "radmin" not in name.lower():
                 best = best or ifip
-    return best
+    return best if best and not _direct_blocked(best) else None
+
+
+def _direct_blocked(ip: str) -> bool:
+    """A VPN kill switch (AmneziaVPN, «block traffic outside the tunnel») refuses sockets bound to the physical
+    adapter with WSAEACCES: tests around the VPN are impossible then."""
+    import socket
+    try:
+        with socket.socket() as s:
+            s.settimeout(1.5)
+            s.bind((ip, 0))
+            return s.connect_ex(("1.1.1.1", 443)) == 10013
+    except OSError as e:
+        return getattr(e, "winerror", None) == 10013
