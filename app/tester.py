@@ -347,7 +347,9 @@ def quick_check(light: bool = False) -> dict[str, bool]:
     global BIND
     from . import vpn as vpnmod
     BIND = vpnmod.bind_ip() if vpn_active() else None  # check the direct path, not the VPN
-    keys = {k for ks in QUICK.values() for k in ks}
+    if BIND is None and vpn_active():
+        return {}  # full tunnel with a kill switch: the bypass isn't on the path, failures would be false alarms
+    keys ={k for ks in QUICK.values() for k in ks}
     ts = [t for t in load_targets() if t.key in keys and not (light and t.is_speed)]
     res = probe_all(ts)
     retry = [t for t in ts if res.get(t.key) is None]
