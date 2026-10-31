@@ -89,3 +89,27 @@ def _direct_blocked(ip: str) -> bool:
             return s.connect_ex(("1.1.1.1", 443)) == 10013
     except OSError as e:
         return getattr(e, "winerror", None) == 10013
+
+
+def restart_discord() -> list[str]:
+    """Discord keeps its gateway and voice connections made through the VPN after it's switched off and hangs on
+    «connecting» until restarted. Relaunched through explorer: started from our elevated process it would run as
+    admin (no drag-and-drop from Explorer, its own settings folder rights)."""
+    import time
+    from .diag import DISCORD_BUILDS
+    names = {n.lower() for n in DISCORD_BUILDS.values()}
+    exes = {}
+    for p in psutil.process_iter(["name", "exe"]):
+        n = (p.info["name"] or "").lower()
+        if n in names and p.info["exe"]:
+            exes[n] = p.info["exe"]  # renderer/GPU helpers share the exe
+    for n in exes:
+        subprocess.run(["taskkill", "/F", "/T", "/IM", n], capture_output=True, timeout=10,
+                       creationflags=CREATE_NO_WINDOW)
+    end = time.time() + 5
+    while exes and time.time() < end and any((p.info["name"] or "").lower() in exes
+                                             for p in psutil.process_iter(["name"])):
+        time.sleep(0.3)
+    for exe in exes.values():
+        subprocess.Popen(["explorer.exe", exe], creationflags=CREATE_NO_WINDOW)
+    return list(exes)

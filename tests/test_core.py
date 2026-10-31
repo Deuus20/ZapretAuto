@@ -1299,3 +1299,21 @@ def test_process_scan_is_throttled(monkeypatch):
     for _ in range(10):  # a running game with no new flows asks every 0.5 s tick
         w._running_names()
     assert len(calls) == 1
+
+
+def test_restart_discord_after_vpn(monkeypatch):
+    from types import SimpleNamespace
+    from app import vpn
+    procs = [SimpleNamespace(info={"name": "Discord.exe", "exe": r"C:\D\app-1\Discord.exe"}),
+             SimpleNamespace(info={"name": "Discord.exe", "exe": r"C:\D\app-1\Discord.exe"}),
+             SimpleNamespace(info={"name": "steam.exe", "exe": r"C:\S\steam.exe"})]
+    killed, started = [], []
+    monkeypatch.setattr(vpn.psutil, "process_iter", lambda attrs: procs if not killed else [])
+    monkeypatch.setattr(vpn.subprocess, "run", lambda cmd, **kw: killed.append(cmd[-1]))
+    monkeypatch.setattr(vpn.subprocess, "Popen", lambda cmd, **kw: started.append(cmd))
+    assert vpn.restart_discord() == ["discord.exe"]
+    assert killed == ["discord.exe"]
+    assert started == [["explorer.exe", r"C:\D\app-1\Discord.exe"]]  # unelevated, once per build
+    killed.clear(), started.clear()
+    procs[:] = procs[2:]
+    assert vpn.restart_discord() == [] and not started  # Discord wasn't running: don't start it
