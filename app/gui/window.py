@@ -71,6 +71,7 @@ class MainWindow(QWidget):
         self._crashes: list[float] = []
         self._repick_pending = False
         self._net = None
+        self._vpn_was = None
         self._next_health = time.time() + 30  # status chips soon after start
 
     # ---------- UI ----------
@@ -87,6 +88,9 @@ class MainWindow(QWidget):
          "Не ставить обновления, пока идёт звонок (Discord, Telegram, Zoom…) или открыто полноэкранное приложение "
          "— игра, фильм, презентация. Обновление перезапускает обход, и связь рвётся на минуту. "
          "Дольше суток не откладывается.", False, "main"),
+        ("discord_after_vpn", "Перезапускать Discord после VPN",
+         "Когда VPN выключается, Discord остаётся на старых соединениях и висит на «Подключение». "
+         "Программа сама перезапустит его, чтобы он заработал через обход.", True, "main"),
         ("autostart", "Запускать вместе с Windows",
          "ZapretAuto тихо стартует в трее при входе в Windows.", False, "main"),
         ("auto_hostlist", "Находить заблокированные сайты",
@@ -1033,6 +1037,17 @@ class MainWindow(QWidget):
             self.refresh()
         self._run(lambda log: sharedb.isp(), done)
 
+    def _vpn_off(self):
+        """VPN switched off: Discord stays stuck on connections made through it until restarted."""
+        if not self.settings.get("discord_after_vpn", True) or not self.runner.running:
+            return
+        from app import vpn
+
+        def done(names):
+            if names:
+                self.log("VPN выключен — перезапустил Discord, чтобы он подключился через обход")
+        self._run(lambda log: vpn.restart_discord(), done)
+
     def _tick(self):
         """Detect winws dying on its own (antivirus, driver conflict)."""
         now = time.time()
@@ -1086,6 +1101,11 @@ class MainWindow(QWidget):
             self._next_health = now + 20
             if net:
                 self._network_changed()
+        if net and net != self._net:
+            vpn_now = tester.vpn_active()
+            if self._vpn_was and not vpn_now:
+                self._vpn_off()
+            self._vpn_was = vpn_now
         self._net = net
         if (not self.busy and now - self.settings.get("ipset_updated", 0) > 7 * 86400
                 and now - getattr(self, "_ipset_try", 0) > 3600):
