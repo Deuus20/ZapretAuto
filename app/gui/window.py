@@ -1116,7 +1116,9 @@ class MainWindow(QWidget):
                 self._vpn_off()
             self._vpn_was = vpn_now
         self._net = net
-        if (not self.busy and now - self.settings.get("ipset_updated", 0) > 7 * 86400
+        # read the file, not self.settings: update_ipset saves the time from a worker thread, and the window's
+        # copy kept the old one, so the "weekly" download ran every hour
+        if (not self.busy and now - tester.load_settings().get("ipset_updated", 0) > 7 * 86400
                 and now - getattr(self, "_ipset_try", 0) > 3600):
             self._ipset_try = now  # weekly; retry hourly on failure
             from app import lists
