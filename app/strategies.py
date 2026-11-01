@@ -1,4 +1,5 @@
 """Parse upstream general*.bat into strategies made of `--new`-separated profiles."""
+import logging
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -140,9 +141,20 @@ def load_all(log=None) -> list[Strategy]:
             s.argv()  # validates variable substitution
             out.append(s)
         except Exception as e:  # noqa: BLE001
+            msg = f"стратегия {p.name} пропущена: {e}"
             if log:
-                log(f"стратегия {p.name} пропущена: {e}")
+                log(msg)
+            elif p.name not in _skipped:  # callers pass no log: an upstream format change went unnoticed
+                _skipped.add(p.name)
+                logging.getLogger("zapretauto").warning(msg)
+    if not out and not _skipped_all:
+        _skipped_all.append(1)
+        logging.getLogger("zapretauto").error("ни одна стратегия zapret не распознана — формат general*.bat изменился?")
     return out
+
+
+_skipped: set[str] = set()
+_skipped_all: list[int] = []
 
 
 def mix(name: str, picks: dict[str, Strategy], base: Strategy) -> Strategy:
