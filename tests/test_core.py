@@ -1317,3 +1317,19 @@ def test_restart_discord_after_vpn(monkeypatch):
     killed.clear(), started.clear()
     procs[:] = procs[2:]
     assert vpn.restart_discord() == [] and not started  # Discord wasn't running: don't start it
+
+
+def test_vpn_left_out_of_capture(monkeypatch, tmp_path):
+    from app import runner
+    monkeypatch.setattr(runner.paths, "DATA", tmp_path)
+
+    def fake_save(cmd, **kw):  # winws --wf-save
+        open(cmd[-1].split("=", 1)[1], "w").write("outbound and udp.DstPort >= 1024\n")
+    monkeypatch.setattr(runner.subprocess, "run", fake_save)
+    argv = [r"C:\z\winws.exe", "--wf-tcp=443", "--wf-udp=443,1024-65535", "--filter-udp=443", "--new"]
+    out = runner.uncapture(argv, {"138.124.5.202"})
+    f = tmp_path / "logs" / "winws-filter.txt"
+    assert out == [r"C:\z\winws.exe", "--filter-udp=443", "--new", f"--wf-raw=@{f}"]
+    assert "not (ip and (ip.SrcAddr == 138.124.5.202 or ip.DstAddr == 138.124.5.202))" in f.read_text()
+    assert runner.uncapture(argv, set()) == argv  # no VPN: filter as winws builds it
+    assert runner.uncapture([r"C:\z\winws2.exe", "--wf-udp-out=443"], {"1.2.3.4"})[1] == "--wf-udp-out=443"

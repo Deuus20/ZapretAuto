@@ -1070,7 +1070,11 @@ class MainWindow(QWidget):
             self.apply_theme()  # Windows light/dark switched: follow it live
         if self._ticks % 30 == 0 and self.runner.running and not self.busy:  # ~1 min: VPN may have moved
             from app import vpn
-            self._run(lambda log: vpn.write_exclude(), lambda _: None)  # winws reloads the file itself
+            def vpn_moved(ips):  # the list reloads by itself, the capture filter only on restart
+                if ips is not None and ips != self.runner.vpn_ips and self.runner.running and not self.busy:
+                    self.log("сменился сервер VPN — перезапускаю обход, чтобы не пропускать туннель через winws")
+                    self.start_runner()
+            self._run(lambda log: vpn.write_exclude(), vpn_moved)
         if now - self._last_tick > 60:  # timer is 2 s: a long gap means sleep/hibernate
             self.log("пробуждение после сна — перезапускаю обход")
             if self._expect_running and not self.busy:
