@@ -747,7 +747,8 @@ class MainWindow(QWidget):
             return False
         try:
             flags = self._game_flags()
-            self.runner.start(s, *flags, self.settings.get("auto_hostlist", True))
+            skip = {ip for ips in self.settings.get("nocapture", {}).values() for ip in ips}
+            self.runner.start(s, *flags, self.settings.get("auto_hostlist", True), skip)
             self._run_flags = flags
             self.log(f"запущено: {s.name}")
             stats.record("start")
@@ -1578,7 +1579,16 @@ class MainWindow(QWidget):
 
     def set_game_ignored(self, exe: str, on: bool):
         ign = set(self.settings.get("games_ignore", []))
-        self.save(games_ignore=sorted(ign | {exe} if on else ign - {exe}))
+        nocap = dict(self.settings.get("nocapture", {}))  # exe -> its servers, kept out of winws entirely
+        if on:
+            g = (self.watcher.games().get(exe) if self.watcher else None) or self.settings.get("games", {}).get(exe)
+            if g and g.get("ips"):
+                nocap[exe] = sorted(g["ips"])
+        else:
+            nocap.pop(exe, None)
+        self.save(games_ignore=sorted(ign | {exe} if on else ign - {exe}), nocapture=nocap)
+        if self.runner.running and not self.busy:
+            self.start_runner()  # the capture filter changes only on restart
         if on and self.watcher:  # not a game: its servers must leave the game ipset (and the game filter)
             self.watcher.reset_game(exe)
         self.log(f"{exe}: обход для игры " + ("выключен" if on else "снова включён"))
