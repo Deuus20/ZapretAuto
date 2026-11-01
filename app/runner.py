@@ -12,6 +12,7 @@ from .strategies import Strategy
 EXES = ("winws.exe", "winws2.exe")  # winws2: experimental zapret2 mode
 
 CREATE_NO_WINDOW = 0x08000000
+ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000  # every captured game packet waits for winws: don't queue it behind the game
 
 
 def is_admin() -> bool:
@@ -34,6 +35,7 @@ class Runner:
         self.current: Strategy | None = None
         self._out = None  # winws output file of the current run
         self._lock = threading.RLock()
+        self.vpn_ips: set[str] = set()  # VPN servers left out of the capture filter at start
 
     @property
     def running(self) -> bool:
@@ -46,15 +48,15 @@ class Runner:
             self.stop()
             paths.sync_lists()
             try:
-                vpn.write_exclude()
+                self.vpn_ips = vpn.write_exclude()
             except Exception:  # noqa: BLE001
-                pass
-            argv = s.argv(game_tcp, game_udp, auto_hostlist)
+                self.vpn_ips = set()
+            argv = uncapture(s.argv(game_tcp, game_udp, auto_hostlist), self.vpn_ips)
             log = output_file()
             log.parent.mkdir(parents=True, exist_ok=True)
             self._out = open(log, "wb")  # a file, not a PIPE: an undrained pipe would block winws
             self.proc = subprocess.Popen(
-                argv, cwd=Path(argv[0]).parent, creationflags=CREATE_NO_WINDOW,
+                argv, cwd=Path(argv[0]).parent, creationflags=CREATE_NO_WINDOW | ABOVE_NORMAL_PRIORITY_CLASS,
                 stdout=self._out, stderr=subprocess.STDOUT,
             )
             self.current = s
@@ -79,6 +81,28 @@ class Runner:
             if getattr(self, "_out", None):
                 self._out.close()
                 self._out = None
+
+
+def uncapture(argv: list[str], ips: set[str]) -> list[str]:
+    """Leave VPN servers out of the WinDivert filter itself. The game ports (UDP 1024-65535) also matched a VPN's
+    own tunnel (WireGuard/AmneziaWG), so every VPN packet went through winws in user mode: ~18% of a core and ping
+    spikes in a game next to it. ipset-exclude only skips the desync; the packets were still captured."""
+    if not ips or Path(argv[0]).name.lower() != "winws.exe":  # winws2 has its own filter options
+        return argv
+    f = paths.DATA / "logs" / "winws-filter.txt"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.unlink(missing_ok=True)
+    try:  # winws writes the filter it would build from these options and exits (no driver, ~0.1 s)
+        subprocess.run(argv + [f"--wf-save={f}"], cwd=Path(argv[0]).parent, capture_output=True, timeout=10,
+                       creationflags=CREATE_NO_WINDOW)
+        base = f.read_text(encoding="utf-8").strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return argv
+    if not base:
+        return argv
+    vpn_ = " or ".join(f"ip.SrcAddr == {i} or ip.DstAddr == {i}" for i in sorted(ips))
+    f.write_text(f"({base})\nand not (ip and ({vpn_}))\n", encoding="utf-8")
+    return [a for a in argv if not a.startswith(("--wf-tcp=", "--wf-udp=", "--wf-raw-part="))] + [f"--wf-raw=@{f}"]
 
 
 def output_file() -> Path:
