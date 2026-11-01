@@ -507,9 +507,11 @@ def remember_network(choice: dict, who: tuple[str, str] | None = None) -> None:
         who = sharedb.isp()
     if not who:
         return
-    nets = dict(load_settings().get("networks") or {})
-    nets[who[0]] = {"isp": who[1], "choice": choice, "time": time.time()}
-    save_settings(networks=nets, net_asn=who[0])
+    from . import settings as settings_mod
+    with settings_mod._lock:  # read-modify-write: a health check and a pick finishing together lost one network
+        nets = dict(load_settings().get("networks") or {})
+        nets[who[0]] = {"isp": who[1], "choice": choice, "time": time.time()}
+        save_settings(networks=nets, net_asn=who[0])
 
 
 def _services(runs: list[dict]) -> dict[str, bool]:
