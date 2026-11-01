@@ -1690,7 +1690,10 @@ class MainWindow(QWidget):
         if not newer or getattr(self, "_app_updating", False):
             return
         self.log(f"доступна новая версия ZapretAuto: {tag}")
-        if self.settings.get("auto_update", True) or QMessageBox.question(
+        if auto and (self.busy or self._game_running()):  # a game/pick began during the check: not now
+            self._next_update_check = time.time() + 600
+            return
+        if auto or QMessageBox.question(
                 self, "ZapretAuto", f"Установить ZapretAuto {tag}?") == QMessageBox.Yes:
             def done(ok):
                 self._app_updating = False
@@ -1711,7 +1714,9 @@ class MainWindow(QWidget):
                                               else f"обновляю до {tag}" if newer else f"{tag}, последняя версия"))
         if self._auto_check:
             self._auto_check = False
-            if newer:
+            if newer and self._game_running():  # a game started during the check: swap zapret later
+                self._next_update_check = time.time() + 600
+            elif newer:
                 self.do_update(True)
 
     def do_update(self, auto: bool):
