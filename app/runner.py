@@ -43,7 +43,8 @@ class Runner:
         return p is not None and p.poll() is None
 
     def start(self, s: Strategy, game_tcp: bool = False, game_udp: bool = False,
-              auto_hostlist: bool = False) -> None:
+              auto_hostlist: bool = False, skip: set[str] = frozenset()) -> None:
+        """skip: servers of games switched off by hand, left out of the capture like VPN servers."""
         with self._lock:
             self.stop()
             paths.sync_lists()
@@ -51,7 +52,7 @@ class Runner:
                 self.vpn_ips = vpn.write_exclude()
             except Exception:  # noqa: BLE001
                 self.vpn_ips = set()
-            argv = uncapture(s.argv(game_tcp, game_udp, auto_hostlist), self.vpn_ips)
+            argv = uncapture(s.argv(game_tcp, game_udp, auto_hostlist), self.vpn_ips | set(skip))
             log = output_file()
             log.parent.mkdir(parents=True, exist_ok=True)
             self._out = open(log, "wb")  # a file, not a PIPE: an undrained pipe would block winws
@@ -84,9 +85,11 @@ class Runner:
 
 
 def uncapture(argv: list[str], ips: set[str]) -> list[str]:
-    """Leave VPN servers out of the WinDivert filter itself. The game ports (UDP 1024-65535) also matched a VPN's
+    """Leave VPN servers (and switched-off games) out of the WinDivert filter itself. The game ports (UDP 1024-65535) also matched a VPN's
     own tunnel (WireGuard/AmneziaWG), so every VPN packet went through winws in user mode: ~18% of a core and ping
-    spikes in a game next to it. ipset-exclude only skips the desync; the packets were still captured."""
+    spikes in a game next to it. ipset-exclude only skips the desync; the packets were still captured. A game that
+    works without the bypass is better off outside winws too: winws now and then holds every captured packet for
+    0.4-1.9 s (seen in Valorant: ping spikes only with zapret on)."""
     if not ips or Path(argv[0]).name.lower() != "winws.exe":  # winws2 has its own filter options
         return argv
     f = paths.DATA / "logs" / "winws-filter.txt"
@@ -99,7 +102,7 @@ def uncapture(argv: list[str], ips: set[str]) -> list[str]:
     except (OSError, subprocess.TimeoutExpired):
         return argv
     # WinDivert has no negation of a group ("not (...)" is a parse error): spell it with "!=", IPv6 passes as is
-    vpn_ = " and ".join(f"ip.SrcAddr != {i} and ip.DstAddr != {i}" for i in sorted(ips)[:16])
+    vpn_ = " and ".join(f"ip.SrcAddr != {i} and ip.DstAddr != {i}" for i in sorted(ips)[:64])
     text = f"({base})\nand (ipv6 or ({vpn_}))\n"
     if not base or not compiles(text):  # a filter WinDivert rejects would leave the bypass down
         return argv
