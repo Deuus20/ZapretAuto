@@ -87,7 +87,8 @@ class Strategy:
                 auto_src = list(args)
             if "ipset-all" in p.group:  # route game ipset through every ipset profile (game ports + 80/443)
                 args.insert(1, f"--ipset={paths.LISTS / 'ipset-games.txt'}")
-                args.insert(1, f"--ipset={paths.LISTS / 'ipset-telegram.txt'}")
+                if p.group != "udp:game:ipset-all":  # Telegram calls must not get the game UDP fakes
+                    args.insert(1, f"--ipset={paths.LISTS / 'ipset-telegram.txt'}")
                 # games' own web/login servers (CloudFront, Cloudflare...) sit inside ipset-all's huge ranges;
                 # desyncing them hung Wardogs at "logging in" — gamewatch collects them here
                 args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-games.txt'}")
