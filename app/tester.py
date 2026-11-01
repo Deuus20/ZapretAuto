@@ -176,7 +176,8 @@ def load_targets() -> list[Target]:
 
 
 STUN_TARGETS = [
-    Target("STUN_Google19302", "stun://stun.l.google.com:19302", "udp:19294-19344:discord,stun"),
+    Target("STUN_Google19302", "stun://stun.l.google.com:19302",
+           "udp:19294-19344,50000-50100:discord,stun"),  # = the voice profile's group, else never tuned
     Target("STUN_Cloudflare3478", "stun://stun.cloudflare.com:3478", "udp:other"),
 ]
 
@@ -227,11 +228,38 @@ def target_group(t: Target) -> str:
         return "tcp:443:list-google"
     if hit(_domains("list-general.txt") | _domains("list-general-user.txt")):
         return "tcp:80,443:list-general"
-    if load_settings().get("auto_hostlist", True):
-        # --hostlist-auto makes the general profile take every 80/443 host it sees (to learn blocked ones),
-        # so ipset hosts never reach the ipset profile: score them for the general profile
-        return "tcp:80,443:list-general"
-    return "tcp:80,443,8443:ipset-all"
+    # the --hostlist-auto profile is the last one (strategies.argv): a host in ipset-all is handled by the ipset
+    # profile first, any other one by the auto profile, which copies the general profile's options
+    if _in_ipset_all(t.host) or not load_settings().get("auto_hostlist", True):  # unresolved: as before
+        return "tcp:80,443,8443:ipset-all"
+    return "tcp:80,443:list-general"
+
+
+_ipset_cache: tuple[float, list] = (0.0, [])
+
+
+def _in_ipset_all(host: str) -> bool | None:
+    """Whether host's IPv4 falls in ipset-all.txt; None if it can't be resolved."""
+    import ipaddress
+    import socket
+    global _ipset_cache
+    try:
+        ip = int(ipaddress.IPv4Address(socket.gethostbyname(host)))
+        f = paths.LISTS / "ipset-all.txt"
+        m = f.stat().st_mtime
+        if _ipset_cache[0] != m:
+            nets = []
+            for ln in f.read_text(encoding="utf-8", errors="ignore").split():
+                try:
+                    n = ipaddress.ip_network(ln, strict=False)
+                except ValueError:
+                    continue
+                if n.version == 4:
+                    nets.append((int(n.network_address), int(n.broadcast_address)))
+            _ipset_cache = (m, nets)
+    except (OSError, ValueError):
+        return None
+    return any(lo <= ip <= hi for lo, hi in _ipset_cache[1])
 
 
 BLOCK_PAGE = re.compile(r"warning\.rt\.ru|blocked|zapret-info|rkn\.gov|eais", re.I)
