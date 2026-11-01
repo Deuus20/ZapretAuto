@@ -1473,3 +1473,43 @@ def test_first_run_defaults_only_on_fresh_install(tmp_path, monkeypatch):
     assert settings.first_run() and settings.load_settings() == settings.FIRST_RUN
     settings.save_settings(game_watch=False)
     assert not settings.first_run() and settings.load_settings()["game_watch"] is False   # user's choice kept
+
+
+def test_locked_settings_are_not_wiped(tmp_path, monkeypatch):
+    from pathlib import Path
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    settings._cache = None
+    settings.save_settings(strategy={"base": "ALT8"}, a=1)
+    settings._cache = None
+    real = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: (_ for _ in ()).throw(PermissionError("locked"))
+                        if self.name == "settings.json" else real(self, *a, **k))
+    monkeypatch.setattr(settings.time, "sleep", lambda s: None)
+    assert settings.load_settings() == {}                                  # transient: not quarantined
+    with pytest.raises(OSError):
+        settings.save_settings(b=2)                                        # refuses to write over unread settings
+    monkeypatch.setattr(Path, "read_text", real)
+    assert settings.load_settings() == {"strategy": {"base": "ALT8"}, "a": 1}
+    assert not (tmp_path / "settings.json.bad").exists()
+
+
+def test_stats_uptime_without_stop_and_locked_file(tmp_path, monkeypatch):
+    import json as _json
+    from app import stats
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    now = time.time()
+    ev = [{"t": now - 7200, "k": "start"}, {"t": now - 6000, "k": "check", "ok": True},   # killed, PC off
+          {"t": now - 600, "k": "start"}, {"t": now - 300, "k": "stop"}]
+    (tmp_path / "stats.json").write_text(_json.dumps(ev), encoding="utf-8")
+    assert stats.summary()["uptime_h"] == round((1200 + 300) / 3600, 1)
+    from pathlib import Path
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: (_ for _ in ()).throw(PermissionError("locked")))
+    stats.record("crash")                                                  # no exception, history kept
+    monkeypatch.undo()
+    assert len(_json.loads((tmp_path / "stats.json").read_text(encoding="utf-8"))) == 4
+
+
+def test_hosts_block_without_end_keeps_user_lines():
+    from app import diag
+    lines = ["127.0.0.1 a", diag.HOSTS_BEGIN, "1.1.1.1 ours", "10.0.0.1 mine"]
+    assert diag._strip_block(lines) == ["127.0.0.1 a", "1.1.1.1 ours", "10.0.0.1 mine"]

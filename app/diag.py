@@ -354,6 +354,8 @@ def _write_hosts(lines: list[str], bom: bool) -> None:
 
 
 def _strip_block(lines: list[str]) -> list[str]:
+    if HOSTS_END not in (ln.strip() for ln in lines):  # end marker lost (edited by hand): drop only our markers,
+        return [ln for ln in lines if ln.strip() != HOSTS_BEGIN]  # never the user's lines after it
     out, inside = [], False
     for ln in lines:
         if ln.strip() == HOSTS_BEGIN:
