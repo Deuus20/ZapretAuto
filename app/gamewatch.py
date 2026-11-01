@@ -399,7 +399,8 @@ class GameWatcher(threading.Thread):
     # ---- flow capture
     def _open_divert(self) -> bool:
         try:
-            dll = ctypes.WinDLL(str(paths.BIN / "WinDivert.dll"), use_last_error=True)
+            from .runner import windivert_dll
+            dll = windivert_dll(use_last_error=True)
             dll.WinDivertOpen.restype = ctypes.c_void_p
             dll.WinDivertOpen.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_int16, ctypes.c_uint64]
             dll.WinDivertRecv.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,

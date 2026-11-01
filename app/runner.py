@@ -1,5 +1,8 @@
 """Start/stop winws.exe (single instance)."""
 import ctypes
+import hashlib
+import os
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -177,9 +180,35 @@ def uncapture(argv: list[str], ips: set[str]) -> list[str]:
     return [a for a in argv if not a.startswith(("--wf-tcp=", "--wf-udp=", "--wf-raw-part="))] + [f"--wf-raw=@{f}"]
 
 
+_dll_lock = threading.Lock()
+
+
+def windivert_dll(**kw):
+    """Load WinDivert from a content-named copy in DATA, never from vendor/bin: a DLL loaded into
+    our process can't be unloaded safely and would block the zapret updater renaming vendor/."""
+    src = paths.BIN / "WinDivert.dll"
+    body = src.read_bytes()
+    root = paths.DATA / "windivert"
+    d = root / hashlib.sha256(body).hexdigest()[:12]
+    dll = d / "WinDivert.dll"
+    with _dll_lock:
+        if not dll.exists():
+            d.mkdir(parents=True, exist_ok=True)
+            drv = paths.BIN / "WinDivert64.sys"  # the DLL installs the driver from its own folder
+            if drv.exists():
+                shutil.copy2(drv, d / drv.name)
+            tmp = d / "WinDivert.dll.tmp"
+            tmp.write_bytes(body)
+            os.replace(tmp, dll)  # the DLL appears last: its presence means the copy is complete
+            for old in root.iterdir():  # copies of older releases (fails harmlessly while one is loaded)
+                if old != d:
+                    shutil.rmtree(old, ignore_errors=True)
+    return ctypes.WinDLL(str(dll), **kw)
+
+
 def compiles(flt: str) -> bool:
     try:
-        f = ctypes.WinDLL(str(paths.BIN / "WinDivert.dll")).WinDivertHelperCompileFilter
+        f = windivert_dll().WinDivertHelperCompileFilter
         f.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
         return bool(f(flt.encode(), 0, None, 0, None, None))  # layer 0: NETWORK, as winws opens it
     except (OSError, AttributeError):

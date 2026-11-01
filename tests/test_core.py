@@ -1319,6 +1319,26 @@ def test_restart_discord_after_vpn(monkeypatch):
     assert vpn.restart_discord() == [] and not started  # Discord wasn't running: don't start it
 
 
+def test_windivert_loaded_from_data_copy(monkeypatch, tmp_path):
+    from app import runner
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "WinDivert.dll").write_bytes(b"dll v1")
+    (bin_ / "WinDivert64.sys").write_bytes(b"sys v1")
+    monkeypatch.setattr(runner.paths, "BIN", bin_)
+    monkeypatch.setattr(runner.paths, "DATA", tmp_path / "data")
+    loaded = []
+    monkeypatch.setattr(runner.ctypes, "WinDLL", lambda p, **kw: loaded.append(p) or p, raising=False)
+    first = runner.windivert_dll()
+    assert not first.startswith(str(bin_)) and open(first, "rb").read() == b"dll v1"
+    assert (tmp_path / "data" / "windivert").joinpath(first).parent.joinpath("WinDivert64.sys").read_bytes() == b"sys v1"
+    assert runner.windivert_dll() == first  # same content: same copy
+    (bin_ / "WinDivert.dll").write_bytes(b"dll v2")  # zapret updated
+    second = runner.windivert_dll()
+    assert second != first and open(second, "rb").read() == b"dll v2"
+    assert len(list((tmp_path / "data" / "windivert").iterdir())) == 1  # old copy cleaned
+
+
 def test_vpn_left_out_of_capture(monkeypatch, tmp_path):
     from app import runner
     monkeypatch.setattr(runner.paths, "DATA", tmp_path)

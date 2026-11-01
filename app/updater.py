@@ -193,7 +193,13 @@ def app_update(log=print) -> bool:
     log(f"скачиваю ZapretAuto {tag}")
     _download(url, f, log)
     _check_url(sha_url)
-    want = requests.get(sha_url, timeout=15).text.split()[0].strip().lower()
+    r = requests.get(sha_url, timeout=15)
+    r.raise_for_status()
+    _check_url(r.url)  # after redirects, like _download
+    want = (r.text.split() or [""])[0].strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", want):
+        shutil.rmtree(d, ignore_errors=True)
+        raise RuntimeError("файл .sha256 в релизе повреждён — обновление не проверить")
     have = hashlib.sha256(f.read_bytes()).hexdigest()
     if have != want:
         shutil.rmtree(d, ignore_errors=True)
