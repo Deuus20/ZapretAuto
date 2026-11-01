@@ -17,6 +17,10 @@ foreach ($p in 'translations', 'plugins\platforminputcontexts', 'plugins\platfor
   'plugins\imageformats\qicns.dll', 'plugins\imageformats\qtga.dll', 'plugins\imageformats\qwbmp.dll') {
   Remove-Item "$q\$p" -Recurse -Force -ErrorAction SilentlyContinue
 }
+# ship the latest zapret: an old copy here made every app update reinstall it and download the new one again
+$env:PYTHONIOENCODING = 'utf-8'
+& .venv\Scripts\python -c "from app import updater; updater.update()"
+if ($LASTEXITCODE -ne 0) { Write-Warning 'zapret update check failed: bundling vendor as is' }
 Copy-Item vendor dist\ZapretAuto\vendor -Recurse -Force
 # Russian Yes/No/Cancel in dialogs (Qt's translations folder is pruned above)
 New-Item -ItemType Directory -Force dist\ZapretAuto\assets | Out-Null
