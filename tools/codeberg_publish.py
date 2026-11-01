@@ -5,6 +5,7 @@
 
 Needs a built dist/ (build.ps1) and the git remote "codeberg" (added on first run).
 """
+import base64
 import os
 import re
 import subprocess
@@ -36,7 +37,9 @@ def main() -> None:
     remote = f"{MIRROR}/{MIRROR_REPO}.git"
     if subprocess.run(["git", "remote", "get-url", "codeberg"], cwd=ROOT, capture_output=True).returncode:
         subprocess.run(["git", "remote", "add", "codeberg", remote], cwd=ROOT, check=True)
-    subprocess.run(["git", "push", "codeberg", "main", tag], cwd=ROOT, check=True)
+    auth = base64.b64encode(f"{MIRROR_REPO.split('/')[0]}:{token}".encode()).decode()
+    subprocess.run(["git", "-c", f"http.{MIRROR}/.extraheader=Authorization: Basic {auth}",
+                    "push", "codeberg", "main", tag], cwd=ROOT, check=True)
     api = f"{MIRROR}/api/v1/repos/{MIRROR_REPO}/releases"
     h = {"Authorization": f"token {token}"}
     r = requests.get(f"{api}/tags/{tag}", headers=h, timeout=30)
