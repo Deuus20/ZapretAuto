@@ -49,6 +49,9 @@ UDP_NON_GAME_EXES = {
     "wireguard.exe", "openvpn.exe", "radmin_vpn.exe", "rvcontrolsvc.exe", "hamachi-2.exe", "zerotier-one_x64.exe",
     "nekoray.exe", "v2rayn.exe", "xray.exe", "sing-box.exe", "hiddify.exe", "claude.exe", "node.exe",
 }
+# clients that stay open in the background: their servers go through the bypass, but they are never «играете»
+# (that label also holds back updates and winws restarts). Riot Client keeps its chat on TCP 5223 for hours.
+NOT_PLAYING_EXES = {"riot client.exe", "riotclientservices.exe", "riotclientux.exe", "riotclientuxrender.exe"}
 UDP_GAME_MIN_IPS = 3     # distinct public UDP peers before an unknown exe is treated as a game
 # A new server must reach the ipset before the game gives up on it. It was «5 s of quiet after the last new
 # IP» on a 3 s loop: a login burst kept resetting the wait, the list lagged behind the game and it took several
@@ -221,6 +224,7 @@ class GameWatcher(threading.Thread):
         self._udp_hits: dict[str, set[str]] = {}
         self._events: list[tuple[int, str, int]] = []
         self._ev_lock = threading.Lock()
+        self._open_flows: dict[int, int] = {}  # WinDivert EndpointId -> pid of open game (non-web) flows
         self._names: tuple[float, set[str]] = (0.0, set())
         self._handle = None
         self._dll = None
@@ -425,12 +429,20 @@ class GameWatcher(threading.Thread):
                 break
             event = (a.Bits >> 8) & 0xFF
             outbound = (a.Bits >> 17) & 1
-            if event != 1 or not outbound or a.Protocol not in (6, 17):
+            if event not in (1, 2) or not outbound or a.Protocol not in (6, 17):
                 continue
             ip = _v4(a.RemoteAddr)
             if ip is None:
                 continue
+            if event == 2:  # flow closed: a game that left its match (Roblox back in its menu) has none left
+                with self._ev_lock:
+                    self._open_flows.pop(a.EndpointId, None)
+                continue
             with self._ev_lock:
+                if a.RemotePort not in SKIP_PORTS and public_ipv4(ip):
+                    self._open_flows[a.EndpointId] = a.ProcessId
+                    if len(self._open_flows) > 20000:  # deletions missed (driver restart): start over
+                        self._open_flows.clear()
                 self._events.append((a.ProcessId, ip, a.RemotePort, a.Protocol))
                 del self._events[:-5000]
             self._wake.set()
@@ -540,20 +552,31 @@ class GameWatcher(threading.Thread):
                 self._pinging.add(ip)
                 self._pool.submit(self._ping_ip, ip)
         with self._lock:
-            names = None
+            names = flow_exes = None
             for exe, g in self._games.items():
-                if exe in seen_active:
+                if exe in NOT_PLAYING_EXES or "launcher" in exe:
+                    g["active"] = False
+                elif exe in seen_active:
                     if not g["active"]:
                         g["started"] = time.time()  # (re)launched: give its login LOGIN_GRACE without restarts
                     g["active"] = True
                 elif g["active"]:
                     if names is None:  # one process scan per tick, only when needed
                         names = self._running_names()
-                    g["active"] = exe in names
+                        flow_exes = self._flow_exes() if self._handle is not None else None
+                    # with flow capture: running is not enough, a client idling in its menu has no game flows
+                    g["active"] = exe in names and (flow_exes is None or exe in flow_exes
+                                                    or time.time() - g.get("started", 0) < LOGIN_GRACE)
         if new_ip or new_web:
             if not self._pending_since:  # the first new IP sets the deadline; more of the burst don't push it
                 self._pending_since = time.time()
             self._dirty = True  # saved after the ipset is written: the disk write must not delay the bypass
+
+    def _flow_exes(self) -> set[str]:
+        """Exes with an open non-web flow right now (WinDivert flow capture only)."""
+        with self._ev_lock:
+            pids = set(self._open_flows.values())
+        return {exe for exe in (self._proc(pid)[0] for pid in pids) if exe}
 
     def _running_names(self) -> set[str]:
         at, names = self._names
