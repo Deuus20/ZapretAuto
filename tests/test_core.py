@@ -1579,3 +1579,22 @@ def test_zapret_update_rejects_wrong_digest(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="контрольная сумма"):
         updater.update(log=lambda m: None, vendor=v)
     assert not v.exists() and list((tmp_path / "data" / "tmp").iterdir()) == []   # nothing installed, no leftovers
+
+
+def test_fetch_freeze_after_16k_is_a_failure(monkeypatch):
+    import sys
+    import types
+
+    class Sess:
+        def __init__(self, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get(self, url, content_callback, **k):
+            content_callback(b"x" * 16384)                     # DPI lets the first 16 KB through...
+            raise TimeoutError("operation timed out")          # ...then the session freezes
+    fake = types.ModuleType("curl_cffi")
+    fake.requests = types.SimpleNamespace(Session=Sess)
+    monkeypatch.setitem(sys.modules, "curl_cffi", fake)
+    with pytest.raises(TimeoutError):
+        tester.fetch("https://x", tester.READ_BYTES, 5)
+    assert tester.probe(tester.Target("YouTubeWeb", "https://x")) is None
