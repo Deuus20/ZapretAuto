@@ -313,6 +313,7 @@ def test_auto_pick_aborts_on_vpn_without_bypass_route(tmp_path, monkeypatch):
 def test_quick_check_majority(tmp_path, monkeypatch):
     from app import tester
     monkeypatch.setattr(tester, "vpn_active", lambda: None)
+    monkeypatch.setattr(tester, "egress_ip", lambda: "1.2.3.4")
     keys = ["DiscordMain", "DiscordGateway", "DiscordCDN", "YouTubeWeb", "YouTubeImage", "YouTubeVideoRedirect",
             "STUN_Google19302"]
     monkeypatch.setattr(tester, "load_targets", lambda: [tester.Target(k, "https://x") for k in keys])
@@ -768,7 +769,9 @@ def _close(app, w):
     w.tray.hide()
     w._timer.stop()
     w.deleteLater()
-    app.processEvents()
+    from PySide6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # else every old window stays alive
+    app.processEvents()                                                  # and each restyle repolishes them all
 
 
 def test_gui_zapret2_toggle(tmp_path, monkeypatch):

@@ -31,7 +31,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - `python tools/render.py <out_dir>`: render every page + states (games, busy, error, dialog) offscreen to PNGs — no window, no focus stealing, temp data dir. Prefer it over shot.py for UI work.
 
 ## Tests
-- `.venv\Scripts\python -m pytest -q` (offline, ~1 s); build.ps1 runs them first.
+- `.venv\Scripts\python -m pytest -q` (offline: tests/conftest.py blocks sockets; ~6 s); build.ps1 runs them first.
 
 ## Token rules
 - Don't read vendor/bin, big lists, service.bat or `test zapret.ps1` (denied). Grep them if needed.
