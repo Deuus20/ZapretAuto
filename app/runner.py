@@ -98,11 +98,22 @@ def uncapture(argv: list[str], ips: set[str]) -> list[str]:
         base = f.read_text(encoding="utf-8").strip()
     except (OSError, subprocess.TimeoutExpired):
         return argv
-    if not base:
+    # WinDivert has no negation of a group ("not (...)" is a parse error): spell it with "!=", IPv6 passes as is
+    vpn_ = " and ".join(f"ip.SrcAddr != {i} and ip.DstAddr != {i}" for i in sorted(ips)[:16])
+    text = f"({base})\nand (ipv6 or ({vpn_}))\n"
+    if not base or not compiles(text):  # a filter WinDivert rejects would leave the bypass down
         return argv
-    vpn_ = " or ".join(f"ip.SrcAddr == {i} or ip.DstAddr == {i}" for i in sorted(ips))
-    f.write_text(f"({base})\nand not (ip and ({vpn_}))\n", encoding="utf-8")
+    f.write_text(text, encoding="utf-8")
     return [a for a in argv if not a.startswith(("--wf-tcp=", "--wf-udp=", "--wf-raw-part="))] + [f"--wf-raw=@{f}"]
+
+
+def compiles(flt: str) -> bool:
+    try:
+        f = ctypes.WinDLL(str(paths.BIN / "WinDivert.dll")).WinDivertHelperCompileFilter
+        f.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+        return bool(f(flt.encode(), 0, None, 0, None, None))  # layer 0: NETWORK, as winws opens it
+    except (OSError, AttributeError):
+        return False
 
 
 def output_file() -> Path:
