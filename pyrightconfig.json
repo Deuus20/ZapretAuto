@@ -1,0 +1,8 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "include": ["app", "tools", "scripts", "tests"],
+  "exclude": ["vendor", "data", "dist", "build", ".venv"],
+  "typeCheckingMode": "off"
+}
