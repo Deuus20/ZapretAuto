@@ -1,4 +1,5 @@
 """data/settings.json: thread-safe, atomic writes, tolerant reads, mtime-cached."""
+import copy
 import json
 import os
 import threading
@@ -22,7 +23,7 @@ def load_settings() -> dict:
         except OSError:
             return {}
         if _cache and _cache[0] == m:
-            return dict(_cache[1])
+            return copy.deepcopy(_cache[1])  # callers edit nested dicts (strategy, games)
         try:
             d = json.loads(p.read_text(encoding="utf-8-sig"))  # tolerate BOM (Notepad, PowerShell)
             if not isinstance(d, dict):
@@ -34,7 +35,7 @@ def load_settings() -> dict:
                 pass
             return {}
         _cache = (m, d)
-        return dict(d)
+        return copy.deepcopy(d)
 
 
 def save_settings(**kw) -> None:

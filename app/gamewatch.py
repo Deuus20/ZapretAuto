@@ -724,7 +724,11 @@ class GameWatcher(threading.Thread):
                 if (self._pending_since and now - self._pending_since >= DEBOUNCE
                         and now - self._last_restart >= MIN_RESTART_GAP):
                     self._pending_since = None
-                    self._flush()
+                    try:
+                        self._flush()
+                    except Exception:
+                        self._pending_since = now  # list locked or disk error: retry after DEBOUNCE, don't drop it
+                        raise
                 if self._dirty and not self._pending_since:
                     self._dirty = False
                     self._persist_settings()
