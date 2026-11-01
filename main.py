@@ -77,8 +77,9 @@ def main() -> int:
         updater.recover_vendor()  # finish/undo an interrupted zapret update
     except Exception:  # noqa: BLE001
         pass
-    from app import logs
+    from app import logs, settings
     logs.setup()
+    settings.first_run()  # fresh install: games watched, autostart on, full settings shown
     from app.gui.window import MainWindow
     w = MainWindow()
     server.newConnection.connect(lambda: (server.nextPendingConnection().disconnectFromServer(), w.show_window()))
