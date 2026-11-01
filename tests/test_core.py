@@ -1598,3 +1598,16 @@ def test_fetch_freeze_after_16k_is_a_failure(monkeypatch):
     with pytest.raises(TimeoutError):
         tester.fetch("https://x", tester.READ_BYTES, 5)
     assert tester.probe(tester.Target("YouTubeWeb", "https://x")) is None
+
+
+def test_ipset_hosts_are_scored_for_the_ipset_profile(tmp_path, monkeypatch):
+    import socket
+    monkeypatch.setattr(paths, "LISTS", tmp_path)
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    settings._cache = None
+    (tmp_path / "ipset-all.txt").write_text("151.101.0.0/16\n", encoding="utf-8")
+    monkeypatch.setattr(tester, "_domains", lambda name: set())
+    ips = {"fastly.example": "151.101.1.1", "other.example": "5.5.5.5"}
+    monkeypatch.setattr(socket, "gethostbyname", lambda h: ips[h])
+    assert tester.target_group(tester.Target("F", "https://fastly.example")) == "tcp:80,443,8443:ipset-all"
+    assert tester.target_group(tester.Target("O", "https://other.example")) == "tcp:80,443:list-general"

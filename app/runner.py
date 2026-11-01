@@ -57,7 +57,8 @@ class Runner:
             except Exception:  # noqa: BLE001
                 self.vpn_ips = set()
             argv, self.unwatched = slim(s.argv(game_tcp, game_udp, auto_hostlist))
-            argv = uncapture(argv, self.vpn_ips | set(skip))
+            # VPN servers first: only 64 fit, and a dropped one put the whole tunnel back through winws
+            argv = uncapture(argv, sorted(self.vpn_ips) + sorted(set(skip) - self.vpn_ips))
             log = output_file()
             log.parent.mkdir(parents=True, exist_ok=True)
             self._out = open(log, "wb")  # a file, not a PIPE: an undrained pipe would block winws
@@ -154,7 +155,7 @@ def stale(snap: dict[Path, list[str] | None]) -> bool:
     return any(_entries(f) != items for f, items in snap.items())
 
 
-def uncapture(argv: list[str], ips: set[str]) -> list[str]:
+def uncapture(argv: list[str], ips: list[str] | set[str]) -> list[str]:
     """Leave VPN servers (and switched-off games) out of the WinDivert filter itself. The game ports (UDP 1024-65535) also matched a VPN's
     own tunnel (WireGuard/AmneziaWG), so every VPN packet went through winws in user mode: ~18% of a core and ping
     spikes in a game next to it. ipset-exclude only skips the desync; the packets were still captured. A game that
@@ -172,7 +173,14 @@ def uncapture(argv: list[str], ips: set[str]) -> list[str]:
     except (OSError, subprocess.TimeoutExpired):
         return argv
     # WinDivert has no negation of a group ("not (...)" is a parse error): spell it with "!=", IPv6 passes as is
-    vpn_ = " and ".join(f"ip.SrcAddr != {i} and ip.DstAddr != {i}" for i in sorted(ips)[:64])
+    import ipaddress
+    good = []
+    for i in ips:  # one CIDR/IPv6 entry made the whole filter fail to compile: the exclusions were lost
+        try:
+            good.append(str(ipaddress.IPv4Address(i)))
+        except ValueError:
+            pass
+    vpn_ = " and ".join(f"ip.SrcAddr != {i} and ip.DstAddr != {i}" for i in good[:64])
     text = f"({base})\nand (ipv6 or ({vpn_}))\n"
     if not base or not compiles(text):  # a filter WinDivert rejects would leave the bypass down
         return argv
