@@ -1569,3 +1569,13 @@ def test_udp_game_heuristic_needs_a_burst(tmp_path, monkeypatch):
         assert r                                              # a burst is
     finally:
         w.stop()
+
+
+def test_zapret_update_rejects_wrong_digest(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path / "data")
+    monkeypatch.setattr(updater, "latest_release", lambda: ("1.99.0", "https://github.com/x.zip", "0" * 64))
+    monkeypatch.setattr(updater, "_download", lambda url, dest, log=print: dest.write_bytes(b"zip"))
+    v = tmp_path / "vendor"
+    with pytest.raises(RuntimeError, match="контрольная сумма"):
+        updater.update(log=lambda m: None, vendor=v)
+    assert not v.exists() and list((tmp_path / "data" / "tmp").iterdir()) == []   # nothing installed, no leftovers
