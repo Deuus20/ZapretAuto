@@ -1244,8 +1244,6 @@ def test_gui_tray_strategy_and_games(tmp_path, monkeypatch):
         assert not a.isChecked()
         a.trigger()  # check it again: the game is back in the bypass
         assert w.settings["games_ignore"] == []
-        w.fill_chart()
-        assert w.lbl_stab.text() == "данных пока нет" and len(w.chart.days) == 7
     finally:
         _close(app, w)
 

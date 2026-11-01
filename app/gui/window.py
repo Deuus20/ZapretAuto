@@ -29,7 +29,7 @@ AUTO = "Авто (результат подбора)"
 UPDATE_EVERY = 6 * 3600  # s between background update checks
 from app.gui import style  # noqa: E402
 from app.gui.style import COLORS, app_icon, init_fonts  # noqa: E402
-from app.gui.widgets import (InputRow, PowerButton, Pages, Rail, SettingRow, StabilityChart, StatusChip,  # noqa: E402
+from app.gui.widgets import (InputRow, PowerButton, Pages, Rail, SettingRow, StatusChip,  # noqa: E402
                              Switch)
 from app.gui.worker import Bridge, Worker  # noqa: E402
 
@@ -131,7 +131,6 @@ class MainWindow(QWidget):
         log = self._page_log()
         self.tabs.addTab(log, "Журнал", "log")
         self.tabs.currentChanged.connect(lambda i: self.fill_stats() if self.tabs.widget(i) is log else None)
-        self.tabs.currentChanged.connect(lambda i: self.fill_chart() if i == 0 else None)
         self.tabs.currentChanged.connect(lambda i: self.fill_games() if self.tabs.widget(i) is self.page_games
                                          else None)
         lists_page = self._page_lists()
@@ -268,20 +267,6 @@ class MainWindow(QWidget):
         gl.addStretch()
         grid.addWidget(games, 1)
         lay.addLayout(grid)
-
-        stab = QFrame(objectName="card")
-        stl = QVBoxLayout(stab)
-        stl.setContentsMargins(14, 10, 14, 8)
-        stl.setSpacing(2)
-        top = QHBoxLayout()
-        top.addWidget(QLabel("Стабильность за неделю", objectName="h2"))
-        top.addStretch()
-        self.lbl_stab = QLabel(objectName="muted")
-        top.addWidget(self.lbl_stab)
-        stl.addLayout(top)
-        self.chart = StabilityChart()
-        stl.addWidget(self.chart)
-        lay.addWidget(stab)
 
         recent = QFrame(objectName="card")
         rl = QVBoxLayout(recent)
@@ -622,7 +607,6 @@ class MainWindow(QWidget):
     def showEvent(self, e):
         super().showEvent(e)
         self._title_bar()
-        self.fill_chart()
 
     def _title_bar(self):
         """Dark or light window title bar to match the theme."""
@@ -847,13 +831,6 @@ class MainWindow(QWidget):
             + "".join(f"<tr><td style='color:{muted}; padding-right:18px'>{k}</td><td>{v}</td></tr>" for k, v in rows)
             + "</table>")
 
-    def fill_chart(self):
-        days = stats.daily(7)
-        self.chart.set_days(days)
-        bad = sum(StabilityChart.problems(d) for d in days)
-        self.lbl_stab.setText("сбоев не было" if not bad and any(d["checks"] for d in days) else
-                              "данных пока нет" if not bad else f"сбоев: {bad}")
-
     def set_advanced(self, on: bool, save: bool = True):
         """Show/hide expert settings and the raw lists editor."""
         self.adv_box.setVisible(on)
@@ -1065,8 +1042,6 @@ class MainWindow(QWidget):
             self._next_update_check = now + UPDATE_EVERY  # the app runs for weeks: don't update only at start
             self._auto_check = True
             self.check_update()
-        if self._ticks % 30 == 0 and self.isVisible() and self.tabs.currentIndex() == 0:
-            self.fill_chart()
         if self._ticks % 5 == 0:
             self.apply_theme()  # Windows light/dark switched: follow it live
             from app import runner as runner_mod
