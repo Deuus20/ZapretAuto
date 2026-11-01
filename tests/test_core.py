@@ -1382,3 +1382,11 @@ def test_slim_lists(tmp_path):
     (tmp_path / "ipset-exclude-vpn.txt").write_text("138.124.5.202\n", encoding="utf-8")
     assert runner.stale(snap)  # winws no longer watches it: the app restarts it
     assert runner.slim([r"C:\z\winws2.exe", f"--ipset={tg}"])[0] == [r"C:\z\winws2.exe", f"--ipset={tg}"]
+
+
+def test_settings_nested_edit_does_not_leak_into_cache(monkeypatch, tmp_path):
+    from app import paths, settings
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    settings.save_settings(strategy={"base": "a", "picks": {}})
+    settings.load_settings()["strategy"]["picks"]["Discord"] = "x"  # edited, never saved
+    assert settings.load_settings()["strategy"]["picks"] == {}
