@@ -1430,3 +1430,21 @@ def test_codeberg_mirror_when_github_hides_repo(monkeypatch):
     assert sharedb.games_db()["games"] == {"g.exe": ["1.2.3.4"]}
     assert seen[-1] == "https://codeberg.org/yuav2/ZapretAuto/raw/branch/main/games-db.json"
     updater._check_url("https://codeberg.org/attachments/a")
+
+
+def test_gui_weekly_ipset_update_runs_once(tmp_path, monkeypatch):
+    from app import lists
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        w.save(ipset_updated=0)
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
+        calls = []
+        monkeypatch.setattr(lists, "update_ipset",
+                            lambda log: calls.append(1) or settings.save_settings(ipset_updated=time.time()) or True)
+        monkeypatch.setattr(tester, "egress_ip", lambda: None)
+        w._tick()
+        w._ipset_try = 0                                     # an hour later
+        w._tick()
+        assert calls == [1]                                  # the saved time counts, not the window's stale copy
+    finally:
+        _close(app, w)
