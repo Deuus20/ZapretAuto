@@ -1400,3 +1400,30 @@ def test_flowseal_hosts_only_known_sites(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: type("R", (), {"text": text})())
     hosts = [h for _, h in diag.flowseal_hosts()]
     assert len(hosts) == 10 and all(h.endswith(".discord.com") for h in hosts)
+
+
+def test_codeberg_mirror_when_github_hides_repo(monkeypatch):
+    import requests
+    from app import sharedb
+
+    class R:
+        def __init__(self, url):
+            self.url, self.status_code = url, 404 if "github" in url else 200
+
+        def raise_for_status(self):
+            if self.status_code != 200:
+                raise requests.HTTPError("404")
+
+        def json(self):
+            if "releases" in self.url:
+                return {"tag_name": "v9.0.0", "assets": [
+                    {"name": "ZapretAuto-Setup.exe", "browser_download_url": "https://codeberg.org/attachments/a"},
+                    {"name": "ZapretAuto-Setup.exe.sha256", "browser_download_url": "https://codeberg.org/attachments/b"}]}
+            return {"games": {"g.exe": ["1.2.3.4"]}, "web": []}
+    seen = []
+    monkeypatch.setattr(requests, "get", lambda url, **kw: seen.append(url) or R(url))
+    monkeypatch.setattr(updater.paths, "PORTABLE", False)
+    assert updater.app_release() == ("v9.0.0", "https://codeberg.org/attachments/a", "https://codeberg.org/attachments/b")
+    assert sharedb.games_db()["games"] == {"g.exe": ["1.2.3.4"]}
+    assert seen[-1] == "https://codeberg.org/yuav2/ZapretAuto/raw/branch/main/games-db.json"
+    updater._check_url("https://codeberg.org/attachments/a")
