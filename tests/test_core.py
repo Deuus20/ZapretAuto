@@ -1513,3 +1513,29 @@ def test_hosts_block_without_end_keeps_user_lines():
     from app import diag
     lines = ["127.0.0.1 a", diag.HOSTS_BEGIN, "1.1.1.1 ours", "10.0.0.1 mine"]
     assert diag._strip_block(lines) == ["127.0.0.1 a", "1.1.1.1 ours", "10.0.0.1 mine"]
+
+
+def test_game_client_idling_in_menu_is_not_playing(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(games={}, games_schema=2)
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        now = time.time()
+        for exe in ("robloxplayerbeta.exe", "riot client.exe"):
+            w._games[exe] = {"path": exe, "ips": set(), "active": True, "ping_ms": None, "started": now - 600}
+        names = {"robloxplayerbeta.exe", "riot client.exe"}
+        monkeypatch.setattr(w, "_running_names", lambda: names)
+        monkeypatch.setattr(w, "_proc", lambda pid: {1: ("robloxplayerbeta.exe", "x")}.get(pid, (None, None)))
+        w._handle = object()                                   # flow capture on
+        w._open_flows = {77: 1}                                # in a match: an open UDP flow
+        w._process([])
+        g = w.games()
+        assert g["robloxplayerbeta.exe"]["active"] and not g["riot client.exe"]["active"]   # client: never
+        w._open_flows = {}                                     # back in the menu: flows closed
+        w._process([])
+        assert not w.games()["robloxplayerbeta.exe"]["active"]
+    finally:
+        w._handle = None
+        w.stop()
