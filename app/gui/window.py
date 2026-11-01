@@ -1069,6 +1069,10 @@ class MainWindow(QWidget):
             self.fill_chart()
         if self._ticks % 5 == 0:
             self.apply_theme()  # Windows light/dark switched: follow it live
+            from app import runner as runner_mod
+            if self.runner.running and not self.busy and runner_mod.stale(self.runner.unwatched):
+                self.log("изменился список исключений — перезапускаю обход, чтобы он его учёл")
+                self.start_runner()
         if self._ticks % 30 == 0 and self.runner.running and not self.busy:  # ~1 min: VPN may have moved
             from app import vpn
             def vpn_moved(ips):  # the list reloads by itself, the capture filter only on restart

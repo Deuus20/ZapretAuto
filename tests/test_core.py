@@ -1336,3 +1336,29 @@ def test_vpn_left_out_of_capture(monkeypatch, tmp_path):
     assert runner.uncapture(argv, {"138.124.5.202"}) == argv  # WinDivert would reject it: keep the bypass up
     assert runner.uncapture(argv, set()) == argv  # no VPN: filter as winws builds it
     assert runner.uncapture([r"C:\z\winws2.exe", "--wf-udp-out=443"], {"1.2.3.4"})[1] == "--wf-udp-out=443"
+
+
+def test_slim_lists(tmp_path):
+    from app import runner
+    def lst(name, text):
+        f = tmp_path / name
+        f.write_text(text, encoding="utf-8")
+        return str(f)
+    allf = lst("ipset-all.txt", "1.0.0.0/8\n")
+    tg = lst("ipset-telegram.txt", "203.0.113.113/32\n")
+    vpn = lst("ipset-exclude-vpn.txt", "203.0.113.113/32\n")
+    ex = lst("ipset-exclude.txt", "# comment\n10.0.0.1\n10.0.0.2\n")
+    gen = lst("list-general.txt", "discord.com\n")
+    genu = lst("list-general-user.txt", "# Never leave this file empty\ndomain.example.abc\n")
+    only = lst("list-only.txt", "domain.example.abc\n")
+    argv = [r"C:\z\winws.exe", "--wf-udp=443", "--filter-udp=443", f"--ipset={tg}", f"--ipset={allf}",
+            f"--ipset-exclude={ex}", f"--ipset-exclude={vpn}", "--dpi-desync=fake", "--new",
+            "--filter-tcp=443", f"--hostlist={gen}", f"--hostlist={genu}", "--new", f"--hostlist={only}"]
+    out, snap = runner.slim(argv)
+    assert out == [r"C:\z\winws.exe", "--wf-udp=443", "--filter-udp=443", f"--ipset={allf}",
+                   "--ipset-exclude-ip=10.0.0.1,10.0.0.2", "--dpi-desync=fake", "--new",
+                   "--filter-tcp=443", f"--hostlist={gen}", "--new", f"--hostlist={only}"]  # sole include stays
+    assert not runner.stale(snap)
+    (tmp_path / "ipset-exclude-vpn.txt").write_text("138.124.5.202\n", encoding="utf-8")
+    assert runner.stale(snap)  # winws no longer watches it: the app restarts it
+    assert runner.slim([r"C:\z\winws2.exe", f"--ipset={tg}"])[0] == [r"C:\z\winws2.exe", f"--ipset={tg}"]

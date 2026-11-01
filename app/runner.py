@@ -36,6 +36,7 @@ class Runner:
         self._out = None  # winws output file of the current run
         self._lock = threading.RLock()
         self.vpn_ips: set[str] = set()  # VPN servers left out of the capture filter at start
+        self.unwatched: dict[Path, list[str] | None] = {}  # list files winws doesn't reload (slim())
 
     @property
     def running(self) -> bool:
@@ -52,7 +53,8 @@ class Runner:
                 self.vpn_ips = vpn.write_exclude()
             except Exception:  # noqa: BLE001
                 self.vpn_ips = set()
-            argv = uncapture(s.argv(game_tcp, game_udp, auto_hostlist), self.vpn_ips | set(skip))
+            argv, self.unwatched = slim(s.argv(game_tcp, game_udp, auto_hostlist))
+            argv = uncapture(argv, self.vpn_ips | set(skip))
             log = output_file()
             log.parent.mkdir(parents=True, exist_ok=True)
             self._out = open(log, "wb")  # a file, not a PIPE: an undrained pipe would block winws
@@ -82,6 +84,71 @@ class Runner:
             if getattr(self, "_out", None):
                 self._out.close()
                 self._out = None
+
+
+PLACEHOLDERS = {"203.0.113.113/32", "domain.example.abc"}  # paths.USER_LISTS fillers: winws refuses empty lists
+INLINE_MAX = 200  # entries: an exclude list this small goes on the command line instead of a file
+LIVE = ("ipset-all.txt", "ipset-games.txt", "list-auto.txt")  # big or rewritten on the fly: stay files
+
+
+def _entries(f: Path) -> list[str] | None:
+    try:
+        lines = f.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return None
+    return [e for e in (ln.split("#")[0].strip() for ln in lines) if e]
+
+
+def slim(argv: list[str]) -> tuple[list[str], dict[Path, list[str] | None]]:
+    """Fewer list files for winws. For every NEW connection winws (a Cygwin build) checks each list file of each
+    profile for changes: 56 references cost ~3 ms per new flow, so a torrent client opening dozens of connections
+    a second queued all captured traffic — game packets waited 0.4-1.9 s. Placeholder lists are dropped, small
+    exclude lists inlined. Returns the new argv and the files it no longer watches with their entries: when one
+    changes, winws must be restarted (stale())."""
+    if Path(argv[0]).name.lower() != "winws.exe":
+        return argv, {}
+    out, snap, prof = [], {}, []
+
+    def flush():
+        for a in prof:
+            opt, _, val = a.partition("=")
+            f = Path(val)
+            if opt not in ("--ipset", "--hostlist", "--ipset-exclude", "--hostlist-exclude") or f.name in LIVE:
+                out.append(a)
+                continue
+            items = _entries(f)
+            if items is None:
+                out.append(a)
+                continue
+            real = [e for e in items if e not in PLACEHOLDERS]
+            if opt in ("--ipset", "--hostlist"):  # an include list: dropping the only one would match everything
+                same = [x for x in prof if x.startswith(opt + "=") and x != a]
+                if real or not same:
+                    out.append(a)
+                    continue
+            elif real and len(real) <= INLINE_MAX:
+                out.append(("--ipset-exclude-ip=" if opt == "--ipset-exclude" else "--hostlist-exclude-domains=")
+                           + ",".join(real))
+            elif real:
+                out.append(a)
+                continue
+            snap[f] = items
+        prof.clear()
+
+    out.append(argv[0])
+    for a in argv[1:]:
+        if a == "--new":
+            flush()
+            out.append(a)
+        else:
+            prof.append(a)
+    flush()
+    return out, snap
+
+
+def stale(snap: dict[Path, list[str] | None]) -> bool:
+    """A list file slim() took off winws changed since the start."""
+    return any(_entries(f) != items for f, items in snap.items())
 
 
 def uncapture(argv: list[str], ips: set[str]) -> list[str]:
