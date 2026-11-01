@@ -32,7 +32,25 @@ def current_version(vendor: Path = paths.VENDOR) -> str:
         return "0"
 
 
-def latest_release() -> tuple[str, str]:
+def _stage(prefix: str) -> Path:
+    """A fresh dir for downloads under data/ (admin-only when installed): %TEMP% is writable by any process of
+    this user, which could swap a checked file before the elevated app runs or installs it."""
+    base = paths.DATA / "tmp"
+    base.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=base))
+
+
+def _sha256(f: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(f, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def latest_release() -> tuple[str, str, str | None]:
+    """(tag, zip url, sha256 from GitHub's asset digest or None)."""
     r = requests.get(
         f"https://api.github.com/repos/{REPO}/releases/latest",
         headers={"Accept": "application/vnd.github+json"},
@@ -42,7 +60,8 @@ def latest_release() -> tuple[str, str]:
     j = r.json()
     for a in j.get("assets", []):
         if a.get("name", "").lower().endswith(".zip"):
-            return j["tag_name"], a["browser_download_url"]
+            dig = a.get("digest") or ""
+            return j["tag_name"], a["browser_download_url"], dig[7:].lower() if dig.startswith("sha256:") else None
     raise RuntimeError("no .zip asset in latest release")
 
 
@@ -125,7 +144,7 @@ def recover_vendor(vendor: Path = paths.VENDOR) -> None:
 
 
 def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=False) -> bool:
-    tag, url = latest_release()
+    tag, url, digest = latest_release()
     if not TAG_RE.match(tag):
         raise RuntimeError(f"bad release tag: {tag!r}")
     cur = current_version(vendor)
@@ -134,11 +153,13 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
         return False
     log(f"обновляю zapret {cur} → {tag}")
     vendor = Path(vendor)
-    with tempfile.TemporaryDirectory(prefix="zapret_upd_") as td:
-        td = Path(td)
+    td = _stage("zapret_")
+    try:
         zpath = td / "release.zip"
         log("скачиваю…")
         _download(url, zpath, log)
+        if digest and _sha256(zpath) != digest:  # winws.exe and the driver run as admin
+            raise RuntimeError("контрольная сумма архива zapret не совпала")
         ex = td / "x"
         with zipfile.ZipFile(zpath) as z:
             _safe_extract(z, ex)
@@ -167,6 +188,8 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
             raise
         if had_old:
             shutil.rmtree(old, ignore_errors=True)
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
     log(f"zapret обновлён до {tag}")
     return True
 
@@ -194,7 +217,6 @@ def app_release() -> tuple[str, str, str | None]:
 
 def app_update(log=print) -> bool:
     """Download the new version, verify it and install it; the app restarts. Caller quits after."""
-    import hashlib
     import subprocess
     from . import __version__
     tag, url, sha_url = app_release()
@@ -202,7 +224,8 @@ def app_update(log=print) -> bool:
         return False
     if not sha_url:
         raise RuntimeError("в релизе нет файла .sha256 — обновление не проверить")
-    d = Path(tempfile.mkdtemp(prefix="zapretauto_upd_"))  # private dir: no TOCTOU via shared %TEMP% name
+    shutil.rmtree(paths.DATA / "tmp", ignore_errors=True)  # earlier updates' files
+    d = _stage("app_")
     f = d / url.rsplit("/", 1)[-1]
     log(f"скачиваю ZapretAuto {tag}")
     _download(url, f, log)
@@ -214,7 +237,7 @@ def app_update(log=print) -> bool:
     if not re.fullmatch(r"[0-9a-f]{64}", want):
         shutil.rmtree(d, ignore_errors=True)
         raise RuntimeError("файл .sha256 в релизе повреждён — обновление не проверить")
-    have = hashlib.sha256(f.read_bytes()).hexdigest()
+    have = _sha256(f)
     if have != want:
         shutil.rmtree(d, ignore_errors=True)
         raise RuntimeError("контрольная сумма не совпала")
@@ -273,7 +296,7 @@ def app_check_async(callback) -> None:
 def check_async(callback) -> None:
     def work():
         try:
-            tag, _ = latest_release()
+            tag, *_ = latest_release()
             callback(tag, is_newer(tag, current_version()))
         except Exception:
             callback(None, False)
