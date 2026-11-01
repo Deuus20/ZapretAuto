@@ -412,10 +412,20 @@ def quick_check(light: bool = False) -> dict[str, bool]:
 def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> dict:
     """Test every strategy, mix the best profile per group, save to data/settings.json."""
     global BIND
+    auto = paths.LISTS / "list-auto.txt"
+    try:
+        before = auto.read_bytes()
+    except OSError:
+        before = None
     try:
         return _auto_pick(log, use_shared, stop)
     finally:
         BIND = None  # the VPN bypass address must not stick to later probes (diagnostics after the VPN is off)
+        if before is not None:  # failures under a bad candidate must not desync those sites for good
+            try:
+                auto.write_bytes(before)
+            except OSError:
+                pass
 
 
 def _auto_pick(log, use_shared, stop) -> dict:

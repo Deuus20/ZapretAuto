@@ -14,6 +14,17 @@ VPN_PROCS = ("openvpn", "warp-svc", "amnezia", "wireguard", "outline", "nekoray"
 PLACEHOLDER = "203.0.113.113/32"
 
 
+# short names match only the whole exe: "throne" caught ThroneAndLiberty.exe, so the game lost its bypass
+EXACT_PROCS = {"happ", "throne"}
+
+
+def is_vpn_proc(name: str) -> bool:
+    name = name.lower()
+    if name.removesuffix(".exe") in EXACT_PROCS:
+        return True
+    return any(k in name for k in VPN_PROCS if k not in EXACT_PROCS)
+
+
 def _routes() -> list[tuple[str, str, str, str]]:
     """IPv4 routes from `route print -4`: (dest, mask, gateway, interface ip)."""
     try:
@@ -45,7 +56,7 @@ def server_ips() -> set[str]:
                     name = psutil.Process(c.pid).name().lower()
                 except psutil.Error:
                     continue
-                if any(k in name for k in VPN_PROCS):
+                if is_vpn_proc(name):
                     ips.add(c.raddr.ip)
     except psutil.Error:
         pass

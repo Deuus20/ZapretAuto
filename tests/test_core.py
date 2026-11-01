@@ -1611,3 +1611,19 @@ def test_ipset_hosts_are_scored_for_the_ipset_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(socket, "gethostbyname", lambda h: ips[h])
     assert tester.target_group(tester.Target("F", "https://fastly.example")) == "tcp:80,443,8443:ipset-all"
     assert tester.target_group(tester.Target("O", "https://other.example")) == "tcp:80,443:list-general"
+
+
+def test_vpn_process_names():
+    assert vpn.is_vpn_proc("Throne.exe") and vpn.is_vpn_proc("AmneziaVPN.exe") and vpn.is_vpn_proc("happ.exe")
+    assert not vpn.is_vpn_proc("ThroneAndLiberty.exe") and not vpn.is_vpn_proc("whatsapp.exe")
+
+
+def test_pick_restores_auto_hostlist(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "LISTS", tmp_path)
+    (tmp_path / "list-auto.txt").write_text("good.example\n", encoding="utf-8")
+    def pick(*a):
+        (tmp_path / "list-auto.txt").write_text("good.example\nbroken-by-candidate.example\n", encoding="utf-8")
+        return {}
+    monkeypatch.setattr(tester, "_auto_pick", pick)
+    tester.auto_pick()
+    assert (tmp_path / "list-auto.txt").read_text(encoding="utf-8") == "good.example\n"

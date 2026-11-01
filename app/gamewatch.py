@@ -48,6 +48,11 @@ UDP_NON_GAME_EXES = {
     "rustdesk.exe", "parsecd.exe", "obs64.exe", "nvcontainer.exe", "amneziavpn.exe", "amneziavpn-service.exe",
     "wireguard.exe", "openvpn.exe", "radmin_vpn.exe", "rvcontrolsvc.exe", "hamachi-2.exe", "zerotier-one_x64.exe",
     "nekoray.exe", "v2rayn.exe", "xray.exe", "sing-box.exe", "hiddify.exe", "claude.exe", "node.exe",
+    # calls: their media peers must not get game fakes (Discord/Telegram forks and Store builds included)
+    "whatsapp.root.exe", "signal.exe", "discordptb.exe", "discordcanary.exe", "vesktop.exe", "legcord.exe",
+    "ayugram.exe", "kotatogram.exe", "64gram.exe", "materialgram.exe", "telegram.exe", "element.exe",
+    "max.exe", "vk calls.exe", "vkcalls.exe", "mumble.exe", "teamspeak.exe", "ts3client_win64.exe",
+    "msedgewebview2.exe", "chrome.exe", "msedge.exe", "firefox.exe", "yandex.exe", "browser.exe", "opera.exe",
 }
 # clients that stay open in the background: their servers go through the bypass, but they are never «играете»
 # (that label also holds back updates and winws restarts). Riot Client keeps its chat on TCP 5223 for hours.
@@ -547,7 +552,7 @@ class GameWatcher(threading.Thread):
                         self._web_nets.add(net)
                     new_web = True
                 continue
-            if not public_ipv4(ip) or ip in banned:
+            if not public_ipv4(ip) or ip in banned or port < 1024:  # DNS/NTP/DoT of a game dir are not its servers
                 continue
             exe, path = self._proc(pid)
             if not exe or not (classify(path, settings) or self._udp_game(exe, path, ip, port, proto, settings)):
