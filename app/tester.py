@@ -140,9 +140,24 @@ def vpn_active() -> str | None:
     return a if a and VPN_RE.search(a) else None
 
 
+# used when upstream renames or drops utils/targets.txt: the pick and the checks must not crash
+FALLBACK_TARGETS = """
+DiscordMain = "https://discord.com"
+DiscordGateway = "https://gateway.discord.gg"
+DiscordCDN = "https://cdn.discordapp.com"
+YouTubeWeb = "https://www.youtube.com"
+YouTubeImage = "https://i.ytimg.com"
+YouTubeVideoRedirect = "https://redirector.googlevideo.com"
+"""
+
+
 def load_targets() -> list[Target]:
     out = []
-    for line in (paths.VENDOR / "utils" / "targets.txt").read_text(encoding="utf-8").splitlines():
+    try:
+        text = (paths.VENDOR / "utils" / "targets.txt").read_text(encoding="utf-8")
+    except OSError:
+        text = FALLBACK_TARGETS
+    for line in text.splitlines():
         m = re.match(r'\s*(\w+)\s*=\s*"(https?://[^"]+)"', line)
         if m:
             out.append(Target(*m.groups()))
@@ -368,6 +383,14 @@ def quick_check(light: bool = False) -> dict[str, bool]:
 
 def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> dict:
     """Test every strategy, mix the best profile per group, save to data/settings.json."""
+    global BIND
+    try:
+        return _auto_pick(log, use_shared, stop)
+    finally:
+        BIND = None  # the VPN bypass address must not stick to later probes (diagnostics after the VPN is off)
+
+
+def _auto_pick(log, use_shared, stop) -> dict:
     runner, targets = Runner(), load_targets()
     paths.sync_lists()
     all_s = strategies.load_all()

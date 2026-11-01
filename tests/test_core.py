@@ -1539,3 +1539,16 @@ def test_game_client_idling_in_menu_is_not_playing(tmp_path, monkeypatch):
     finally:
         w._handle = None
         w.stop()
+
+
+def test_targets_fallback_and_bind_reset(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "VENDOR", tmp_path)                      # upstream dropped utils/targets.txt
+    assert {"DiscordMain", "YouTubeWeb"} <= {t.key for t in tester.load_targets()}
+
+    def boom(*a):
+        tester.BIND = "192.168.1.5"
+        raise RuntimeError("pick failed")
+    monkeypatch.setattr(tester, "_auto_pick", boom)
+    with pytest.raises(RuntimeError):
+        tester.auto_pick()
+    assert tester.BIND is None

@@ -64,14 +64,19 @@ def main() -> int:
         app.installTranslator(tr)
     sock = QLocalSocket()
     sock.connectToServer("ZapretAuto")
-    if sock.waitForConnected(300):
+    if sock.waitForConnected(2000):  # 300 ms missed a busy first instance: two trays killed each other's winws
         sock.write(b"show")
         sock.waitForBytesWritten(300)
         return 0
     QLocalServer.removeServer("ZapretAuto")
     server = QLocalServer()
     server.setSocketOptions(QLocalServer.UserAccessOption)  # only this user may poke the instance
-    server.listen("ZapretAuto")
+    if not server.listen("ZapretAuto"):  # the name is taken: another instance answered late
+        sock.connectToServer("ZapretAuto")
+        if sock.waitForConnected(2000):
+            sock.write(b"show")
+            sock.waitForBytesWritten(300)
+        return 0
     try:
         from app import updater
         updater.recover_vendor()  # finish/undo an interrupted zapret update
