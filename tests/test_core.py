@@ -1390,3 +1390,13 @@ def test_settings_nested_edit_does_not_leak_into_cache(monkeypatch, tmp_path):
     settings.save_settings(strategy={"base": "a", "picks": {}})
     settings.load_settings()["strategy"]["picks"]["Discord"] = "x"  # edited, never saved
     assert settings.load_settings()["strategy"]["picks"] == {}
+
+
+def test_flowseal_hosts_only_known_sites(monkeypatch):
+    from app import diag
+    import requests
+    good = "".join(f"1.2.3.{i} gateway{i}.discord.com\n" for i in range(10))
+    text = good + "6.6.6.6 sberbank.ru\n6.6.6.6 evildiscord.com\n6.6.6.6 discord.com.evil.net\n"
+    monkeypatch.setattr(requests, "get", lambda *a, **k: type("R", (), {"text": text})())
+    hosts = [h for _, h in diag.flowseal_hosts()]
+    assert len(hosts) == 10 and all(h.endswith(".discord.com") for h in hosts)

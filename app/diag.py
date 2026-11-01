@@ -298,6 +298,16 @@ FLOWSEAL_HOSTS_URL = ("https://raw.githubusercontent.com/Flowseal/zapret-discord
 HOSTS_BEGIN = "# ZapretAuto: адреса от Flowseal (Discord, Telegram, GitHub) — начало"
 HOSTS_END = "# ZapretAuto: адреса от Flowseal — конец"
 _HOST_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z]{2,63}$")
+# We write the system hosts file as admin from a remote list: only these sites (and subdomains) may be
+# redirected, so a broken or hijacked upstream file can't point a bank or Windows Update elsewhere.
+HOSTS_DOMAINS = ("discord.com", "discord.gg", "discordapp.com", "discordapp.net", "discord.media",
+                 "github.com", "githubusercontent.com", "githubassets.com",
+                 "telegram.org", "telegram.me", "telegram.dog", "telegram.space", "cdn-telegram.org",
+                 "t.me", "tg.dev", "telesco.pe")
+
+
+def _hosts_allowed(host: str) -> bool:
+    return any(host == d or host.endswith("." + d) for d in HOSTS_DOMAINS)
 
 
 def _hosts_file():
@@ -321,7 +331,7 @@ def flowseal_hosts() -> list[tuple[str, str]]:
             ipaddress.ip_address(f[0])
         except ValueError:
             continue
-        if _HOST_RE.match(f[1].lower()):
+        if _HOST_RE.match(f[1].lower()) and _hosts_allowed(f[1].lower()):
             out.append((f[0], f[1].lower()))
     if len(out) < 10:
         raise ValueError("список Flowseal пустой или повреждён")
