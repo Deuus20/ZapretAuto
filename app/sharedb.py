@@ -10,9 +10,22 @@ from urllib.parse import quote
 
 import requests
 
-from .updater import APP_REPO
+from .updater import APP_REPO, app_raw_urls
 
-DB_URL = f"https://raw.githubusercontent.com/{APP_REPO}/main/strategies-db.json"
+DB_FILE = "strategies-db.json"
+
+
+def _get_json(name: str):
+    """A JSON file from our repo: GitHub, else the Codeberg mirror. Raises if neither answers."""
+    err: Exception = ValueError("no source")
+    for url in app_raw_urls(name):
+        try:
+            r = requests.get(url, timeout=8)
+            r.raise_for_status()
+            return r.json()
+        except (requests.RequestException, ValueError) as e:
+            err = e
+    raise err
 
 
 def isp() -> tuple[str, str] | None:
@@ -28,7 +41,7 @@ def isp() -> tuple[str, str] | None:
 def suggestion(asn: str, zapret_version: str) -> dict | None:
     """Best known choice {"base", "picks"} for this ISP and zapret version, if any."""
     try:
-        db = requests.get(DB_URL, timeout=8).json()
+        db = _get_json(DB_FILE)
     except (requests.RequestException, ValueError):
         return None
     e = db.get(asn, {}).get(zapret_version)
@@ -39,9 +52,7 @@ def isp_entry(asn: str, zapret_version: str) -> dict | None:
     """What other users of this ISP reported for this zapret version: {"votes", "reports", "choice"};
     None when the base is unreachable."""
     try:
-        r = requests.get(DB_URL, timeout=8)
-        r.raise_for_status()
-        db = r.json()
+        db = _get_json(DB_FILE)
     except (requests.RequestException, ValueError):
         return None
     e = db.get(asn, {}).get(zapret_version) or {}
@@ -58,14 +69,14 @@ def report_url(asn: str, name: str, zapret_version: str, app_version: str, choic
     return f"https://github.com/{APP_REPO}/issues/new?title={quote(title)}&body={quote(text)}"
 
 
-GAMES_URL = f"https://raw.githubusercontent.com/{APP_REPO}/main/games-db.json"
+GAMES_FILE = "games-db.json"
 MAX_URL = 7500  # GitHub drops prefilled issue text beyond ~8 KB of URL
 
 
 def games_db() -> dict | None:
     """Crowd-sourced game servers {"games": {exe: [ip]}, "web": [net]}: each address sent by 2+ people."""
     try:
-        db = requests.get(GAMES_URL, timeout=8).json()
+        db = _get_json(GAMES_FILE)
     except (requests.RequestException, ValueError):
         return None
     return db if isinstance(db, dict) else None

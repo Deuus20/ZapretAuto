@@ -14,6 +14,15 @@ from . import paths
 
 REPO = "Flowseal/zapret-discord-youtube"
 APP_REPO = "yuav2/ZapretAuto"  # our releases with ZapretAuto-Setup.exe
+# Mirror on Codeberg (Forgejo): used when GitHub fails (GitHub hid yuav2 as spam on 2026-10-20: 404 for all).
+MIRROR = "https://codeberg.org"
+MIRROR_REPO = "yuav2/ZapretAuto"
+
+
+def app_raw_urls(name: str) -> list[str]:
+    """Where a file from our repo's main branch can be read: GitHub first, then the Codeberg mirror."""
+    return [f"https://raw.githubusercontent.com/{APP_REPO}/main/{name}",
+            f"{MIRROR}/{MIRROR_REPO}/raw/branch/main/{name}"]
 
 
 def current_version(vendor: Path = paths.VENDOR) -> str:
@@ -63,7 +72,7 @@ def _find_root(base: Path) -> Path | None:
 MAX_DOWNLOAD = 200 * 1024 * 1024
 TAG_RE = re.compile(r"^v?\d+(\.\d+)*[a-z]?$", re.I)
 ALLOWED_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
-                 "githubusercontent.com")
+                 "githubusercontent.com", "codeberg.org")
 
 
 def _check_url(url: str) -> None:
@@ -165,10 +174,15 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
 def app_release() -> tuple[str, str, str | None]:
     """(tag, download url, .sha256 url or None) of the latest ZapretAuto release: the installer, or the zip for a
     portable copy (it must not install itself into Program Files)."""
-    r = requests.get(f"https://api.github.com/repos/{APP_REPO}/releases/latest",
-                     headers={"Accept": "application/vnd.github+json"}, timeout=15)
-    r.raise_for_status()
-    j = r.json()
+    try:
+        r = requests.get(f"https://api.github.com/repos/{APP_REPO}/releases/latest",
+                         headers={"Accept": "application/vnd.github+json"}, timeout=15)
+        r.raise_for_status()
+        j = r.json()
+    except (requests.RequestException, ValueError):  # Forgejo answers in the same shape
+        r = requests.get(f"{MIRROR}/api/v1/repos/{MIRROR_REPO}/releases/latest", timeout=15)
+        r.raise_for_status()
+        j = r.json()
     assets = {a.get("name", "").lower(): a["browser_download_url"] for a in j.get("assets", [])}
     kind = "portable.zip" if paths.PORTABLE else "setup.exe"
     url = next((u for n, u in assets.items() if n.endswith(kind)), None)
