@@ -1467,3 +1467,11 @@ def test_shared_games_db_retried_when_offline_at_start(tmp_path, monkeypatch):
         assert waits == [120, 240] and "4.4.4.0/24" in w._web_nets and not answers
     finally:
         w.stop()
+
+
+def test_first_run_defaults_only_on_fresh_install(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    settings._cache = None
+    assert settings.first_run() and settings.load_settings() == settings.FIRST_RUN
+    settings.save_settings(game_watch=False)
+    assert not settings.first_run() and settings.load_settings()["game_watch"] is False   # user's choice kept
