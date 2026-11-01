@@ -1552,3 +1552,20 @@ def test_targets_fallback_and_bind_reset(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         tester.auto_pick()
     assert tester.BIND is None
+
+
+def test_udp_game_heuristic_needs_a_burst(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        t = [1000.0]
+        monkeypatch.setattr(gamewatch.time, "time", lambda: t[0])
+        for ip in ("5.5.5.1", "5.5.5.2"):
+            assert not w._udp_game("sync.exe", r"c:\apps\sync.exe", ip, 40000, 17, {})
+            t[0] += 86400                                     # one peer a day: never a game
+        assert not w._udp_game("sync.exe", r"c:\apps\sync.exe", "5.5.5.3", 40000, 17, {})
+        for ip in ("6.6.6.1", "6.6.6.2", "6.6.6.3"):
+            r = w._udp_game("game.exe", r"c:\g\game.exe", ip, 40000, 17, {})
+        assert r                                              # a burst is
+    finally:
+        w.stop()

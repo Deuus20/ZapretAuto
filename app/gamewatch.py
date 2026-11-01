@@ -52,6 +52,7 @@ UDP_NON_GAME_EXES = {
 # clients that stay open in the background: their servers go through the bypass, but they are never «играете»
 # (that label also holds back updates and winws restarts). Riot Client keeps its chat on TCP 5223 for hours.
 NOT_PLAYING_EXES = {"riot client.exe", "riotclientservices.exe", "riotclientux.exe", "riotclientuxrender.exe"}
+UDP_GAME_WINDOW = 600.0  # s: those peers must be seen within this time
 UDP_GAME_MIN_IPS = 3     # distinct public UDP peers before an unknown exe is treated as a game
 # A new server must reach the ipset before the game gives up on it. It was «5 s of quiet after the last new
 # IP» on a 3 s loop: a login burst kept resetting the wait, the list lagged behind the game and it took several
@@ -59,6 +60,7 @@ UDP_GAME_MIN_IPS = 3     # distinct public UDP peers before an unknown exe is tr
 # after it); a burst is batched by MIN_RESTART_GAP. winws re-reads a changed ipset file by itself.
 DEBOUNCE = 0.0           # s from the first new IP of a burst to writing the ipset
 MIN_RESTART_GAP = 0.25   # s between ipset rewrites
+DIVERT_RETRY = 300.0     # s between attempts to (re)open WinDivert flow capture
 FAST_INTERVAL = 0.5      # s, idle loop with WinDivert flow capture (new flows wake it earlier)
 PSUTIL_EVERY = 60.0      # s, flow layer sees only new flows: pick up already-open connections
 NAMES_EVERY = 5.0        # s, process scan to notice a game has exited (a full scan every 0.5 s ate ~3% CPU)
@@ -221,7 +223,7 @@ class GameWatcher(threading.Thread):
         self._stop_ev = threading.Event()
         self._lock = threading.Lock()
         self._games: dict[str, dict] = {}
-        self._udp_hits: dict[str, set[str]] = {}
+        self._udp_hits: dict[str, dict[str, float]] = {}
         self._events: list[tuple[int, str, int]] = []
         self._ev_lock = threading.Lock()
         self._open_flows: dict[int, int] = {}  # WinDivert EndpointId -> pid of open game (non-web) flows
@@ -229,6 +231,7 @@ class GameWatcher(threading.Thread):
         self._handle = None
         self._dll = None
         self._pending_since: float | None = None
+        self._flush_fails = 0
         self._wake = threading.Event()  # set by the flow capture: process new servers now, not at the next tick
         self._dirty = False             # settings.json is behind the in-memory lists (written after the ipset)
         self._last_written: str | None = None
@@ -376,6 +379,12 @@ class GameWatcher(threading.Thread):
             threading.Thread(target=self._rollback_check, args=(todo,), daemon=True).start()
 
     def _rollback_check(self, todo: dict[str, tuple[int, float, str]]) -> None:
+        try:
+            self._rollback_check_inner(todo)
+        except Exception as e:  # a bare thread: without this it died with a traceback nobody sees
+            self.log(f"gamewatch: rollback error: {e}")
+
+    def _rollback_check_inner(self, todo: dict[str, tuple[int, float, str]]) -> None:
         if self._stop_ev.wait(self.rollback_delay):
             return
         bad = []
@@ -401,7 +410,7 @@ class GameWatcher(threading.Thread):
         self._flush()
 
     # ---- flow capture
-    def _open_divert(self) -> bool:
+    def _open_divert(self, quiet: bool = False) -> bool:
         try:
             from .runner import windivert_dll
             dll = windivert_dll(use_last_error=True)
@@ -413,12 +422,14 @@ class GameWatcher(threading.Thread):
             dll.WinDivertClose.argtypes = [ctypes.c_void_p]
             h = dll.WinDivertOpen(b"true", 2, 0, 1 | 4)
             if h in (None, ctypes.c_void_p(-1).value):
-                self.log(f"gamewatch: WinDivertOpen failed (err {ctypes.get_last_error()})")
+                if not quiet:
+                    self.log(f"gamewatch: WinDivertOpen failed (err {ctypes.get_last_error()})")
                 return False
             self._dll, self._handle = dll, h
             return True
         except Exception as e:
-            self.log(f"gamewatch: WinDivert unavailable: {e}")
+            if not quiet:
+                self.log(f"gamewatch: WinDivert unavailable: {e}")
             return False
 
     def _recv_loop(self) -> None:
@@ -426,6 +437,13 @@ class GameWatcher(threading.Thread):
         dll, h = self._dll, self._handle
         while not self._stop_ev.is_set() and self._handle is not None:
             if not dll.WinDivertRecv(h, None, 0, None, ctypes.byref(a)):
+                if not self._stop_ev.is_set():  # driver stopped/handle broken: psutil until run() reopens it
+                    self.log(f"gamewatch: WinDivert capture stopped (err {ctypes.get_last_error()})")
+                    self._handle = None
+                    try:
+                        dll.WinDivertClose(h)
+                    except Exception:
+                        pass
                 break
             event = (a.Bits >> 8) & 0xFF
             outbound = (a.Bits >> 17) & 1
@@ -497,8 +515,11 @@ class GameWatcher(threading.Thread):
                 or any(d in p for d in SYSTEM_DIRS)
                 or exe in {x.lower() for x in settings.get("games_ignore", [])}):
             return False
-        hits = self._udp_hits.setdefault(exe, set())
-        hits.add(ip)
+        now = time.time()
+        hits = self._udp_hits.setdefault(exe, {})
+        hits[ip] = now
+        for old in [k for k, t in hits.items() if now - t > UDP_GAME_WINDOW]:
+            del hits[old]  # a burst marks a game; three peers over a week (sync tools, updaters) do not
         if len(hits) >= UDP_GAME_MIN_IPS:
             if exe not in self._games:
                 self.log(f"игра определена по UDP-трафику: {exe}")
@@ -544,8 +565,8 @@ class GameWatcher(threading.Thread):
                 g["path"] = path
                 if self._add_ip(g, ip, now):
                     new_ip = True
-                    if (ip in g["ips"] and ip not in self._base and ip not in self._measuring
-                            and ip not in self._checked):
+                    if (proto == 6 and ip in g["ips"] and ip not in self._base  # tcp_latency can't time UDP
+                            and ip not in self._measuring and ip not in self._checked):
                         self._measuring.add(ip)
                         self._pool.submit(self._measure_base, ip, port, exe)
             if ip not in self._ping and ip not in self._pinging:
@@ -629,7 +650,7 @@ class GameWatcher(threading.Thread):
                        key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
         man = paths.DATA / "games_manual.txt"
         if man.exists():
-            for ln in man.read_text(encoding="utf-8").splitlines():
+            for ln in man.read_text(encoding="utf-8", errors="ignore").splitlines():
                 ln = ln.strip()
                 if ln and not ln.startswith("#") and ln not in lines:
                     lines.append(ln)
@@ -726,11 +747,12 @@ class GameWatcher(threading.Thread):
             self.log("gamewatch: WinDivert flow capture active")
         else:
             self.log("gamewatch: fallback to psutil.net_connections (TCP/connected UDP only)")
-        last_poll = 0.0
+        last_poll, last_open = 0.0, time.time()
         while not self._stop_ev.is_set():
             wait = min(self.interval, FAST_INTERVAL) if use_divert else self.interval
             if self._pending_since:  # a write held back by MIN_RESTART_GAP: come back exactly when it is due
-                wait = min(wait, max(0.01, self._last_restart + MIN_RESTART_GAP - time.time()))
+                due = max(self._last_restart + MIN_RESTART_GAP, self._pending_since + DEBOUNCE)  # may be a backoff
+                wait = min(wait, max(0.01, due - time.time()))
             if use_divert:
                 self._wake.wait(wait)
                 self._wake.clear()
@@ -739,6 +761,13 @@ class GameWatcher(threading.Thread):
             if self._stop_ev.is_set():
                 break
             try:
+                use_divert = self._handle is not None
+                if not use_divert and time.time() - last_open >= DIVERT_RETRY:  # failed at boot or died later
+                    last_open = time.time()
+                    if self._open_divert(quiet=True):
+                        use_divert = True
+                        threading.Thread(target=self._recv_loop, daemon=True, name="GameWatchRecv").start()
+                        self.log("gamewatch: WinDivert flow capture active")
                 if use_divert:
                     with self._ev_lock:
                         ev, self._events = self._events, []
@@ -763,8 +792,11 @@ class GameWatcher(threading.Thread):
                     try:
                         self._flush()
                     except Exception:
-                        self._pending_since = now  # list locked or disk error: retry after DEBOUNCE, don't drop it
+                        # list locked or disk error: retry, don't drop it, but back off (it retried every second)
+                        self._flush_fails += 1
+                        self._pending_since = now + min(300, 2 ** self._flush_fails)
                         raise
+                    self._flush_fails = 0
                 if self._dirty and not self._pending_since:
                     self._dirty = False
                     self._persist_settings()
