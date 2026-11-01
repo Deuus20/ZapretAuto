@@ -1326,10 +1326,13 @@ def test_vpn_left_out_of_capture(monkeypatch, tmp_path):
     def fake_save(cmd, **kw):  # winws --wf-save
         open(cmd[-1].split("=", 1)[1], "w").write("outbound and udp.DstPort >= 1024\n")
     monkeypatch.setattr(runner.subprocess, "run", fake_save)
+    monkeypatch.setattr(runner, "compiles", lambda flt: True)
     argv = [r"C:\z\winws.exe", "--wf-tcp=443", "--wf-udp=443,1024-65535", "--filter-udp=443", "--new"]
     out = runner.uncapture(argv, {"138.124.5.202"})
     f = tmp_path / "logs" / "winws-filter.txt"
     assert out == [r"C:\z\winws.exe", "--filter-udp=443", "--new", f"--wf-raw=@{f}"]
-    assert "not (ip and (ip.SrcAddr == 138.124.5.202 or ip.DstAddr == 138.124.5.202))" in f.read_text()
+    assert "and (ipv6 or (ip.SrcAddr != 138.124.5.202 and ip.DstAddr != 138.124.5.202))" in f.read_text()
+    monkeypatch.setattr(runner, "compiles", lambda flt: False)
+    assert runner.uncapture(argv, {"138.124.5.202"}) == argv  # WinDivert would reject it: keep the bypass up
     assert runner.uncapture(argv, set()) == argv  # no VPN: filter as winws builds it
     assert runner.uncapture([r"C:\z\winws2.exe", "--wf-udp-out=443"], {"1.2.3.4"})[1] == "--wf-udp-out=443"
