@@ -1448,3 +1448,22 @@ def test_gui_weekly_ipset_update_runs_once(tmp_path, monkeypatch):
         assert calls == [1]                                  # the saved time counts, not the window's stale copy
     finally:
         _close(app, w)
+
+
+def test_shared_games_db_retried_when_offline_at_start(tmp_path, monkeypatch):
+    from app import sharedb
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    settings.save_settings(games={}, games_schema=2)
+    answers = [None, None, {"games": {}, "web": ["4.4.4.0/24"]}]
+    monkeypatch.setattr(sharedb, "games_db", lambda: answers.pop(0))
+    monkeypatch.setattr(gamewatch, "KNOWN_WEB_HOSTS", ())
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    waits = []
+    monkeypatch.setattr(w._stop_ev, "wait", lambda t: waits.append(t) or False)
+    try:
+        w._resolve_known()
+        assert waits == [120, 240] and "4.4.4.0/24" in w._web_nets and not answers
+    finally:
+        w.stop()

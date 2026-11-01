@@ -643,8 +643,15 @@ class GameWatcher(threading.Thread):
                     nets.add(sa[0].rsplit(".", 1)[0] + ".0/24")
             except OSError:
                 pass
-        db = self._shared_db()
-        nets |= set(db.get("web", []))
+        # one try at start missed the base for weeks: at boot the network (or winws starting) may not be up yet
+        for attempt in range(4):
+            fetched, db = self._load_shared_db()
+            self._apply_db(nets, db)
+            if fetched or self._stop_ev.wait(120 * (attempt + 1)):
+                break
+
+    def _apply_db(self, nets: set[str], db: dict) -> None:
+        nets = nets | set(db.get("web", []))
         with self._lock:
             new = nets - self._web_nets
             if len(self._web_nets) < MAX_WEB_NETS:
@@ -663,9 +670,15 @@ class GameWatcher(threading.Thread):
     @staticmethod
     def _shared_db() -> dict:
         """games-db.json from the repo; the last good copy when offline. Only valid public IPv4 entries pass."""
+        return GameWatcher._load_shared_db()[1]
+
+    @staticmethod
+    def _load_shared_db() -> tuple[bool, dict]:
+        """(fetched now, base): the base comes from the cache when the fetch failed."""
         from . import sharedb
         cache = paths.DATA / "games-db.json"
         db = sharedb.games_db()
+        fetched = db is not None
         if db is not None:
             try:
                 cache.write_text(json.dumps(db), encoding="utf-8")
@@ -675,11 +688,11 @@ class GameWatcher(threading.Thread):
             try:
                 db = json.loads(cache.read_text(encoding="utf-8"))
             except (OSError, ValueError):
-                return {}
+                return fetched, {}
         games = {exe: [ip for ip in ips if public_ipv4(ip)][:MAX_IPS_PER_GAME]
                  for exe, ips in (db.get("games") or {}).items() if isinstance(ips, list)}
         web = [n for n in (db.get("web") or []) if isinstance(n, str) and n.endswith(".0/24") and public_ipv4(n[:-3])]
-        return {"games": games, "web": web[:MAX_WEB_NETS]}
+        return fetched, {"games": games, "web": web[:MAX_WEB_NETS]}
 
     def run(self) -> None:
         self._pending_since = time.time()  # write ipset-exclude-games.txt with the known nets right away
