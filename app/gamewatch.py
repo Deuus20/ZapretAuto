@@ -157,6 +157,16 @@ class _Addr(ctypes.Structure):
                 ("_pad", ctypes.c_uint8 * 7)]
 
 
+BAN_TTL = 3 * 86400  # one slow re-measure (a busy evening, a server hiccup) must not ban a server for good
+
+
+def active_bans(settings: dict) -> set[str]:
+    """Servers rolled back in the last BAN_TTL; older bans (and ones from before the timestamps) expire."""
+    when = settings.get("games_bad_time") or {}
+    now = time.time()
+    return {ip for ip in settings.get("games_bad_ips", []) if now - when.get(ip, 0) < BAN_TTL}
+
+
 def _v4(a) -> str | None:
     w = list(a)
     # IPv4-mapped ::ffff:x.x.x.x stored as host-order words
@@ -404,13 +414,16 @@ class GameWatcher(threading.Thread):
             return
         s = load_settings()
         banned = set(s.get("games_bad_ips", []))
+        when = dict(s.get("games_bad_time") or {})
+        now = time.time()
         with self._lock:
             for ip, exe in bad:
                 banned.add(ip)
+                when[ip] = now
                 self._games[exe]["ips"].discard(ip)
                 self._games[exe].get("seen", {}).pop(ip, None)
                 self.log(f"откат IP {ip} для {exe}")
-        save_settings(games_bad_ips=sorted(banned))
+        save_settings(games_bad_ips=sorted(banned), games_bad_time=when)
         self._persist_settings()
         self._flush()
 
@@ -535,7 +548,7 @@ class GameWatcher(threading.Thread):
         settings = load_settings()
         seen_active: set[str] = set()
         new_ip = new_web = False
-        banned = set(settings.get("games_bad_ips", []))
+        banned = active_bans(settings)
         if len(self._udp_hits) > 500:
             self._udp_hits.clear()
         if len(self._ping) > 5000:

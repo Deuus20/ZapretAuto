@@ -1627,3 +1627,10 @@ def test_pick_restores_auto_hostlist(tmp_path, monkeypatch):
     monkeypatch.setattr(tester, "_auto_pick", pick)
     tester.auto_pick()
     assert (tmp_path / "list-auto.txt").read_text(encoding="utf-8") == "good.example\n"
+
+
+def test_rolled_back_servers_are_banned_for_a_while():
+    now = time.time()
+    s = {"games_bad_ips": ["1.1.1.1", "2.2.2.2", "3.3.3.3"],
+         "games_bad_time": {"1.1.1.1": now - 3600, "2.2.2.2": now - 10 * 86400}}
+    assert gamewatch.active_bans(s) == {"1.1.1.1"}         # old and untimed bans expire
