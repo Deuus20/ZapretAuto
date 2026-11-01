@@ -90,8 +90,8 @@ def fetch(url: str, max_bytes: int, deadline: float, h3: bool = False) -> tuple[
             except _Enough:
                 pass
             except Exception:  # noqa: BLE001
-                if got == 0:
-                    raise
+                # a timeout/reset mid-body is the classic DPI freeze after ~16 KB: a failure, not a pass
+                raise
         return status, final, got
     with _get(url, timeout=TIMEOUT, stream=True, proxies={"http": None, "https": None},
               headers={"User-Agent": "Mozilla/5.0"}) as r:
