@@ -1093,8 +1093,8 @@ class MainWindow(QWidget):
         self._net = net
         # read the file, not self.settings: update_ipset saves the time from a worker thread, and the window's
         # copy kept the old one, so the "weekly" download ran every hour
-        if (not self.busy and now - tester.load_settings().get("ipset_updated", 0) > 7 * 86400
-                and now - getattr(self, "_ipset_try", 0) > 3600):
+        if (not self.busy and now - getattr(self, "_ipset_try", 0) > 3600
+                and now - tester.load_settings().get("ipset_updated", 0) > 7 * 86400):
             self._ipset_try = now  # weekly; retry hourly on failure
             from app import lists
             self.log("еженедельное обновление ipset…")
@@ -1780,6 +1780,8 @@ class MainWindow(QWidget):
 
     def quit(self):
         self._cancel = True  # let a running pick stop at its next step
+        if self.runner.running:
+            stats.record("stop")  # else the next start's uptime counted the time the PC was off
         self.runner.stop()
         self.stop_watcher()
         self.tray.hide()

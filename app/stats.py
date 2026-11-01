@@ -14,24 +14,35 @@ def _file():
     return paths.DATA / "stats.json"
 
 
-def _load() -> list:
+def _load(strict: bool = False) -> list:
     try:
-        d = json.loads(_file().read_text(encoding="utf-8"))
+        text = _file().read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except OSError:
+        if strict:
+            raise
+        return []
+    try:
+        d = json.loads(text)
         return d if isinstance(d, list) else []
-    except (OSError, ValueError):
+    except ValueError:
         return []
 
 
 def record(kind: str, **data) -> None:
     """kind: check (ok: bool) | repick (reason) | crash | start | stop | ipset | switch (to)."""
-    with _lock:
-        ev = [e for e in _load() if e.get("t", 0) > time.time() - KEEP]
-        ev.append({"t": time.time(), "k": kind, **data})
-        f = _file()
-        f.parent.mkdir(parents=True, exist_ok=True)
-        tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps(ev), encoding="utf-8")
-        os.replace(tmp, f)
+    with _lock:  # history is a nice-to-have: a locked file must neither wipe it nor break the caller (crash restart)
+        try:
+            ev = [e for e in _load(strict=True) if e.get("t", 0) > time.time() - KEEP]
+            ev.append({"t": time.time(), "k": kind, **data})
+            f = _file()
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_suffix(".tmp")
+            tmp.write_text(json.dumps(ev), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError:
+            pass
 
 
 def summary(days: int = 7) -> dict:
@@ -40,13 +51,17 @@ def summary(days: int = 7) -> dict:
     checks = [e for e in ev if e["k"] == "check"]
     ok = sum(1 for e in checks if e.get("ok"))
     # bypass uptime: sum of start->stop intervals (open interval counts until now)
-    up, started = 0.0, None
+    up, started, last = 0.0, None, 0.0
     for e in sorted(ev, key=lambda e: e["t"]):
-        if e["k"] == "start" and started is None:
+        if e["k"] == "start" and started is not None:  # no "stop" (killed, power cut): ended by the last event
+            up += max(0.0, last - started)
+            started = e["t"]
+        elif e["k"] == "start":
             started = e["t"]
         elif e["k"] in ("stop", "crash") and started is not None:
             up += e["t"] - started
             started = None
+        last = e["t"]
     if started is not None:
         up += time.time() - started
     repicks = [e for e in ev if e["k"] == "repick"]
