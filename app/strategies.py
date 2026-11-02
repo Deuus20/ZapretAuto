@@ -92,6 +92,8 @@ class Strategy:
                 # games' own web/login servers (CloudFront, Cloudflare...) sit inside ipset-all's huge ranges;
                 # desyncing them hung Wardogs at "logging in" — gamewatch collects them here
                 args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-games.txt'}")
+                if any(a.startswith("--filter-tcp") for a in args):  # Steam's client link shares SDR games' nets
+                    args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-steam.txt'}")
             out += args
         if auto_src:
             # winws adds domains whose connections fail (RST / retransmits) and desyncs them from then on. Its own

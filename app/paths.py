@@ -51,6 +51,13 @@ USER_LISTS = {
 }
 
 
+# Valve's Steam Datagram Relay nets (AS32590): gamewatch adds them to ipset-games for SDR games (UDP). Steam's own
+# client link (CM servers, TCP 27017-27050/443) lives in the same nets: excluded from TCP profiles, desync broke it
+# (Shift+Tab overlay and friends would not open with the bypass on).
+VALVE_NETS = ("103.10.124.0/23", "103.28.54.0/23", "146.66.152.0/21", "155.133.224.0/19", "162.254.192.0/21",
+              "185.25.180.0/22", "205.196.6.0/24")
+
+
 def sync_lists() -> None:
     """Copy upstream lists into data/lists, keeping user-owned files."""
     LISTS.mkdir(parents=True, exist_ok=True)
@@ -63,6 +70,10 @@ def sync_lists() -> None:
         p = LISTS / name
         if not p.exists():
             p.write_text(default, encoding="utf-8")
+    steam = LISTS / "ipset-exclude-steam.txt"
+    text = "\n".join(VALVE_NETS) + "\n"
+    if not steam.exists() or steam.read_text(encoding="utf-8") != text:
+        steam.write_text(text, encoding="utf-8")
 
 
 def write_list(p: Path, text: str) -> None:
