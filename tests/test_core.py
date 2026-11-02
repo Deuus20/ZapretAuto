@@ -31,6 +31,28 @@ def test_game_and_vpn_lists_are_wired():
     assert sum("ipset-exclude-games.txt" in a for a in argv) == sum("ipset-all" in p.group for p in s.profiles)
 
 
+def test_steam_client_not_desynced(tmp_path, monkeypatch):
+    """SDR games put Valve's nets into ipset-games; Steam's own TCP link (CM 155.133.x:27019) sits there too and
+    desync broke it (Shift+Tab overlay, friends). Valve nets leave every TCP ipset profile, UDP keeps them."""
+    for s in strategies.load_all():
+        argv = s.argv(game_tcp=True, game_udp=True)
+        chunks, cur = [], []
+        for a in argv[1:]:
+            if a == "--new":
+                chunks.append(cur)
+                cur = []
+            else:
+                cur.append(a)
+        chunks.append(cur)
+        for c in chunks:
+            if any("ipset-games.txt" in a for a in c):
+                tcp = any(a.startswith("--filter-tcp") for a in c)
+                assert any("ipset-exclude-steam.txt" in a for a in c) == tcp, (s.name, c[:3])
+    monkeypatch.setattr(paths, "LISTS", tmp_path)
+    paths.sync_lists()
+    assert "155.133.224.0/19" in (tmp_path / "ipset-exclude-steam.txt").read_text().split()
+
+
 def test_mix_replaces_only_matching_group():
     by = {s.name: s for s in strategies.load_all()}
     base, other = by["ALT12"], by["FAKE TLS AUTO ALT"]

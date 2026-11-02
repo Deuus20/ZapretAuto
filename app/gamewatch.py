@@ -74,8 +74,7 @@ IP_TTL = 7 * 86400       # s; a server the game has not talked to for a week lea
 # Valve's Steam Datagram Relay networks (AS32590). SDR games (Wardogs, Deadlock, CS2, Dota 2) ping many relays
 # whose addresses rotate: learned one by one, a new relay went without the bypass until a few relaunches had
 # collected it. The whole nets go in once a game is seen using them.
-VALVE_SDR_NETS = ("103.10.124.0/23", "103.28.54.0/23", "146.66.152.0/21", "155.133.224.0/19", "162.254.192.0/21",
-                  "185.25.180.0/22", "205.196.6.0/24")
+VALVE_SDR_NETS = paths.VALVE_NETS
 # CDN fronts (Cloudflare, Fastly) are web/login servers, never game servers, and desync breaks them: Wardogs'
 # login (Cloudflare) learned on a non-443 port hung the login until the list was cleared. Never learned.
 CDN_NETS = ("103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "104.16.0.0/13", "104.24.0.0/14",
