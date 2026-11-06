@@ -2,8 +2,8 @@
 
 # ZapretAuto
 
-[![tests](https://github.com/yuav2/ZapretAuto/actions/workflows/tests.yml/badge.svg)](https://github.com/yuav2/ZapretAuto/actions/workflows/tests.yml)
-[![release](https://img.shields.io/github/v/release/yuav2/ZapretAuto)](https://github.com/yuav2/ZapretAuto/releases/latest)
+[![tests](https://github.com/Deuus20/ZapretAuto/actions/workflows/tests.yml/badge.svg)](https://github.com/Deuus20/ZapretAuto/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/Deuus20/ZapretAuto)](https://github.com/Deuus20/ZapretAuto/releases/latest)
 
 Программа, которая сама включает и чинит обход блокировок Discord, YouTube и онлайн-игр. Внутри — движок
 [zapret](https://github.com/bol-van/zapret) (winws + WinDivert) и стратегии
@@ -22,7 +22,7 @@ Windows 10/11 x64, нужны права администратора (драй�
 Коротко (подробно, с картинками — [docs/install.md](docs/install.md)):
 
 0. Удалите другие программы обхода (GoodbyeDPI, другой zapret) — они конфликтуют.
-1. Скачайте `ZapretAuto-Setup.exe` со страницы [Releases](https://github.com/yuav2/ZapretAuto/releases/latest).
+1. Скачайте `ZapretAuto-Setup.exe` со страницы [Releases](https://github.com/Deuus20/ZapretAuto/releases/latest).
 2. Запустите. Если Windows покажет «Windows защитила ваш компьютер» — «Подробнее» → «Выполнить в любом случае»
    (установщик пока не подписан). Галочка «Добавить папку в исключения Защитника» — рекомендуется.
 3. При первом запуске нажмите «Начать»: подбор стратегии займёт 2–4 минуты. Если для вашего провайдера
@@ -103,7 +103,7 @@ winws.exe и драйвер WinDivert перехватывают сетевые 
 **Telegram.** Обход zapret помогает Telegram не у всех провайдеров. Надёжнее пустить Telegram через VPN.
 
 **Что-то сломалось.** Диагностика → «Отправить отчёт разработчику» — откроется готовый
-[issue](https://github.com/yuav2/ZapretAuto/issues), нажмите «Create».
+[issue](https://github.com/Deuus20/ZapretAuto/issues), нажмите «Create».
 
 ## Для разработчиков
 
@@ -140,4 +140,4 @@ blocking. It wraps [zapret](https://github.com/bol-van/zapret) (winws + WinDiver
   self-tested by GitHub Actions.
 - **Shared ISP database**: proven picks per ASN, crowd-sourced through issues and merged by a GitHub Action.
 
-The UI is Russian. Install: download `ZapretAuto-Setup.exe` from [Releases](https://github.com/yuav2/ZapretAuto/releases/latest).
+The UI is Russian. Install: download `ZapretAuto-Setup.exe` from [Releases](https://github.com/Deuus20/ZapretAuto/releases/latest).

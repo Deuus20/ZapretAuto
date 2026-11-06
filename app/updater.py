@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import requests
 from . import paths
 REPO = "Flowseal/zapret-discord-youtube"
-APP_REPO = "yuav2/ZapretAuto"  # our releases with ZapretAuto-Setup.exe
+APP_REPO = "Deuus20/ZapretAuto"  # our releases with ZapretAuto-Setup.exe
 # Mirror on Codeberg (Forgejo): used when GitHub fails (GitHub hid yuav2 as spam on 2026-10-20: 404 for all).
 MIRROR = "https://codeberg.org"
 MIRROR_REPO = "yuav2/ZapretAuto"

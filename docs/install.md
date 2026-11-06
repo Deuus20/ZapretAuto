@@ -22,7 +22,7 @@ ZapretAuto не уживается с другими программами то
 
 ## 2. Скачайте установщик
 
-1. Откройте страницу [последнего релиза](https://github.com/yuav2/ZapretAuto/releases/latest).
+1. Откройте страницу [последнего релиза](https://github.com/Deuus20/ZapretAuto/releases/latest).
 2. В разделе **Assets** скачайте `ZapretAuto-Setup.exe`.
    Файл `ZapretAuto-Setup.exe.sha256` скачивать не нужно — он для автообновления.
 
