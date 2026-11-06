@@ -4,22 +4,14 @@ import json
 import os
 import threading
 import time
-
 from . import paths
-
 _lock = threading.RLock()
 _cache: tuple[float, dict] | None = None
-
-
 # a fresh install (no settings.json yet) starts with these: games are watched and their traffic goes through
 # the bypass, the app comes up with Windows, full settings are shown. main.py calls first_run() at start.
 FIRST_RUN = {"game_watch": True, "game_tcp": True, "game_udp": True, "autostart": True, "show_advanced": True}
-
-
 def _file():
     return paths.DATA / "settings.json"
-
-
 def load_settings(strict: bool = False) -> dict:
     """strict: raise OSError when the file exists but can't be read (a save must not write over it)."""
     global _cache
@@ -49,8 +41,6 @@ def load_settings(strict: bool = False) -> dict:
             return {}
         _cache = (m, d)
         return copy.deepcopy(d)
-
-
 def save_settings(**kw) -> None:
     global _cache
     with _lock:
@@ -71,8 +61,6 @@ def save_settings(**kw) -> None:
             os.fsync(f.fileno())  # a power cut right after the rename must not leave an empty file
         os.replace(tmp, p)
         _cache = None
-
-
 def first_run() -> bool:
     """Write FIRST_RUN if there are no settings yet (fresh install). True if it did."""
     with _lock:

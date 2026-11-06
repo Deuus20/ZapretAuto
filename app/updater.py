@@ -7,39 +7,28 @@ import threading
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
-
 import requests
-
 from . import paths
-
 REPO = "Flowseal/zapret-discord-youtube"
 APP_REPO = "yuav2/ZapretAuto"  # our releases with ZapretAuto-Setup.exe
 # Mirror on Codeberg (Forgejo): used when GitHub fails (GitHub hid yuav2 as spam on 2026-10-20: 404 for all).
 MIRROR = "https://codeberg.org"
 MIRROR_REPO = "yuav2/ZapretAuto"
-
-
 def app_raw_urls(name: str) -> list[str]:
     """Where a file from our repo's main branch can be read: GitHub first, then the Codeberg mirror."""
     return [f"https://raw.githubusercontent.com/{APP_REPO}/main/{name}",
             f"{MIRROR}/{MIRROR_REPO}/raw/branch/main/{name}"]
-
-
 def current_version(vendor: Path = paths.VENDOR) -> str:
     try:
         return (vendor / "VERSION").read_text(encoding="utf-8").strip() or "0"
     except OSError:
         return "0"
-
-
 def _stage(prefix: str) -> Path:
     """A fresh dir for downloads under data/ (admin-only when installed): %TEMP% is writable by any process of
     this user, which could swap a checked file before the elevated app runs or installs it."""
     base = paths.DATA / "tmp"
     base.mkdir(parents=True, exist_ok=True)
     return Path(tempfile.mkdtemp(prefix=prefix, dir=base))
-
-
 def _sha256(f: Path) -> str:
     import hashlib
     h = hashlib.sha256()
@@ -47,8 +36,6 @@ def _sha256(f: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
 def latest_release() -> tuple[str, str, str | None]:
     """(tag, zip url, sha256 from GitHub's asset digest or None)."""
     r = requests.get(
@@ -63,8 +50,6 @@ def latest_release() -> tuple[str, str, str | None]:
             dig = a.get("digest") or ""
             return j["tag_name"], a["browser_download_url"], dig[7:].lower() if dig.startswith("sha256:") else None
     raise RuntimeError("no .zip asset in latest release")
-
-
 def _key(v: str):
     v = v.strip().lstrip("vV")
     m = re.match(r"^(\d+(?:\.\d+)*)(.*)$", v)
@@ -74,32 +59,22 @@ def _key(v: str):
     while len(nums) > 1 and nums[-1] == 0:
         nums = nums[:-1]
     return (nums, m.group(2).strip().lower())
-
-
 def is_newer(a: str, b: str) -> bool:
     """True if version a is newer than b."""
     return _key(a) > _key(b)
-
-
 def _find_root(base: Path) -> Path | None:
     for exe in base.rglob("winws.exe"):
         if exe.parent.name.lower() == "bin":
             return exe.parent.parent
     return None
-
-
 MAX_DOWNLOAD = 200 * 1024 * 1024
 TAG_RE = re.compile(r"^v?\d+(\.\d+)*[a-z]?$", re.I)
 ALLOWED_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com",
                  "githubusercontent.com", "codeberg.org")
-
-
 def _check_url(url: str) -> None:
     host = urlparse(url).hostname or ""
     if urlparse(url).scheme != "https" or not any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS):
         raise RuntimeError(f"unexpected download host: {host}")
-
-
 def _download(url: str, dest: Path, log=print) -> None:
     """Download to dest.part with size cap and Content-Length check, then rename."""
     _check_url(url)
@@ -119,8 +94,6 @@ def _download(url: str, dest: Path, log=print) -> None:
         part.unlink(missing_ok=True)
         raise RuntimeError(f"incomplete download ({got} of {expected} bytes)")
     os.replace(part, dest)
-
-
 def _safe_extract(z: zipfile.ZipFile, dest: Path) -> None:
     total = 0
     root = dest.resolve()
@@ -132,8 +105,6 @@ def _safe_extract(z: zipfile.ZipFile, dest: Path) -> None:
         if root not in target.parents and target != root:
             raise RuntimeError(f"unsafe path in archive: {m.filename}")
     z.extractall(dest)
-
-
 def recover_vendor(vendor: Path = paths.VENDOR) -> None:
     """Undo an update interrupted between renaming the old vendor dir and moving the new one in."""
     old = vendor.with_name(vendor.name + ".old")
@@ -141,8 +112,6 @@ def recover_vendor(vendor: Path = paths.VENDOR) -> None:
         if vendor.exists():
             shutil.rmtree(vendor, ignore_errors=True)
         old.rename(vendor)
-
-
 def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=False) -> bool:
     tag, url, digest = latest_release()
     if not TAG_RE.match(tag):
@@ -192,8 +161,6 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
         shutil.rmtree(td, ignore_errors=True)
     log(f"zapret обновлён до {tag}")
     return True
-
-
 def app_release() -> tuple[str, str, str | None]:
     """(tag, download url, .sha256 url or None) of the latest ZapretAuto release: the installer, or the zip for a
     portable copy (it must not install itself into Program Files)."""
@@ -213,8 +180,6 @@ def app_release() -> tuple[str, str, str | None]:
         raise RuntimeError(f"no {kind} asset in latest app release")
     sha = next((u for n, u in assets.items() if n.endswith(kind + ".sha256")), None)
     return j["tag_name"], url, sha
-
-
 def app_update(log=print) -> bool:
     """Download the new version, verify it and install it; the app restarts. Caller quits after."""
     import subprocess
@@ -255,8 +220,6 @@ def app_update(log=print) -> bool:
     subprocess.Popen([str(f), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/UPDATE=1"],
                      creationflags=0x00000008)  # DETACHED_PROCESS
     return True
-
-
 def portable_swap_command(new: Path, root: Path, tmp: Path) -> list[str]:
     """Wait until this app has quit, copy the new files over the portable folder (data/ and vendor/ stay: zapret
     updates itself), then start it again in the tray."""
@@ -267,11 +230,7 @@ def portable_swap_command(new: Path, root: Path, tmp: Path) -> list[str]:
               f"Start-Process -FilePath {q(root / 'ZapretAuto.exe')} -ArgumentList '--tray'; "
               f"Remove-Item -Recurse -Force {q(tmp)} -ErrorAction SilentlyContinue")
     return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", script]
-
-
 APP_CHECK_ERROR = ""  # why the last app check failed, in words for the Updates section
-
-
 def app_check_async(callback) -> None:
     """callback(tag|None, newer) for the app itself; on failure APP_CHECK_ERROR says why."""
     def work():
@@ -289,10 +248,7 @@ def app_check_async(callback) -> None:
         except Exception:
             APP_CHECK_ERROR = "нет связи с GitHub"
             callback(None, False)
-
     threading.Thread(target=work, daemon=True).start()
-
-
 def check_async(callback) -> None:
     def work():
         try:
@@ -300,5 +256,4 @@ def check_async(callback) -> None:
             callback(tag, is_newer(tag, current_version()))
         except Exception:
             callback(None, False)
-
     threading.Thread(target=work, daemon=True).start()

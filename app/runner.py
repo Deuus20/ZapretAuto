@@ -6,32 +6,23 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
-
 import psutil
-
 from . import paths, vpn
 from .strategies import Strategy
-
+import contextlib
 EXES = ("winws.exe", "winws2.exe")  # winws2: experimental zapret2 mode
-
 CREATE_NO_WINDOW = 0x08000000
 ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000  # every captured game packet waits for winws: don't queue it behind the game
-
-
 def is_admin() -> bool:
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except OSError:
         return False
-
-
 def _stray_winws() -> bool:
     try:
         return any((p.info["name"] or "").lower() in EXES for p in psutil.process_iter(["name"]))
     except psutil.Error:
         return True
-
-
 class Runner:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
@@ -40,12 +31,10 @@ class Runner:
         self._lock = threading.RLock()
         self.vpn_ips: set[str] = set()  # VPN servers left out of the capture filter at start
         self.unwatched: dict[Path, list[str] | None] = {}  # list files winws doesn't reload (slim())
-
     @property
     def running(self) -> bool:
         p = self.proc
         return p is not None and p.poll() is None
-
     def start(self, s: Strategy, game_tcp: bool = False, game_udp: bool = False,
               auto_hostlist: bool = False, skip: set[str] = frozenset()) -> None:
         """skip: servers of games switched off by hand, left out of the capture like VPN servers."""
@@ -67,7 +56,6 @@ class Runner:
                 stdout=self._out, stderr=subprocess.STDOUT,
             )
             self.current = s
-
     def stop(self) -> None:
         with self._lock:
             p = self.proc
@@ -79,30 +67,22 @@ class Runner:
                     p.kill()
             if _stray_winws():  # instances started by upstream .bat files or a previous run
                 for exe in EXES:
-                    try:
+                    with contextlib.suppress(subprocess.TimeoutExpired):
                         subprocess.run(["taskkill", "/F", "/IM", exe], capture_output=True,
                                        creationflags=CREATE_NO_WINDOW, timeout=10)
-                    except subprocess.TimeoutExpired:
-                        pass
             self.proc = self.current = None
             if getattr(self, "_out", None):
                 self._out.close()
                 self._out = None
-
-
 PLACEHOLDERS = {"203.0.113.113/32", "domain.example.abc"}  # paths.USER_LISTS fillers: winws refuses empty lists
 INLINE_MAX = 200  # entries: an exclude list this small goes on the command line instead of a file
 LIVE = ("ipset-all.txt", "ipset-games.txt", "list-auto.txt")  # big or rewritten on the fly: stay files
-
-
 def _entries(f: Path) -> list[str] | None:
     try:
         lines = f.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
         return None
     return [e for e in (ln.split("#")[0].strip() for ln in lines) if e]
-
-
 def slim(argv: list[str]) -> tuple[list[str], dict[Path, list[str] | None]]:
     """Fewer list files for winws. For every NEW connection winws (a Cygwin build) checks each list file of each
     profile for changes: 56 references cost ~3 ms per new flow, so a torrent client opening dozens of connections
@@ -112,7 +92,6 @@ def slim(argv: list[str]) -> tuple[list[str], dict[Path, list[str] | None]]:
     if Path(argv[0]).name.lower() != "winws.exe":
         return argv, {}
     out, snap, prof = [], {}, []
-
     def flush():
         for a in prof:
             opt, _, val = a.partition("=")
@@ -138,7 +117,6 @@ def slim(argv: list[str]) -> tuple[list[str], dict[Path, list[str] | None]]:
                 continue
             snap[f] = items
         prof.clear()
-
     out.append(argv[0])
     for a in argv[1:]:
         if a == "--new":
@@ -148,13 +126,9 @@ def slim(argv: list[str]) -> tuple[list[str], dict[Path, list[str] | None]]:
             prof.append(a)
     flush()
     return out, snap
-
-
 def stale(snap: dict[Path, list[str] | None]) -> bool:
     """A list file slim() took off winws changed since the start."""
     return any(_entries(f) != items for f, items in snap.items())
-
-
 def uncapture(argv: list[str], ips: list[str] | set[str]) -> list[str]:
     """Leave VPN servers (and switched-off games) out of the WinDivert filter itself. The game ports (UDP 1024-65535) also matched a VPN's
     own tunnel (WireGuard/AmneziaWG), so every VPN packet went through winws in user mode: ~18% of a core and ping
@@ -176,21 +150,15 @@ def uncapture(argv: list[str], ips: list[str] | set[str]) -> list[str]:
     import ipaddress
     good = []
     for i in ips:  # one CIDR/IPv6 entry made the whole filter fail to compile: the exclusions were lost
-        try:
+        with contextlib.suppress(ValueError):
             good.append(str(ipaddress.IPv4Address(i)))
-        except ValueError:
-            pass
     vpn_ = " and ".join(f"ip.SrcAddr != {i} and ip.DstAddr != {i}" for i in good[:64])
     text = f"({base})\nand (ipv6 or ({vpn_}))\n"
     if not base or not compiles(text):  # a filter WinDivert rejects would leave the bypass down
         return argv
     f.write_text(text, encoding="utf-8")
     return [a for a in argv if not a.startswith(("--wf-tcp=", "--wf-udp=", "--wf-raw-part="))] + [f"--wf-raw=@{f}"]
-
-
 _dll_lock = threading.Lock()
-
-
 def windivert_dll(**kw):
     """Load WinDivert from a content-named copy in DATA, never from vendor/bin: a DLL loaded into
     our process can't be unloaded safely and would block the zapret updater renaming vendor/."""
@@ -212,8 +180,6 @@ def windivert_dll(**kw):
                 if old != d:
                     shutil.rmtree(old, ignore_errors=True)
     return ctypes.WinDLL(str(dll), **kw)
-
-
 def compiles(flt: str) -> bool:
     try:
         f = windivert_dll().WinDivertHelperCompileFilter
@@ -221,21 +187,15 @@ def compiles(flt: str) -> bool:
         return bool(f(flt.encode(), 0, None, 0, None, None))  # layer 0: NETWORK, as winws opens it
     except (OSError, AttributeError):
         return False
-
-
 def output_file() -> Path:
     """What winws printed in its last run (errors such as a WinDivert driver that won't load)."""
     return paths.DATA / "logs" / "winws.log"
-
-
 def last_output(lines: int = 20) -> str:
     try:
         text = output_file().read_bytes().decode("utf-8", errors="replace")
     except OSError:
         return ""
     return "\n".join(text.splitlines()[-lines:])
-
-
 def explain(output: str) -> str | None:
     """A human cause from winws' own words, or None."""
     import re

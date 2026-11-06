@@ -7,14 +7,9 @@ Only the ASN and ISP name are shared, never the IP address.
 import json
 import re
 from urllib.parse import quote
-
 import requests
-
 from .updater import APP_REPO, app_raw_urls
-
 DB_FILE = "strategies-db.json"
-
-
 def _get_json(name: str):
     """A JSON file from our repo: GitHub, else the Codeberg mirror. Raises if neither answers."""
     err: Exception = ValueError("no source")
@@ -26,8 +21,6 @@ def _get_json(name: str):
         except (requests.RequestException, ValueError) as e:
             err = e
     raise err
-
-
 def isp() -> tuple[str, str] | None:
     """(ASN like 'AS25513', ISP name) of the current connection."""
     try:
@@ -36,29 +29,22 @@ def isp() -> tuple[str, str] | None:
         return None
     m = re.match(r"(AS\d+)\s*(.*)", org)
     return (m.group(1), m.group(2).strip()) if m else None
-
-
-def suggestion(asn: str, zapret_version: str) -> dict | None:
-    """Best known choice {"base", "picks"} for this ISP and zapret version, if any."""
+def _entry(asn: str, zapret_version: str) -> dict | None:
+    """Entry for this ISP and zapret version ({} if none); None when the base is unreachable."""
     try:
-        db = _get_json(DB_FILE)
+        return _get_json(DB_FILE).get(asn, {}).get(zapret_version) or {}
     except (requests.RequestException, ValueError):
         return None
-    e = db.get(asn, {}).get(zapret_version)
-    return e.get("choice") if e else None
-
-
+def suggestion(asn: str, zapret_version: str) -> dict | None:
+    """Best known choice {"base", "picks"} for this ISP and zapret version, if any."""
+    return (_entry(asn, zapret_version) or {}).get("choice")
 def isp_entry(asn: str, zapret_version: str) -> dict | None:
     """What other users of this ISP reported for this zapret version: {"votes", "reports", "choice"};
     None when the base is unreachable."""
-    try:
-        db = _get_json(DB_FILE)
-    except (requests.RequestException, ValueError):
+    e = _entry(asn, zapret_version)
+    if e is None:
         return None
-    e = db.get(asn, {}).get(zapret_version) or {}
     return {"votes": e.get("votes", 0), "reports": len(e.get("reports", [])), "choice": e.get("choice")}
-
-
 def report_url(asn: str, name: str, zapret_version: str, app_version: str, choice: dict,
                score: int, total: int) -> str:
     body = {"asn": asn, "isp": name, "zapret": zapret_version, "app": app_version,
@@ -67,12 +53,8 @@ def report_url(asn: str, name: str, zapret_version: str, app_version: str, choic
             + json.dumps(body, ensure_ascii=False, indent=1) + "\n```\n")
     title = f"[report] {asn} {name}"[:120]
     return f"https://github.com/{APP_REPO}/issues/new?title={quote(title)}&body={quote(text)}"
-
-
 GAMES_FILE = "games-db.json"
 MAX_URL = 7500  # GitHub drops prefilled issue text beyond ~8 KB of URL
-
-
 def games_db() -> dict | None:
     """Crowd-sourced game servers {"games": {exe: [ip]}, "web": [net]}: each address sent by 2+ people."""
     try:
@@ -80,8 +62,6 @@ def games_db() -> dict | None:
     except (requests.RequestException, ValueError):
         return None
     return db if isinstance(db, dict) else None
-
-
 def games_report_url(app_version: str, games: dict[str, list[str]], web: list[str]) -> str:
     """Prefilled issue with learned game servers; big lists are trimmed to fit the URL."""
     games = {k: sorted(v) for k, v in games.items() if v}

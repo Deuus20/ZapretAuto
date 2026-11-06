@@ -4,15 +4,11 @@ import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
-
 from . import paths
-
 GAME_OFF = "12"  # upstream uses a dummy port when the game filter is disabled
 GAME_TCP = "1024-1934,1936-65535"  # game filter TCP minus RTMP (1935): desyncing it broke OBS streams (Flowseal 1.10.3)
 GAME_UDP = "1024-65535"
 _PORTS = re.compile(r"^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$")
-
-
 def valid_ports(s: str) -> bool:
     """'1024-1934,1936-65535': ports 1..65535, ranges low-high, comma-separated (WinDivert/winws syntax)."""
     s = (s or "").replace(" ", "")
@@ -24,24 +20,18 @@ def valid_ports(s: str) -> bool:
         if not (1 <= lo <= hi <= 65535):
             return False
     return True
-
-
 def game_ports() -> tuple[str, str]:
     """(TCP, UDP) ports of the game filter: the user's choice (settings game_ports_tcp/udp) or the defaults."""
     from .settings import load_settings
     st = load_settings()
     t, u = (st.get("game_ports_tcp") or "").replace(" ", ""), (st.get("game_ports_udp") or "").replace(" ", "")
     return (t if valid_ports(t) else GAME_TCP), (u if valid_ports(u) else GAME_UDP)
-
-
 @dataclass
 class Profile:
     args: list[str]
-
     def opt(self, name: str) -> list[str]:
         p = f"--{name}="
         return [a[len(p):] for a in self.args if a.startswith(p)]
-
     @property
     def group(self) -> str:
         """Target group key; profiles with equal keys are interchangeable when mixing."""
@@ -53,15 +43,12 @@ class Profile:
         lists = [l for l in lists if not l.endswith("-user")]
         extra = self.opt("filter-l7") + self.opt("hostlist-domains")
         return ":".join([proto, ports, "+".join(lists + extra) or "any"])
-
-
 @dataclass
 class Strategy:
     name: str
     wf_tcp: str
     wf_udp: str
     profiles: list[Profile] = field(default_factory=list)
-
     def argv(self, game_tcp: bool = False, game_udp: bool = False, auto_hostlist: bool = False) -> list[str]:
         gt, gu = game_ports()
         subs = {
@@ -70,12 +57,10 @@ class Strategy:
             "%GameFilterTCP%": gt if game_tcp else GAME_OFF,
             "%GameFilterUDP%": gu if game_udp else GAME_OFF,
         }
-
         def sub(s: str) -> str:
             for k, v in subs.items():
                 s = s.replace(k, v)
             return s
-
         out = [str(paths.BIN / "winws.exe"), f"--wf-tcp={sub(self.wf_tcp)}", f"--wf-udp={sub(self.wf_udp)}"]
         auto_src = None
         for i, p in enumerate(self.profiles):
@@ -106,8 +91,6 @@ class Strategy:
         if left:
             raise ValueError(f"{self.name}: unknown variables {left}")
         return out
-
-
 def parse_bat(path: Path) -> Strategy:
     text = path.read_text(encoding="utf-8", errors="replace")
     text = re.sub(r"\^\s*\r?\n", " ", text)
@@ -131,8 +114,6 @@ def parse_bat(path: Path) -> Strategy:
         profiles.append(Profile(cur))
     name = re.sub(r"^general\s*\(?|\)?$", "", path.stem) or "default"
     return Strategy(name, wf_tcp, wf_udp, profiles)
-
-
 def load_all(log=None) -> list[Strategy]:
     """All parseable strategies; a broken .bat (upstream format change) is skipped, not fatal."""
     out = []
@@ -154,12 +135,8 @@ def load_all(log=None) -> list[Strategy]:
         _skipped_all.append(1)
         logging.getLogger("zapretauto").error("ни одна стратегия zapret не распознана — формат general*.bat изменился?")
     return out
-
-
 _skipped: set[str] = set()
 _skipped_all: list[int] = []
-
-
 def mix(name: str, picks: dict[str, Strategy], base: Strategy) -> Strategy:
     """Build a strategy from `base`, replacing each group's profile with the one from picks[group]."""
     profiles = []

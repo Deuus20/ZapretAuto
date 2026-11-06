@@ -10,14 +10,10 @@ import time
 import traceback
 import zipfile
 from pathlib import Path
-
 from . import paths
-
 LOG_DIR = paths.DATA / "logs"
 log = logging.getLogger("zapretauto")
 _on_crash = None  # callable(str) set by the GUI to show a message
-
-
 def setup() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     h = logging.handlers.RotatingFileHandler(LOG_DIR / "zapretauto.log", maxBytes=1_000_000, backupCount=3,
@@ -29,8 +25,6 @@ def setup() -> None:
     threading.excepthook = lambda a: _excepthook(a.exc_type, a.exc_value, a.exc_traceback)
     from . import __version__
     log.info("start ZapretAuto %s, Windows %s", __version__, platform.version())
-
-
 def _excepthook(t, v, tb) -> None:
     text = "".join(traceback.format_exception(t, v, tb))
     log.error("unhandled exception:\n%s", text)
@@ -39,18 +33,12 @@ def _excepthook(t, v, tb) -> None:
             _on_crash(f"{t.__name__}: {v}")
         except Exception:  # noqa: BLE001
             pass
-
-
 def _redact(text: str) -> str:
     """Hide the Windows user name."""
-    text = re.sub(r"(?i)(c:[\\/]+users[\\/]+)[^\\/\"']+", r"\1<user>", text)
-    return text
-
-
+    return re.sub(r"(?i)(c:[\\/]+users[\\/]+)[^\\/\"']+", r"\1<user>", text)
 def _redact_public(text: str) -> str:
     """For a public GitHub issue: also hide every non-local IPv4 (VPN servers, the user's own address)."""
     import ipaddress
-
     def ip(m):
         try:
             a = ipaddress.IPv4Address(m.group(0))
@@ -58,11 +46,7 @@ def _redact_public(text: str) -> str:
             return m.group(0)
         return m.group(0) if a.is_private or a.is_loopback else "<ip>"
     return re.sub(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", ip, _redact(text))
-
-
 ISSUE_URL_MAX = 7500  # GitHub drops prefilled issue text beyond ~8 KB of URL
-
-
 def issue_url(what: str = "", diag_results: list | None = None) -> str:
     """Prefilled GitHub issue: versions, the user's words, problems found by diagnostics and the log tail
     (as many last lines as fit). Opened in the browser; the user presses «Create»."""
@@ -88,8 +72,6 @@ def issue_url(what: str = "", diag_results: list | None = None) -> str:
         if len(url) <= ISSUE_URL_MAX or n == 0:
             return url
         n = max(0, n - 10)
-
-
 def make_report(dest: Path, diag_results: list | None = None) -> Path:
     """Zip logs, diagnostics, settings and test results (user name redacted) for a bug report."""
     from . import __version__, strategies, tester, updater

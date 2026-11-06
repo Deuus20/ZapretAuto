@@ -13,22 +13,17 @@ import os
 import re
 import sys
 from pathlib import Path
-
 DB = Path(__file__).resolve().parent.parent / "games-db.json"
 EXE = re.compile(r"^[a-z0-9][a-z0-9 ._()+-]{0,79}\.exe$")
 MIN_VOTES = 2
 MAX_GAMES, MAX_IPS, MAX_WEB = 20, 256, 512
 MAX_REPORTERS = 20
-
-
 def _public(ip: str) -> bool:
     try:
         a = ipaddress.IPv4Address(ip)
     except ValueError:
         return False
     return a.is_global and not a.is_multicast
-
-
 def parse(body: str) -> dict:
     m = re.search(r"```json\s*(\{.*?\})\s*```", body, re.S)
     if not m:
@@ -50,14 +45,10 @@ def parse(body: str) -> dict:
     if not out and not web:
         raise ValueError("empty report")
     return {"games": out, "web": sorted(set(web))}
-
-
 def _vote(table: dict, key: str, who: str) -> None:
     v = table.setdefault(key, [])
     if who not in v:
         table[key] = (v + [who])[-MAX_REPORTERS:]
-
-
 def merge(db: dict, rep: dict, reporter: str) -> dict:
     who = hashlib.sha256(reporter.lower().encode()).hexdigest()[:12]
     votes = db.setdefault("votes", {"games": {}, "web": {}})
@@ -71,8 +62,6 @@ def merge(db: dict, rep: dict, reporter: str) -> dict:
     db["games"] = {k: v[:MAX_IPS] for k, v in db["games"].items() if v}
     db["web"] = sorted(n for n, v in votes["web"].items() if len(v) >= MIN_VOTES)[:MAX_WEB]
     return db
-
-
 def main() -> int:
     try:
         rep = parse(os.environ.get("ISSUE_BODY", ""))
@@ -84,7 +73,5 @@ def main() -> int:
                   encoding="utf-8")
     print(f"merged {len(rep['games'])} games, {len(rep['web'])} nets")
     return 0
-
-
 if __name__ == "__main__":
     sys.exit(main())

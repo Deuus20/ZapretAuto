@@ -7,24 +7,18 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))  # offscreen has no fonts
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from app import paths, settings  # noqa: E402
-
 paths.DATA = Path(tempfile.mkdtemp(prefix="za_render_"))
 paths.LISTS = paths.DATA / "lists"
 settings._cache = None
 settings.save_settings(strategy={"base": "ALT8", "picks": {}}, show_advanced=True, game_watch=True,
                        ipset_updated=9e9)
-
 import json as _json  # noqa: E402
 import time as _time  # noqa: E402
-
 from app import paths as _paths  # noqa: E402
-
 _ev = []  # a sample week for the stability chart: calm days, one bad day, one with a re-pick
 for _d, (_ok, _bad, _crash, _repick) in enumerate([(140, 0, 0, 0), (130, 1, 0, 0), (0, 0, 0, 0), (120, 4, 1, 1),
                                                     (144, 0, 0, 0), (100, 2, 0, 0), (60, 0, 0, 0)]):
@@ -32,17 +26,13 @@ for _d, (_ok, _bad, _crash, _repick) in enumerate([(140, 0, 0, 0), (130, 1, 0, 0
     _ev += [{"t": _t, "k": "check", "ok": True}] * _ok + [{"t": _t, "k": "check", "ok": False}] * _bad
     _ev += [{"t": _t, "k": "crash"}] * _crash + [{"t": _t, "k": "repick"}] * _repick
 (_paths.DATA / "stats.json").write_text(_json.dumps(_ev), encoding="utf-8")
-
 from PySide6.QtWidgets import QApplication  # noqa: E402
-
 app = QApplication(sys.argv[:1])
 from PySide6.QtCore import QTranslator  # noqa: E402
-
 _tr = QTranslator(app)
 if _tr.load(str(Path(__file__).resolve().parent.parent / "assets" / "qtbase_ru.qm")):
     app.installTranslator(_tr)
 from app.gui.window import MainWindow  # noqa: E402
-
 out = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
 out.mkdir(parents=True, exist_ok=True)
 w = MainWindow()
@@ -60,16 +50,14 @@ for i in range(w.tabs.count()):
     w.grab().save(str(out / f"tab{i}.png"))
 w.tray.hide()
 print(out)
-
 # extra states: games with data, busy pick, an error line, a message box
 from app import gamewatch as _gw  # noqa: E402
-
 _gw.GameWatcher.start = lambda self: None
 w.start_watcher()
 w.watcher._games.update({
-    "wardogsclient-win64-shipping.exe": {"path": "x", "ips": set(f"9.9.9.{i}" for i in range(110)), "active": True,
+    "wardogsclient-win64-shipping.exe": {"path": "x", "ips": {f"9.9.9.{i}" for i in range(110)}, "active": True,
                                          "ping_ms": 38.0},
-    "deadlock.exe": {"path": "x", "ips": set(f"8.8.8.{i}" for i in range(56)), "active": False, "ping_ms": None}})
+    "deadlock.exe": {"path": "x", "ips": {f"8.8.8.{i}" for i in range(56)}, "active": False, "ping_ms": None}})
 w.tabs.setCurrentIndex(1)
 w.fill_games()
 w.table.selectRow(0)
@@ -88,7 +76,6 @@ w.refresh()
 app.processEvents()
 w.grab().save(str(out / "error.png"))
 from PySide6.QtWidgets import QMessageBox  # noqa: E402
-
 mb = QMessageBox(QMessageBox.Question, "ZapretAuto", "Готово! Запускать ZapretAuto вместе с Windows?",
                  QMessageBox.Yes | QMessageBox.No, w)
 mb.show()
@@ -127,7 +114,6 @@ app.processEvents()
 w.grab().save(str(out / "settings_bottom.png"))
 # light theme (Windows «light» apps mode)
 from app.gui import style as _st  # noqa: E402
-
 _st.windows_light = lambda: True
 w.apply_theme()
 w.runner.proc = type("P", (), {"poll": lambda self: None})()

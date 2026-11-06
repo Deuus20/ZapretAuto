@@ -1,7 +1,6 @@
 """Look of the app: Material 3 dark tokens, stylesheet, icon font and the drawn app icon."""
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
-
 # Material 3 dark scheme from a blue seed (primary tone 80, containers 30, surfaces 6–22), plus status roles
 C = {
     "surface": "#111318", "surface_low": "#191c20", "surface_cont": "#1d2024", "surface_high": "#272a2f",
@@ -26,8 +25,6 @@ LIGHT = {
     "error": "#ba1a1a", "error_container": "#ffdad6", "on_error_container": "#410002",
 }
 COLORS = {"on": "#22c55e", "off": "#9aa3b5", "busy": "#f59e0b"}  # tray/taskbar icon fills: small, need punch
-
-
 def windows_light() -> bool:
     """Windows «apps» theme: light (True) or dark."""
     import winreg
@@ -37,27 +34,20 @@ def windows_light() -> bool:
             return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 1
     except OSError:
         return False
-
-
 def set_theme(light: bool) -> bool:
     """Switch the tokens in place (widgets read C when they paint). True if it changed."""
     new = LIGHT if light else DARK
-    if C == new:
+    if new == C:
         return False
     C.clear()
     C.update(new)
     return True
-
 # Segoe Fluent Icons (Win11) and Segoe MDL2 Assets (Win10) share these code points
 ICONS = {"home": "", "games": "", "settings": "", "diag": "", "log": "",
          "lists": ""}
 ICON_FONT = "Segoe MDL2 Assets"
-
-
 def glyph(name: str) -> str:
     return ICONS.get(name, "")
-
-
 def init_fonts() -> None:
     """Pick the icon font once the QApplication exists."""
     global ICON_FONT
@@ -66,8 +56,6 @@ def init_fonts() -> None:
     ICON_FONT = next((f for f in ("Segoe Fluent Icons", "Segoe MDL2 Assets") if f in fams), ICON_FONT)
     from . import widgets
     widgets.ICON_FONT = ICON_FONT
-
-
 def app_icon(color: str = "#3b82f6") -> QIcon:
     """Shield with a power symbol; drawn at several sizes so tray and taskbar stay crisp."""
     from PySide6.QtGui import QPainterPath, QPen
@@ -96,20 +84,14 @@ def app_icon(color: str = "#3b82f6") -> QIcon:
         p.end()
         icon.addPixmap(pm)
     return icon
-
-
 def _rgba(color: str, a: float) -> str:
     c = QColor(color)
     return f"rgba({c.red()}, {c.green()}, {c.blue()}, {a})"
-
-
 def _mix(base: str, layer: str, t: float) -> str:
     """M3 state layer: `layer` at opacity t over `base`, as an opaque color."""
     b, l_ = QColor(base), QColor(layer)
     return QColor(round(b.red() + (l_.red() - b.red()) * t), round(b.green() + (l_.green() - b.green()) * t),
                   round(b.blue() + (l_.blue() - b.blue()) * t)).name()
-
-
 def build_style() -> str:
     """The app stylesheet from the current tokens C (rebuilt when the Windows theme changes)."""
     hover, press = _rgba(C["primary"], .08), _rgba(C["primary"], .12)

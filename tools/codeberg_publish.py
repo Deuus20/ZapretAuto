@@ -11,23 +11,16 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-
 import requests
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from app.updater import MIRROR, MIRROR_REPO  # noqa: E402
-
 ASSETS = ("ZapretAuto-Setup.exe", "ZapretAuto-Setup.exe.sha256",
           "ZapretAuto-portable.zip", "ZapretAuto-portable.zip.sha256")
-
-
 def notes(tag: str) -> str:
     text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     m = re.search(rf"^## {re.escape(tag.lstrip('v'))}\b.*?$\n(.*?)(?=^## |\Z)", text, re.M | re.S)
     return m.group(1).strip() if m else ""
-
-
 def main() -> None:
     tag = sys.argv[1]
     token = os.environ["CODEBERG_TOKEN"]
@@ -57,7 +50,5 @@ def main() -> None:
                           files={"attachment": (name, f)}, timeout=600).raise_for_status()
         print("загружен", name)
     print(f"готово: {MIRROR}/{MIRROR_REPO}/releases/tag/{tag}")
-
-
 if __name__ == "__main__":
     main()
