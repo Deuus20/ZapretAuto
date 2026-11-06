@@ -11,7 +11,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - `strategies.py`: parse .bat into profiles, substitute vars, build argv; mix = pick best profile per target group.
 - `runner.py`: start/stop winws.exe, single instance.
 - `tester.py`: run a strategy, probe targets (TLS/HTTP + ping, like utils/targets.txt), score it.
-- `updater.py`: GitHub releases/latest, replace vendor/, keep data/. App release + repo JSON fall back to the Codeberg mirror (MIRROR_REPO; publish with `tools/codeberg_publish.py <tag>`, env CODEBERG_TOKEN).
+- `updater.py`: GitHub releases/latest, replace vendor/, keep data/. App home: github.com/Deuus20/ZapretAuto (APP_REPO). App release + repo JSON fall back to the Codeberg mirror (MIRROR_REPO), frozen at 2.1.1: no longer published, by the user's decision.
 - `gamewatch.py`: psutil poll for new processes with remote endpoints; probe; add IPs to data ipset + game filter.
 - `settings.py`: settings.json with lock, atomic write, mtime cache (tester re-exports load/save).
 - `vpn.py`: VPN server IPs -> ipset-exclude-vpn.txt (all profiles), bind_ip() to test around full-tunnel VPN.
