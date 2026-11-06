@@ -1,5 +1,4 @@
 """Servers learned on a real PC, shipped so a known game works from its first launch on any PC."""
-
 # game servers (Valve SDR relays etc.): seeded into the game's entry when it is first detected
 GAME_IPS = {
     "wardogsclient-win64-shipping.exe": [
@@ -23,7 +22,6 @@ GAME_IPS = {
         "185.25.183.163", "185.25.183.179", "205.196.6.135", "205.196.6.149",
     ],
 }
-
 # /24s that games and launchers reach on 80/443 (login APIs on CloudFront/Cloudflare/AWS): never desynced
 WEB_NETS = {
     "3.164.68.0/24", "3.164.206.0/24", "3.164.230.0/24", "3.171.214.0/24",

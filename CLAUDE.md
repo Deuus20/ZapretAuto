@@ -27,6 +27,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 - Build: `powershell -File build.ps1` -> dist\ZapretAuto (onedir, uac-admin, vendor copied next to exe).
 
 ## Tools
+- `CODEMAP.md`: all modules, classes and functions. Read it first, instead of opening files to find code; regenerate with `python tools/codemap.py` when definitions change (a test checks it).
 - `python tools/make_icon.py`: regenerate assets/icon.ico from app_icon().
 - `python tools/shot.py <out.png> [maxW]`: screenshot (use maxW 1024 to save tokens), then Read the png.
 - `python tools/render.py <out_dir>`: render every page + states (games, busy, error, dialog) offscreen to PNGs — no window, no focus stealing, temp data dir. Prefer it over shot.py for UI work.

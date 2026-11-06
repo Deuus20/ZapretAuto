@@ -1,62 +1,46 @@
 """Probe targets through each strategy, score them, build the best mix."""
+import socket
 import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-
 import psutil
 import requests
-
 from . import paths, strategies
 from .settings import load_settings, save_settings  # noqa: F401 (re-exported)
 from .runner import Runner
-
 READ_BYTES = 32 * 1024  # DPI often freezes TLS sessions after ~16 KB
 TIMEOUT = 4
 ROUNDS = 2
 KEEP_MARGIN = 2  # finals: a new strategy must beat the current one by MORE than this many passed probes
 WARMUP = 1.5
-
-
 @dataclass
 class Target:
     key: str
     url: str
     group: str | None = None  # fixed group (UDP targets); None = derive from lists
-
     @property
     def host(self) -> str:
         return re.sub(r"^[a-z]+://([^/:]+).*", r"\1", self.url)
-
     @property
     def is_stun(self) -> bool:
         return self.url.startswith("stun://")
-
     @property
     def is_speed(self) -> bool:
         return self.url.startswith("speed://")
-
-
 from .vpn import VPN_RE  # noqa: E402
-
+import contextlib
 BIND: str | None = None  # source IP of a physical adapter when testing around a full-tunnel VPN
-
-
 class _SrcAdapter(requests.adapters.HTTPAdapter):
     def __init__(self, src: str):
         self.src = src
         super().__init__()
-
     def init_poolmanager(self, *a, **kw):
         kw["source_address"] = (self.src, 0)
         return super().init_poolmanager(*a, **kw)
-
-
 class _Enough(Exception):
     """Raised from the curl write callback once enough bytes arrived."""
-
-
 def fetch(url: str, max_bytes: int, deadline: float, h3: bool = False) -> tuple[int, str, int]:
     """Download up to max_bytes; returns (status, final_url, bytes). Uses a Chrome TLS fingerprint
     (curl_cffi) when available: DPI and strategies react to the ClientHello, and browsers/Discord send
@@ -73,13 +57,11 @@ def fetch(url: str, max_bytes: int, deadline: float, h3: bool = False) -> tuple[
         # An early stop means a big real page (status 200, original URL); ISP stub pages (451 / redirect to a
         # warning site) are small, finish normally and keep their real status and final URL.
         got, status, final = 0, 200, url
-
         def on_data(data: bytes) -> None:
             nonlocal got
             got += len(data)
             if got >= max_bytes or time.perf_counter() - t0 > deadline:
                 raise _Enough
-
         kw = {"interface": BIND} if BIND else {}
         if h3:  # QUIC (UDP 443): browsers use it for YouTube/Google, and strategies have separate UDP profiles
             kw["http_version"] = "v3only"
@@ -101,8 +83,6 @@ def fetch(url: str, max_bytes: int, deadline: float, h3: bool = False) -> tuple[
             if got >= max_bytes or time.perf_counter() - t0 > deadline:
                 break
         return r.status_code, r.url, got
-
-
 def _get(url: str, **kw):
     """requests.get that leaves through BIND's adapter when set (Windows strong-host routing)."""
     s = requests.Session()
@@ -110,36 +90,23 @@ def _get(url: str, **kw):
         s.mount("https://", _SrcAdapter(BIND))
         s.mount("http://", _SrcAdapter(BIND))
     return s.get(url, **kw)
-
-
 def egress_ip() -> str | None:
     """Local IPv4 used for internet traffic (cheap: one UDP socket, no packets sent). Changes when the network does."""
-    import socket
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 53))
             return s.getsockname()[0]
     except OSError:
         return None
-
-
 def egress_adapter() -> str | None:
     """Name of the adapter that carries traffic to the internet."""
-    import socket
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 53))
-            ip = s.getsockname()[0]
-    except OSError:  # no network / no route
+    ip = egress_ip()
+    if not ip:  # no network / no route
         return None
     return next((n for n, addrs in psutil.net_if_addrs().items() if any(a.address == ip for a in addrs)), None)
-
-
 def vpn_active() -> str | None:
     a = egress_adapter()
     return a if a and VPN_RE.search(a) else None
-
-
 # used when upstream renames or drops utils/targets.txt: the pick and the checks must not crash
 FALLBACK_TARGETS = """
 DiscordMain = "https://discord.com"
@@ -149,8 +116,6 @@ YouTubeWeb = "https://www.youtube.com"
 YouTubeImage = "https://i.ytimg.com"
 YouTubeVideoRedirect = "https://redirector.googlevideo.com"
 """
-
-
 def load_targets() -> list[Target]:
     out = []
     try:
@@ -173,19 +138,14 @@ def load_targets() -> list[Target]:
         out.append(Target("TelegramWeb", "https://web.telegram.org"))
         out.append(Target("TelegramDC2", "tcp://149.154.167.50:443"))
     return out
-
-
 STUN_TARGETS = [
     Target("STUN_Google19302", "stun://stun.l.google.com:19302",
            "udp:19294-19344,50000-50100:discord,stun"),  # = the voice profile's group, else never tuned
     Target("STUN_Cloudflare3478", "stun://stun.cloudflare.com:3478", "udp:other"),
 ]
-
-
 def probe_stun(t: Target, timeout: float = 2.0, tries: int = 2) -> float | None:
     """RFC5389 Binding Request over UDP; RTT seconds or None."""
     import os
-    import socket
     import struct
     host, _, port = t.url[len("stun://"):].partition(":")
     for _ in range(tries):
@@ -209,15 +169,11 @@ def probe_stun(t: Target, timeout: float = 2.0, tries: int = 2) -> float | None:
         except OSError:
             pass
     return None
-
-
 def _domains(name: str) -> set[str]:
     p = paths.LISTS / name
     if not p.exists():  # before the first sync_lists(): fall back to the upstream copy
         p = paths.VENDOR / "lists" / name
     return {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")} if p.exists() else set()
-
-
 def target_group(t: Target) -> str:
     """Profile group that handles this target's host."""
     if t.group:
@@ -233,15 +189,10 @@ def target_group(t: Target) -> str:
     if _in_ipset_all(t.host) or not load_settings().get("auto_hostlist", True):  # unresolved: as before
         return "tcp:80,443,8443:ipset-all"
     return "tcp:80,443:list-general"
-
-
 _ipset_cache: tuple[float, list] = (0.0, [])
-
-
 def _in_ipset_all(host: str) -> bool | None:
     """Whether host's IPv4 falls in ipset-all.txt; None if it can't be resolved."""
     import ipaddress
-    import socket
     global _ipset_cache
     try:
         ip = int(ipaddress.IPv4Address(socket.gethostbyname(host)))
@@ -260,15 +211,9 @@ def _in_ipset_all(host: str) -> bool | None:
     except (OSError, ValueError):
         return None
     return any(lo <= ip <= hi for lo, hi in _ipset_cache[1])
-
-
 BLOCK_PAGE = re.compile(r"warning\.rt\.ru|blocked|zapret-info|rkn\.gov|eais", re.I)
-
-
 SPEED_MIN = 250 * 1024    # B/s below which YouTube counts as throttled
 SPEED_BYTES = 1536 * 1024
-
-
 def probe_speed(t: Target) -> float | None:
     """Download the ~1 MB YouTube front page completely: catches DPI that freezes a session after the
     first kilobytes. Seconds taken, None if it stalls or is slower than SPEED_MIN."""
@@ -279,11 +224,7 @@ def probe_speed(t: Target) -> float | None:
         return None
     dt = time.perf_counter() - t0
     return dt if got >= 400 * 1024 and got / dt >= SPEED_MIN else None
-
-
 _CDN_NODE: str | None = None  # this network's YouTube video cache, e.g. "comstar-bka2" (asked once)
-
-
 def probe_video_cdn() -> float | None:
     """The server videos actually stream from (rrN---<node>.googlevideo.com, often a cache at the ISP): ISPs
     slow YouTube down on these hosts, not on www.youtube.com. Seconds for /generate_204, None on failure."""
@@ -304,10 +245,7 @@ def probe_video_cdn() -> float | None:
         _CDN_NODE = None  # another network may map to another cache: ask again next time
         return None
     return time.perf_counter() - t0 if status == 204 else None
-
-
 def probe_tcp(t: Target) -> float | None:
-    import socket
     host, port = t.url[6:].rsplit(":", 1)
     t0 = time.perf_counter()
     try:
@@ -316,8 +254,6 @@ def probe_tcp(t: Target) -> float | None:
             return time.perf_counter() - t0
     except OSError:
         return None
-
-
 def _quic_targets() -> list["Target"]:
     """HTTP/3 probes, scored for the UDP:443 profile that handles the host (hostlist vs ipset)."""
     try:
@@ -332,8 +268,6 @@ def _quic_targets() -> list["Target"]:
         listed = any(host == d or host.endswith("." + d) for d in gen)
         out.append(Target(key, f"h3://{host}/", "udp:443:list-general" if listed else "udp:443:ipset-all"))
     return out
-
-
 def probe(t: Target) -> float | None:
     """Seconds to read READ_BYTES (or full body), None on failure."""
     if t.is_stun:
@@ -354,18 +288,12 @@ def probe(t: Target) -> float | None:
     if status == 451 or BLOCK_PAGE.search(final):  # ISP stub page
         return None
     return time.perf_counter() - t0
-
-
 def probe_all(targets: list[Target]) -> dict[str, float | None]:
     with ThreadPoolExecutor(max(1, min(len(targets), 24))) as ex:  # all at once: wall time = slowest probe
         return dict(zip((t.key for t in targets), ex.map(probe, targets)))
-
-
 def score(res: dict[str, float | None]) -> tuple[int, float]:
     ok = [v for v in res.values() if v is not None]
     return len(ok), -(sum(ok) / len(ok) if ok else 99)
-
-
 def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float = WARMUP) -> dict | None:
     try:
         runner.start(s, auto_hostlist=load_settings().get("auto_hostlist", True))  # test what will run
@@ -376,14 +304,10 @@ def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float
         return res if runner.running else None  # winws died during probing
     finally:
         runner.stop()
-
-
 # service -> probes; a service counts as working when most of its probes pass (single probes through DPI are noisy)
 QUICK = {"Discord": ("DiscordMain", "DiscordGateway", "DiscordCDN"),
          "YouTube": ("YouTubeWeb", "YouTubeImage", "YouTubeVideoRedirect", "YouTubeVideo"),
          "Скорость YouTube": ("YouTubeSpeed",), "Голос Discord": ("STUN_Google19302",), "Telegram": ("TelegramWeb",)}
-
-
 def quick_check(light: bool = False) -> dict[str, bool]:
     """Check key services through the currently running bypass (does not touch winws).
     light=True skips the ~1 MB YouTube speed test (periodic background checks: ~144 MB/day otherwise)."""
@@ -407,8 +331,6 @@ def quick_check(light: bool = False) -> dict[str, bool]:
         if got:
             out[name] = sum(got) * 2 > len(got) or (len(got) == 1 and got[0])
     return out
-
-
 def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> dict:
     """Test every strategy, mix the best profile per group, save to data/settings.json."""
     global BIND
@@ -422,18 +344,13 @@ def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> 
     finally:
         BIND = None  # the VPN bypass address must not stick to later probes (diagnostics after the VPN is off)
         if before is not None:  # failures under a bad candidate must not desync those sites for good
-            try:
+            with contextlib.suppress(OSError):
                 auto.write_bytes(before)
-            except OSError:
-                pass
-
-
 def _auto_pick(log, use_shared, stop) -> dict:
     runner, targets = Runner(), load_targets()
     paths.sync_lists()
     all_s = strategies.load_all()
     groups = {t.key: target_group(t) for t in targets}
-
     global BIND
     BIND = None
     if vpn := vpn_active():
@@ -476,7 +393,6 @@ def _auto_pick(log, use_shared, stop) -> dict:
         r = test_strategy(runner, s, targets)
         results[s.name] = r
         log(f"[{i}/{len(all_s)}] {s.name}: " + ("не запустилась" if r is None else f"{score(r)[0]} из {n}"))
-
     tested = {s.name: s for s in all_s if results[s.name]}
     if not tested:
         log("Ни одна стратегия не запустилась (WinDivert/антивирус?). Откройте «Диагностику».")
@@ -533,8 +449,6 @@ def _auto_pick(log, use_shared, stop) -> dict:
     remember_network(choice)
     log(f"Готово. Выбрано: {'комбинация стратегий' if choice['picks'] else choice['base']}")
     return choice
-
-
 def remember_network(choice: dict, who: tuple[str, str] | None = None) -> None:
     """Remember the pick for this ISP (ASN): back on that network, it is switched on at once, without a pick.
     Not behind a VPN: the ASN would be the VPN's."""
@@ -550,8 +464,6 @@ def remember_network(choice: dict, who: tuple[str, str] | None = None) -> None:
         nets = dict(load_settings().get("networks") or {})
         nets[who[0]] = {"isp": who[1], "choice": choice, "time": time.time()}
         save_settings(networks=nets, net_asn=who[0])
-
-
 def _services(runs: list[dict]) -> dict[str, bool]:
     """Per service (QUICK): passed in most of these runs — the status chips right after a pick."""
     out = {}
@@ -560,8 +472,6 @@ def _services(runs: list[dict]) -> dict[str, bool]:
         if got:
             out[name] = sum(got) * 2 > len(got)
     return out
-
-
 def _try_shared(runner: Runner, targets, log) -> dict | None:
     """Use a combination proven by other users of the same ISP if it passes here too (~30 s)."""
     from . import sharedb, updater
@@ -594,8 +504,6 @@ def _try_shared(runner: Runner, targets, log) -> dict | None:
     except Exception as e:  # noqa: BLE001
         log(f"общая база недоступна: {e}")
     return None
-
-
 def chosen_strategy() -> strategies.Strategy | None:
     if load_settings().get("zapret2"):  # experimental mode: winws2 rotates strategies per site by itself
         from . import zapret2
@@ -609,7 +517,5 @@ def chosen_strategy() -> strategies.Strategy | None:
     if base and c.get("picks"):
         return strategies.mix("mix", {g: by[n] for g, n in c["picks"].items() if n in by}, base)
     return base
-
-
 if __name__ == "__main__":
     auto_pick()

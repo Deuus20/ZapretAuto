@@ -11,13 +11,11 @@ import threading
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable
-
+from collections.abc import Callable
 import psutil
-
 from . import known_games, paths
 from .settings import load_settings, save_settings
-
+import contextlib
 PLACEHOLDER = "203.0.113.113/32"
 SKIP_PORTS = {80, 443}  # web/CDN traffic (launchers, login APIs) is covered by hostlists/ipset; desyncing it broke launchers
 MAX_WEB_NETS = 512      # /24s of games' web/login servers kept out of the ipset-all profiles
@@ -88,8 +86,6 @@ SYSTEM_DIRS = ("\\windows\\", "\\microsoft\\edge\\", "\\google\\chrome\\", "\\wi
                "\\windowsapps\\microsoftcorporationii.", "\\windowsapps\\spotifyab.",
                "\\windowsapps\\5319275a.", "\\windowsapps\\telegram")
 CREATE_NO_WINDOW = 0x08000000
-
-
 def classify(path: str | None, settings: dict | None = None) -> bool:
     """True if process exe path looks like a game."""
     if not path:
@@ -108,8 +104,6 @@ def classify(path: str | None, settings: dict | None = None) -> bool:
     if any(d in p for d in SYSTEM_DIRS):
         return False
     return any(d in p for d in GAME_DIRS)
-
-
 def display_name(exe: str, path: str | None = "") -> str:
     """Human name of a game: its Steam/Epic folder ("Wardogs"), else the exe without build suffixes."""
     p = (path or "").replace("/", "\\")
@@ -123,8 +117,6 @@ def display_name(exe: str, path: str | None = "") -> str:
     name = re.sub(r"(?i)([-_](win(32|64)|x64|x86|shipping|dx1[12]|vulkan))+$", "", name)
     name = re.sub(r"(?i)client$", "", name) or name
     return name[:1].upper() + name[1:]
-
-
 def web_client(path: str | None, settings: dict | None = None) -> bool:
     """Game or its launcher (anything in a game dir), or a program the user said the bypass breaks
     (settings apps_exclude): its 80/443 servers must not be desynced."""
@@ -136,16 +128,12 @@ def web_client(path: str | None, settings: dict | None = None) -> bool:
         return True
     return (exe not in NON_GAME_EXES and exe not in {x.lower() for x in (settings or {}).get("games_ignore", [])}
             and not any(d in p for d in SYSTEM_DIRS) and any(d in p for d in GAME_DIRS))
-
-
 def public_ipv4(ip: str) -> bool:
     try:
         a = ipaddress.IPv4Address(ip)
     except ValueError:
         return False
     return a.is_global and not a.is_multicast
-
-
 class _Addr(ctypes.Structure):
     """WINDIVERT_ADDRESS (2.2), FLOW view of the 64-byte union."""
     _fields_ = [("Timestamp", ctypes.c_int64), ("Bits", ctypes.c_uint32), ("Reserved2", ctypes.c_uint32),
@@ -154,18 +142,12 @@ class _Addr(ctypes.Structure):
                 ("RemoteAddr", ctypes.c_uint32 * 4), ("LocalPort", ctypes.c_uint16),
                 ("RemotePort", ctypes.c_uint16), ("Protocol", ctypes.c_uint8),
                 ("_pad", ctypes.c_uint8 * 7)]
-
-
 BAN_TTL = 3 * 86400  # one slow re-measure (a busy evening, a server hiccup) must not ban a server for good
-
-
 def active_bans(settings: dict) -> set[str]:
     """Servers rolled back in the last BAN_TTL; older bans (and ones from before the timestamps) expire."""
     when = settings.get("games_bad_time") or {}
     now = time.time()
     return {ip for ip in settings.get("games_bad_ips", []) if now - when.get(ip, 0) < BAN_TTL}
-
-
 def _v4(a) -> str | None:
     w = list(a)
     # IPv4-mapped ::ffff:x.x.x.x stored as host-order words
@@ -176,24 +158,16 @@ def _v4(a) -> str | None:
     else:
         return None
     return str(ipaddress.IPv4Address(v))
-
-
 def _in(ip: str, nets: list) -> bool:
     try:
         a = ipaddress.ip_address(ip)
     except ValueError:
         return False
     return any(a in n for n in nets)
-
-
 def valve_sdr(ip: str) -> bool:
     return _in(ip, _SDR)
-
-
 def cdn(ip: str) -> bool:
     return _in(ip, _CDN)
-
-
 def _group(ips: set[str]) -> set[str]:
     """Collapse >=4 IPs of one /24 into the /24."""
     by24 = defaultdict(list)
@@ -206,8 +180,6 @@ def _group(ips: set[str]) -> set[str]:
         else:
             out.update(lst)
     return out
-
-
 def tcp_latency(ip: str, port: int, timeout: float = 2.0, n: int = 3) -> float | None:
     """Median TCP connect time in ms over n tries; None if no try succeeded."""
     vals = []
@@ -219,8 +191,6 @@ def tcp_latency(ip: str, port: int, timeout: float = 2.0, n: int = 3) -> float |
         except OSError:
             pass
     return statistics.median(vals) if len(vals) >= (n // 2 + 1) else None
-
-
 def is_degraded(before: float | None, after: float | None) -> bool:
     """True if TCP connect got worse after desync. No baseline = no judgement."""
     if before is None:
@@ -228,8 +198,6 @@ def is_degraded(before: float | None, after: float | None) -> bool:
     if after is None:
         return True
     return after > before * 1.5 and after - before > 30
-
-
 class GameWatcher(threading.Thread):
     def __init__(self, on_change: Callable[[], None], log: Callable[[str], None] = print, interval: float = 3.0):
         super().__init__(daemon=True, name="GameWatcher")
@@ -289,7 +257,6 @@ class GameWatcher(threading.Thread):
             self._last_web = (paths.LISTS / "ipset-exclude-games.txt").read_text(encoding="utf-8")
         except OSError:
             pass
-
     # ---- public
     def stop(self) -> None:
         self._stop_ev.set()
@@ -298,24 +265,18 @@ class GameWatcher(threading.Thread):
         h, dll = self._handle, self._dll
         if h is not None and dll is not None:
             self._handle = None
-            try:
+            with contextlib.suppress(Exception):
                 dll.WinDivertClose(h)
-            except Exception:
-                pass
-
     def games(self) -> dict[str, dict]:
         with self._lock:
             return {k: {"path": v["path"], "ips": set(v["ips"]), "active": v["active"],
                         "ping_ms": v["ping_ms"], "started": v.get("started", 0)} for k, v in self._games.items()}
-
     def web_nets(self) -> list[str]:
         """Login/web nets learned on this PC (for sharing; shipped and shared ones are left out)."""
         with self._lock:
             return sorted(self._web_nets - KNOWN_WEB_NETS)
-
     def _seed(self, exe: str) -> set[str]:
         return set(known_games.GAME_IPS.get(exe, ())) | self._db_games.get(exe, set())
-
     def add_manual(self, path: str) -> str:
         """Add a game picked by hand (shown at once; its servers are collected when it runs)."""
         exe = path.replace("/", "\\").rsplit("\\", 1)[-1].lower()
@@ -324,7 +285,6 @@ class GameWatcher(threading.Thread):
             g["path"] = path
         self._persist_settings()
         return exe
-
     @staticmethod
     def _add_ip(g: dict, ip: str, now: float) -> bool:
         """Remember a game server (caller holds the lock); True if the ipset must change. A full list drops the
@@ -346,7 +306,6 @@ class GameWatcher(threading.Thread):
         g["ips"].add(ip)
         seen[ip] = now
         return True
-
     def _expire(self, now: float) -> bool:
         """Drop servers no game has talked to for IP_TTL. True if any went."""
         gone = False
@@ -361,7 +320,6 @@ class GameWatcher(threading.Thread):
                         self._base.pop(ip, None)
                     gone = True
         return gone
-
     def reset_game(self, exe: str) -> None:
         """Drop all learned IPs of a game."""
         with self._lock:
@@ -374,7 +332,6 @@ class GameWatcher(threading.Thread):
             g.get("seen", {}).clear()
         self._persist_settings()
         self._flush()
-
     def _measure_base(self, ip: str, port: int, exe: str) -> None:
         try:
             ms = self.measure(ip, port)
@@ -384,20 +341,17 @@ class GameWatcher(threading.Thread):
         finally:
             with self._lock:
                 self._measuring.discard(ip)
-
     def _schedule_rollback(self) -> None:
         with self._lock:
             todo = {ip: v for ip, v in self._base.items() if ip not in self._checked}
             self._checked.update(todo)
         if todo:
             threading.Thread(target=self._rollback_check, args=(todo,), daemon=True).start()
-
     def _rollback_check(self, todo: dict[str, tuple[int, float, str]]) -> None:
         try:
             self._rollback_check_inner(todo)
         except Exception as e:  # a bare thread: without this it died with a traceback nobody sees
             self.log(f"gamewatch: rollback error: {e}")
-
     def _rollback_check_inner(self, todo: dict[str, tuple[int, float, str]]) -> None:
         if self._stop_ev.wait(self.rollback_delay):
             return
@@ -425,7 +379,6 @@ class GameWatcher(threading.Thread):
         save_settings(games_bad_ips=sorted(banned), games_bad_time=when)
         self._persist_settings()
         self._flush()
-
     # ---- flow capture
     def _open_divert(self, quiet: bool = False) -> bool:
         try:
@@ -448,7 +401,6 @@ class GameWatcher(threading.Thread):
             if not quiet:
                 self.log(f"gamewatch: WinDivert unavailable: {e}")
             return False
-
     def _recv_loop(self) -> None:
         a = _Addr()
         dll, h = self._dll, self._handle
@@ -457,10 +409,8 @@ class GameWatcher(threading.Thread):
                 if not self._stop_ev.is_set():  # driver stopped/handle broken: psutil until run() reopens it
                     self.log(f"gamewatch: WinDivert capture stopped (err {ctypes.get_last_error()})")
                     self._handle = None
-                    try:
+                    with contextlib.suppress(Exception):
                         dll.WinDivertClose(h)
-                    except Exception:
-                        pass
                 break
             event = (a.Bits >> 8) & 0xFF
             outbound = (a.Bits >> 17) & 1
@@ -481,7 +431,6 @@ class GameWatcher(threading.Thread):
                 self._events.append((a.ProcessId, ip, a.RemotePort, a.Protocol))
                 del self._events[:-5000]
             self._wake.set()
-
     def _poll_psutil(self) -> list[tuple[int, str, int, int]]:
         out = []
         try:
@@ -491,7 +440,6 @@ class GameWatcher(threading.Thread):
         except Exception as e:
             self.log(f"gamewatch: psutil failed: {e}")
         return out
-
     # ---- logic
     def _proc(self, pid: int) -> tuple[str | None, str | None]:
         hit = self._pid_cache.get(pid)
@@ -506,7 +454,6 @@ class GameWatcher(threading.Thread):
         if len(self._pid_cache) > 2000:
             self._pid_cache.clear()
         return r
-
     def _ping_ip(self, ip: str) -> None:
         ms = None
         try:
@@ -524,7 +471,6 @@ class GameWatcher(threading.Thread):
                     vals = [self._ping[i] for i in g["ips"] if self._ping.get(i) is not None]
                     g["ping_ms"] = min(vals) if vals else None
         self._pinging.discard(ip)
-
     def _udp_game(self, exe: str, path: str, ip: str, port: int, proto: int, settings: dict) -> bool:
         """Heuristic for games outside known launcher dirs: UDP to several public peers on high ports."""
         p = (path or "").lower()
@@ -542,7 +488,6 @@ class GameWatcher(threading.Thread):
                 self.log(f"игра определена по UDP-трафику: {exe}")
             return True
         return False
-
     def _process(self, events: list[tuple[int, str, int, int]]) -> None:
         settings = load_settings()
         seen_active: set[str] = set()
@@ -609,13 +554,11 @@ class GameWatcher(threading.Thread):
             if not self._pending_since:  # the first new IP sets the deadline; more of the burst don't push it
                 self._pending_since = time.time()
             self._dirty = True  # saved after the ipset is written: the disk write must not delay the bypass
-
     def _flow_exes(self) -> set[str]:
         """Exes with an open non-web flow right now (WinDivert flow capture only)."""
         with self._ev_lock:
             pids = set(self._open_flows.values())
         return {exe for exe in (self._proc(pid)[0] for pid in pids) if exe}
-
     def _running_names(self) -> set[str]:
         at, names = self._names
         if time.time() - at < NAMES_EVERY:
@@ -626,7 +569,6 @@ class GameWatcher(threading.Thread):
             names = set()
         self._names = (time.time(), names)
         return names
-
     def _persist_settings(self) -> None:
         with self._lock:
             data = {k: {"path": v["path"], "ips": sorted(v["ips"]),
@@ -634,7 +576,6 @@ class GameWatcher(threading.Thread):
                         **({"sdr": True} if v.get("sdr") else {})} for k, v in self._games.items()}
             web = sorted(self._web_nets)
         save_settings(games=data, games_web=web)
-
     def _render_web(self) -> str:
         """ipset-exclude-games.txt. Off by default now (games_web_bypass=false turns it on): the «16 KB» whitelist
         block stalls these very servers (Wardogs' Epic login on Cloudflare) unless they are desynced."""
@@ -643,7 +584,6 @@ class GameWatcher(threading.Thread):
         if not nets or load_settings().get("games_web_bypass", True):
             nets = [PLACEHOLDER]
         return "\n".join(nets) + "\n"
-
     @staticmethod
     def _write(name: str, text: str) -> None:
         paths.LISTS.mkdir(parents=True, exist_ok=True)
@@ -658,7 +598,6 @@ class GameWatcher(threading.Thread):
                 if i == 49:
                     raise
                 time.sleep(0.02)
-
     def _render(self) -> str:
         with self._lock:
             ips = set().union(*[g["ips"] for g in self._games.values()]) if self._games else set()
@@ -674,7 +613,6 @@ class GameWatcher(threading.Thread):
         if not lines:
             lines = [PLACEHOLDER]
         return "\n".join(lines) + "\n"
-
     def _flush(self) -> None:
         with self._flush_lock:
             web = self._render_web()
@@ -695,7 +633,6 @@ class GameWatcher(threading.Thread):
         except Exception as e:
             self.log(f"gamewatch: on_change error: {e}")
         self._schedule_rollback()
-
     def _resolve_known(self) -> None:
         nets = set()
         for host in KNOWN_WEB_HOSTS:
@@ -710,7 +647,6 @@ class GameWatcher(threading.Thread):
             self._apply_db(nets, db)
             if fetched or self._stop_ev.wait(120 * (attempt + 1)):
                 break
-
     def _apply_db(self, nets: set[str], db: dict) -> None:
         nets = nets | set(db.get("web", []))
         with self._lock:
@@ -727,12 +663,10 @@ class GameWatcher(threading.Thread):
         if new:
             self._persist_settings()
             self._pending_since = time.time()
-
     @staticmethod
     def _shared_db() -> dict:
         """games-db.json from the repo; the last good copy when offline. Only valid public IPv4 entries pass."""
         return GameWatcher._load_shared_db()[1]
-
     @staticmethod
     def _load_shared_db() -> tuple[bool, dict]:
         """(fetched now, base): the base comes from the cache when the fetch failed."""
@@ -741,10 +675,8 @@ class GameWatcher(threading.Thread):
         db = sharedb.games_db()
         fetched = db is not None
         if db is not None:
-            try:
+            with contextlib.suppress(OSError):
                 cache.write_text(json.dumps(db), encoding="utf-8")
-            except OSError:
-                pass
         else:
             try:
                 db = json.loads(cache.read_text(encoding="utf-8"))
@@ -754,7 +686,6 @@ class GameWatcher(threading.Thread):
                  for exe, ips in (db.get("games") or {}).items() if isinstance(ips, list)}
         web = [n for n in (db.get("web") or []) if isinstance(n, str) and n.endswith(".0/24") and public_ipv4(n[:-3])]
         return fetched, {"games": games, "web": web[:MAX_WEB_NETS]}
-
     def run(self) -> None:
         self._pending_since = time.time()  # write ipset-exclude-games.txt with the known nets right away
         threading.Thread(target=self._resolve_known, daemon=True, name="GameWatchDNS").start()

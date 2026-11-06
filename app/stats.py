@@ -3,17 +3,11 @@ import json
 import os
 import threading
 import time
-
 from . import paths
-
 _lock = threading.Lock()
 KEEP = 30 * 86400
-
-
 def _file():
     return paths.DATA / "stats.json"
-
-
 def _load(strict: bool = False) -> list:
     try:
         text = _file().read_text(encoding="utf-8")
@@ -28,8 +22,6 @@ def _load(strict: bool = False) -> list:
         return d if isinstance(d, list) else []
     except ValueError:
         return []
-
-
 def record(kind: str, **data) -> None:
     """kind: check (ok: bool) | repick (reason) | crash | start | stop | ipset | switch (to)."""
     with _lock:  # history is a nice-to-have: a locked file must neither wipe it nor break the caller (crash restart)
@@ -43,8 +35,6 @@ def record(kind: str, **data) -> None:
             os.replace(tmp, f)
         except OSError:
             pass
-
-
 def summary(days: int = 7) -> dict:
     since = time.time() - days * 86400
     ev = [e for e in _load() if e.get("t", 0) > since]
@@ -70,8 +60,6 @@ def summary(days: int = 7) -> dict:
             "crashes": sum(1 for e in ev if e["k"] == "crash"),
             "ipset": sum(1 for e in ev if e["k"] == "ipset"), "uptime_h": round(up / 3600, 1),
             "switches": [(e["t"], e.get("to", "?")) for e in ev if e["k"] == "switch"]}
-
-
 def daily(days: int = 7) -> list[dict]:
     """Per local day, oldest first: background checks, failed ones, bypass crashes and re-picks (the home chart)."""
     today = time.localtime()

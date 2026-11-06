@@ -9,14 +9,11 @@ import os
 import re
 import sys
 from pathlib import Path
-
 DB = Path(__file__).resolve().parent.parent / "strategies-db.json"
 NAME = re.compile(r"^[A-Za-z0-9 ]{1,40}$")
 GROUP = re.compile(r"^[a-z]{3}:[0-9a-z,*:+-]{1,160}$")
 MAX_REPORTS = 50
 MIN_APP = (1, 0, 8)  # earlier apps probed with a Python TLS fingerprint: their picks do not reflect browsers/Discord
-
-
 def parse(body: str) -> dict:
     m = re.search(r"```json\s*(\{.*?\})\s*```", body, re.S)
     if not m:
@@ -41,12 +38,8 @@ def parse(body: str) -> dict:
         raise ValueError("bad app version")
     return {"asn": r["asn"], "isp": str(r.get("isp", ""))[:80], "zapret": r["zapret"], "app": app.lstrip("v"),
             "choice": {"base": c["base"], "picks": dict(sorted(picks.items()))}, "score": score, "total": total}
-
-
 def _ver(v: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3]) or (0,)
-
-
 def merge(db: dict, rep: dict) -> dict:
     e = db.setdefault(rep["asn"], {}).setdefault(rep["zapret"], {"isp": rep["isp"], "reports": []})
     e["isp"] = rep["isp"] or e["isp"]
@@ -64,8 +57,6 @@ def merge(db: dict, rep: dict) -> dict:
     e["choice"] = json.loads(best)
     e["votes"] = len(stats[best])
     return db
-
-
 def main() -> int:
     try:
         rep = parse(os.environ.get("ISSUE_BODY", ""))
@@ -76,7 +67,5 @@ def main() -> int:
     DB.write_text(json.dumps(merge(db, rep), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(f"merged {rep['asn']} {rep['zapret']}")
     return 0
-
-
 if __name__ == "__main__":
     sys.exit(main())

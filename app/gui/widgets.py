@@ -3,19 +3,13 @@ from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAni
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
-
 from .style import C, ICON_FONT, glyph
-
-
 def _alpha(color: str, a: float) -> QColor:
     c = QColor(color)
     c.setAlphaF(a)
     return c
-
-
 class Switch(QAbstractButton):
     """M3 switch: 52×32 track; the handle grows and slides right when on. Behaves like a QCheckBox."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCheckable(True)
@@ -27,20 +21,15 @@ class Switch(QAbstractButton):
         self._anim = QVariantAnimation(self, duration=150, easingCurve=QEasingCurve.OutCubic)
         self._anim.valueChanged.connect(self._set_pos)
         self.toggled.connect(self._animate)
-
     _kbd = False
-
     def focusInEvent(self, e) -> None:  # noqa: N802
         self._kbd = e.reason() in (Qt.TabFocusReason, Qt.BacktabFocusReason)
         super().focusInEvent(e)
-
     def sizeHint(self) -> QSize:
         return QSize(60, 40)
-
     def _set_pos(self, v) -> None:
         self._pos = float(v)
         self.update()
-
     def _animate(self, on: bool) -> None:
         if not self.isVisible():  # set before shown (settings load): no motion, just the state
             self._set_pos(1.0 if on else 0.0)
@@ -49,16 +38,13 @@ class Switch(QAbstractButton):
         self._anim.setStartValue(self._pos)
         self._anim.setEndValue(1.0 if on else 0.0)
         self._anim.start()
-
     def setChecked(self, on: bool) -> None:  # noqa: N802 (Qt API)
         super().setChecked(on)
         if not self.isVisible():
             self._set_pos(1.0 if on else 0.0)
-
     def showEvent(self, e) -> None:  # noqa: N802
         self._set_pos(1.0 if self.isChecked() else 0.0)
         super().showEvent(e)
-
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -93,15 +79,11 @@ class Switch(QAbstractButton):
             path.lineTo(cx + 5, cy - 3.5)
             p.drawPath(path)
         p.end()
-
     def hitButton(self, pos) -> bool:  # noqa: N802
         return self.rect().contains(pos)
-
-
 class SettingRow(QWidget):
     """One line: title on the left, a switch on the right; the description shows on hover (row and switch).
     A click anywhere on the row flips the switch."""
-
     def __init__(self, title: str, text: str, switch: Switch, parent=None):
         super().__init__(parent)
         self.setObjectName("row")
@@ -115,20 +97,15 @@ class SettingRow(QWidget):
         self.title = QLabel(title, objectName="rowTitle")
         lay.addWidget(self.title, 1)
         lay.addWidget(switch, 0, Qt.AlignVCenter)
-
     def mouseReleaseEvent(self, e) -> None:  # noqa: N802
         if e.button() == Qt.LeftButton and self.switch.isEnabled() and self.rect().contains(e.position().toPoint()):
             self.switch.toggle()
         super().mouseReleaseEvent(e)
-
     def changeEvent(self, e) -> None:  # noqa: N802
         super().changeEvent(e)
         self.title.setEnabled(self.switch.isEnabled())
-
-
 class InputRow(QWidget):
     """One line: title on the left, a short text field on the right; the description shows on hover."""
-
     def __init__(self, title: str, text: str, edit, parent=None):
         super().__init__(parent)
         self.setObjectName("row")
@@ -142,11 +119,8 @@ class InputRow(QWidget):
         edit.setToolTip(text)
         edit.setFixedWidth(190)
         lay.addWidget(edit, 0, Qt.AlignVCenter)
-
-
 class RailButton(QAbstractButton):
     """Navigation rail destination: icon in a pill-shaped active indicator, label below."""
-
     def __init__(self, icon: str, text: str, parent=None):
         super().__init__(parent)
         self.setCheckable(True)
@@ -157,7 +131,6 @@ class RailButton(QAbstractButton):
         self.setFocusPolicy(Qt.NoFocus)  # Ctrl+1..6 switch pages; a focus pill on start looked like a 2nd selection
         self.setFixedSize(68, 54)
         self.setToolTip(text)
-
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -179,12 +152,9 @@ class RailButton(QAbstractButton):
         p.setPen(QColor(C["on_surface"] if on else C["on_surface_variant"]))
         p.drawText(QRectF(0, 34, self.width(), 16), Qt.AlignHCenter | Qt.AlignTop, self.text())
         p.end()
-
-
 class Rail(QWidget):
     """Vertical navigation rail; emits the index of the chosen destination."""
     changed = Signal(int)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("rail")
@@ -198,7 +168,6 @@ class Rail(QWidget):
         self._group.idClicked.connect(self.changed.emit)
         self._lay.addStretch(1)
         self.buttons: list[RailButton] = []
-
     def add(self, icon: str, text: str) -> RailButton:
         b = RailButton(icon, text)
         self._group.addButton(b, len(self.buttons))
@@ -207,37 +176,26 @@ class Rail(QWidget):
         if len(self.buttons) == 1:
             b.setChecked(True)
         return b
-
     def select(self, i: int) -> None:
         if 0 <= i < len(self.buttons):
             self.buttons[i].setChecked(True)
-
-
 class Pages(QStackedWidget):
     """A stack of pages driven by a Rail, with the QTabWidget calls the window and tests use."""
-
     def __init__(self, rail: Rail, parent=None):
         super().__init__(parent)
         self.rail = rail
         rail.changed.connect(self.setCurrentIndex)
         self.currentChanged.connect(rail.select)
-
     def addTab(self, w: QWidget, text: str, icon: str = "home") -> int:  # noqa: N802
         self.rail.add(icon, text)
         return self.addWidget(w)
-
     def setTabVisible(self, i: int, on: bool) -> None:  # noqa: N802
         self.rail.buttons[i].setVisible(on)
         if not on and self.currentIndex() == i:
             self.setCurrentIndex(0)
-
-
 S = 88  # power button size, px
-
-
 class PowerButton(QAbstractButton):
     """The one bold element: a big round toggle whose ring tells the state (off / on / working)."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.state = "off"
@@ -247,17 +205,13 @@ class PowerButton(QAbstractButton):
         self._spin = 0.0
         self._anim = QVariantAnimation(self, startValue=0.0, endValue=360.0, duration=1400, loopCount=-1)
         self._anim.valueChanged.connect(self._rot)
-
     _kbd = False
-
     def focusInEvent(self, e) -> None:  # noqa: N802
         self._kbd = e.reason() in (Qt.TabFocusReason, Qt.BacktabFocusReason)
         super().focusInEvent(e)
-
     def _rot(self, v) -> None:
         self._spin = float(v)
         self.update()
-
     def set_state(self, state: str) -> None:
         if state == self.state:
             return
@@ -267,7 +221,6 @@ class PowerButton(QAbstractButton):
         else:
             self._anim.stop()
         self.update()
-
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -298,11 +251,8 @@ class PowerButton(QAbstractButton):
         p.drawArc(QRectF(cx - rr, cy - rr, 2 * rr, 2 * rr), 125 * 16, 290 * 16)
         p.drawLine(QPointF(cx, cy - rr - 5), QPointF(cx, cy - 4))
         p.end()
-
-
 class StatusChip(QWidget):
     """Service status: a colored dot and the name; the text says the state, the dot repeats it."""
-
     def __init__(self, name: str, ok: bool | None, note: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("chip")

@@ -1,8 +1,5 @@
 import socket
-
 import pytest
-
-
 @pytest.fixture(autouse=True)
 def _offline(monkeypatch):
     """Tests are offline: a real connection is a bug (slow, flaky, depends on the network)."""

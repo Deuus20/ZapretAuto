@@ -2,12 +2,9 @@ import ctypes
 import os
 import sys
 from pathlib import Path
-
 ROOT = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 os.chdir(ROOT)
 sys.path.insert(0, str(ROOT))
-
-
 def selftest() -> int:
     """`ZapretAuto.exe --selftest`: no GUI, no admin; checks the frozen build can load its parts."""
     out = []
@@ -24,8 +21,6 @@ def selftest() -> int:
         code = 1
     (ROOT / "selftest.txt").write_text("\n".join(out) + "\n", encoding="utf-8")
     return code
-
-
 def cleanup() -> int:
     """`ZapretAuto.exe --cleanup` (run by the uninstaller, elevated): take our block out of the hosts file."""
     try:
@@ -34,8 +29,6 @@ def cleanup() -> int:
         return 0
     except Exception:  # noqa: BLE001 (no hosts / no block: nothing to undo)
         return 1
-
-
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
@@ -92,7 +85,5 @@ def main() -> int:
         w.show_window()
     w.startup(autostart=not os.environ.get("ZAPRET_NO_AUTOSTART"))
     return app.exec()
-
-
 if __name__ == "__main__":
     sys.exit(main())

@@ -1,30 +1,21 @@
 """Coexistence with VPN clients: never desync VPN tunnels; test around a full-tunnel VPN."""
 import re
 import subprocess
-
 import psutil
-
 from . import paths
-
 CREATE_NO_WINDOW = 0x08000000
 VPN_RE = re.compile(r"vpn|wireguard|amnezia|outline|nekoray|hiddify|openvpn|warp|^(wg|tun|tap)\d*$|\b(tun|tap)\b",
                     re.I)
 VPN_PROCS = ("openvpn", "warp-svc", "amnezia", "wireguard", "outline", "nekoray", "hiddify", "sing-box",
              "xray", "v2ray", "clash", "mihomo", "happ", "throne")
 PLACEHOLDER = "203.0.113.113/32"
-
-
 # short names match only the whole exe: "throne" caught ThroneAndLiberty.exe, so the game lost its bypass
 EXACT_PROCS = {"happ", "throne"}
-
-
 def is_vpn_proc(name: str) -> bool:
     name = name.lower()
     if name.removesuffix(".exe") in EXACT_PROCS:
         return True
     return any(k in name for k in VPN_PROCS if k not in EXACT_PROCS)
-
-
 def _routes() -> list[tuple[str, str, str, str]]:
     """IPv4 routes from `route print -4`: (dest, mask, gateway, interface ip)."""
     try:
@@ -38,12 +29,8 @@ def _routes() -> list[tuple[str, str, str, str]]:
         if len(f) >= 5 and all(re.match(r"^\d+\.\d+\.\d+\.\d+$", x) for x in (f[0], f[1], f[3])):
             rows.append((f[0], f[1], f[2], f[3]))
     return rows
-
-
 def _adapter_of(ip: str) -> str | None:
     return next((n for n, addrs in psutil.net_if_addrs().items() if any(a.address == ip for a in addrs)), None)
-
-
 def server_ips() -> set[str]:
     """Public endpoints of running VPN clients: host routes via a real gateway (WireGuard/OpenVPN add one
     for their server) plus remote addresses of known VPN processes."""
@@ -61,8 +48,6 @@ def server_ips() -> set[str]:
     except psutil.Error:
         pass
     return {i for i in ips if ":" not in i}
-
-
 def write_exclude() -> set[str]:
     """data/lists/ipset-exclude-vpn.txt: every profile skips these, so winws never touches VPN tunnels."""
     ips = server_ips()
@@ -76,8 +61,6 @@ def write_exclude() -> set[str]:
         pass
     paths.write_list(f, text)
     return ips
-
-
 def bind_ip() -> str | None:
     """IP of a physical adapter that has its own default route (to test around a full-tunnel VPN)."""
     best = None
@@ -87,8 +70,6 @@ def bind_ip() -> str | None:
             if not VPN_RE.search(name) and "radmin" not in name.lower():
                 best = best or ifip
     return best if best and not _direct_blocked(best) else None
-
-
 def _direct_blocked(ip: str) -> bool:
     """A VPN kill switch (AmneziaVPN, «block traffic outside the tunnel») refuses sockets bound to the physical
     adapter with WSAEACCES: tests around the VPN are impossible then."""
@@ -100,8 +81,6 @@ def _direct_blocked(ip: str) -> bool:
             return s.connect_ex(("1.1.1.1", 443)) == 10013
     except OSError as e:
         return getattr(e, "winerror", None) == 10013
-
-
 def restart_discord() -> list[str]:
     """Discord keeps its gateway and voice connections made through the VPN after it's switched off and hangs on
     «connecting» until restarted. Relaunched through explorer: started from our elevated process it would run as

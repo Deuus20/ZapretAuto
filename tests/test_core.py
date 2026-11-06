@@ -4,14 +4,9 @@ import json
 import re
 import time
 from pathlib import Path
-
 import pytest
-
 from app import gamewatch, paths, settings, strategies, tester, updater, vpn
-
 ROOT = Path(__file__).resolve().parent.parent
-
-
 # ---- strategies
 def test_all_upstream_strategies_parse_and_resolve():
     all_s = strategies.load_all()
@@ -21,16 +16,12 @@ def test_all_upstream_strategies_parse_and_resolve():
         assert argv[0].endswith("winws.exe")
         assert not any(re.search(r"%[\w~]+%", a) for a in argv), s.name
         assert argv.count("--new") == len(s.profiles) - 1
-
-
 def test_game_and_vpn_lists_are_wired():
     s = strategies.load_all()[0]
     argv = s.argv()
     assert sum("ipset-exclude-vpn.txt" in a for a in argv) == len(s.profiles)
     assert any("ipset-games.txt" in a for a in argv)
     assert sum("ipset-exclude-games.txt" in a for a in argv) == sum("ipset-all" in p.group for p in s.profiles)
-
-
 def test_steam_client_not_desynced(tmp_path, monkeypatch):
     """SDR games put Valve's nets into ipset-games; Steam's own TCP link (CM 155.133.x:27019) sits there too and
     desync broke it (Shift+Tab overlay, friends). Valve nets leave every TCP ipset profile, UDP keeps them."""
@@ -51,8 +42,6 @@ def test_steam_client_not_desynced(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LISTS", tmp_path)
     paths.sync_lists()
     assert "155.133.224.0/19" in (tmp_path / "ipset-exclude-steam.txt").read_text().split()
-
-
 def test_mix_replaces_only_matching_group():
     by = {s.name: s for s in strategies.load_all()}
     base, other = by["ALT12"], by["FAKE TLS AUTO ALT"]
@@ -63,8 +52,6 @@ def test_mix_replaces_only_matching_group():
             assert p_mix.args == next(q.args for q in other.profiles if q.group == g)
         else:
             assert p_mix.args == p_base.args
-
-
 def test_broken_bat_is_skipped(tmp_path, monkeypatch):
     (tmp_path / "general (BROKEN).bat").write_text("@echo off\necho nothing\n", encoding="utf-8")
     src = next(paths.VENDOR.glob("general.bat"))
@@ -73,8 +60,6 @@ def test_broken_bat_is_skipped(tmp_path, monkeypatch):
     logs = []
     got = strategies.load_all(logs.append)
     assert [s.name for s in got] == ["default"] and logs
-
-
 # ---- settings
 def test_settings_atomic_and_corrupt_tolerant(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -86,15 +71,11 @@ def test_settings_atomic_and_corrupt_tolerant(tmp_path, monkeypatch):
     settings._cache = None
     assert settings.load_settings() == {}
     assert (tmp_path / "settings.json.bad").exists()
-
-
 # ---- updater
 @pytest.mark.parametrize("a,b,newer", [("1.10.0", "1.9.9d", True), ("1.9.9d", "1.9.9", True),
                                        ("1.10.3", "1.10.3", False), ("v1.0.1", "1.0.0", True)])
 def test_is_newer(a, b, newer):
     assert updater.is_newer(a, b) is newer
-
-
 def test_tag_and_host_validation():
     assert updater.TAG_RE.match("1.10.3") and not updater.TAG_RE.match("../../x")
     updater._check_url("https://github.com/x/y/releases/download/v1/a.zip")
@@ -102,8 +83,6 @@ def test_tag_and_host_validation():
         updater._check_url("https://evil.example.com/a.zip")
     with pytest.raises(RuntimeError):
         updater._check_url("http://github.com/a.zip")
-
-
 # ---- gamewatch
 def test_classify_and_grouping():
     s = {"games_force": [r"D:\Games\Foo\Foo.exe"], "games_ignore": ["bad.exe"]}
@@ -114,8 +93,6 @@ def test_classify_and_grouping():
     ips = {f"5.5.5.{i}" for i in range(1, 5)}
     assert gamewatch._group(ips) == {"5.5.5.0/24"}
     assert gamewatch._group({"5.5.5.1", "6.6.6.6"}) == {"5.5.5.1", "6.6.6.6"}
-
-
 def test_udp_heuristic_ignores_torrents():
     w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
     try:
@@ -125,8 +102,6 @@ def test_udp_heuristic_ignores_torrents():
                        for i in range(5))
     finally:
         w.stop()
-
-
 # ---- vpn
 def test_vpn_route_parsing(monkeypatch):
     rows = [("0.0.0.0", "0.0.0.0", "192.168.1.1", "192.168.1.70"),
@@ -147,23 +122,17 @@ def test_vpn_route_parsing(monkeypatch):
     monkeypatch.setattr(tester, "vpn_active", lambda: None)
     assert tester.quick_check() == {}  # offline: nothing to check
     assert vpn.VPN_RE.search("AmneziaVPN") and not vpn.VPN_RE.search("Laptop LAN")
-
-
 # ---- shared DB merge script
 def _merge_mod():
     spec = importlib.util.spec_from_file_location("merge_report", ROOT / "scripts" / "merge_report.py")
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
-
-
 def _body(**over):
     r = {"asn": "AS25513", "isp": "MGTS", "zapret": "1.10.3", "app": "1.0.8",
          "choice": {"base": "ALT12", "picks": {"tcp:443:list-google": "FAKE TLS AUTO ALT", "udp:other": "ALT3"}},
          "score": 23, "total": 28} | over
     return "text\n```json\n" + json.dumps(r) + "\n```\n"
-
-
 def test_merge_votes_and_validation():
     m = _merge_mod()
     db = {}
@@ -175,15 +144,11 @@ def test_merge_votes_and_validation():
     for bad in (_body(asn="AS1; rm"), _body(score=5), _body(choice={"base": "x$(y)", "picks": {}}), "no json"):
         with pytest.raises(ValueError):
             m.parse(bad)
-
-
 # ---- logs / stats
 def test_report_redacts_user_name():
     from app import logs
     assert logs._redact(r"C:\Users\Ivan\AppData\x") == r"C:\Users\<user>\AppData\x"
     assert logs._redact("c:/users/Ivan/x") == "c:/users/<user>/x"
-
-
 def test_stats_uptime_and_checks(tmp_path, monkeypatch):
     from app import stats
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -196,15 +161,11 @@ def test_stats_uptime_and_checks(tmp_path, monkeypatch):
     stats.record("stop")
     s = stats.summary(7)
     assert s["uptime_h"] == 1.0 and s["checks"] == 2 and s["ok_pct"] == 50
-
-
 def test_settings_with_bom(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     settings._cache = None
     (tmp_path / "settings.json").write_text('{"a": 1}', encoding="utf-8-sig")
     assert settings.load_settings() == {"a": 1}
-
-
 def test_launchers_and_web_ports_are_not_game_traffic():
     assert not gamewatch.classify(r"C:\Steam\steamapps\common\Wardogs\WardogsLauncher-Shipping.exe", {})
     assert gamewatch.classify(r"C:\Steam\steamapps\common\Wardogs\WardogsClient-Win64-Shipping.exe", {})
@@ -212,16 +173,12 @@ def test_launchers_and_web_ports_are_not_game_traffic():
     # the launcher's own web servers (Fastly, CloudFront) must not be desynced either
     assert gamewatch.web_client(r"C:\Steam\steamapps\common\Wardogs\WardogsLauncher-Shipping.exe", {})
     assert not gamewatch.web_client(r"C:\Program Files\Google\Chrome\Application\chrome.exe", {})
-
-
 def test_merge_ignores_old_app_reports():
     m = _merge_mod()
     db = m.merge({}, m.parse(_body(app="1.0.3")))
     assert "choice" not in db["AS25513"]["1.10.3"]
     db = m.merge(db, m.parse(_body(app="1.0.8", choice={"base": "SIMPLE FAKE ALT", "picks": {}}, score=34, total=36)))
     assert db["AS25513"]["1.10.3"]["choice"]["base"] == "SIMPLE FAKE ALT"
-
-
 def test_gamewatch_v1_ips_reset_once(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
@@ -233,8 +190,6 @@ def test_gamewatch_v1_ips_reset_once(tmp_path, monkeypatch):
         assert settings.load_settings()["games_schema"] == 3
     finally:
         w.stop()
-
-
 def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
@@ -261,15 +216,11 @@ def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
         assert w.games()["game.exe"]["active"]
     finally:
         w.stop()
-
-
 def test_diag_reports_missing_bypass_files(tmp_path, monkeypatch):
     from app import diag
     (tmp_path / "winws.exe").write_text("x")
     monkeypatch.setattr(paths, "BIN", tmp_path)
     assert set(diag.missing_files()) == {"WinDivert.dll", "WinDivert64.sys", "cygwin1.dll"}
-
-
 def test_gui_smoke(tmp_path, monkeypatch):
     """Build the main window offscreen and walk its tabs (skipped where PySide6 is absent, e.g. CI)."""
     pytest.importorskip("PySide6")
@@ -297,8 +248,6 @@ def test_gui_smoke(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()  # destroy Qt objects before the interpreter exits (else a crash at shutdown)
         app.processEvents()
-
-
 def _fake_pick_env(monkeypatch, tmp_path, baseline_ok, vpn=None, bind=None):
     from app import tester, vpn as vpnmod
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -315,23 +264,17 @@ def _fake_pick_env(monkeypatch, tmp_path, baseline_ok, vpn=None, bind=None):
     from app import sharedb
     monkeypatch.setattr(sharedb, "isp", lambda: ("AS100", "Home ISP"))
     return tester
-
-
 def test_auto_pick_keeps_strategy_when_nothing_is_blocked(tmp_path, monkeypatch):
     tester = _fake_pick_env(monkeypatch, tmp_path, baseline_ok=9)
     settings.save_settings(strategy={"base": "ALT12", "picks": {}})
     logs = []
     assert tester.auto_pick(logs.append, use_shared=False) == {"base": "ALT12", "picks": {}}
     assert any("почти ничего не блокируется" in m for m in logs)
-
-
 def test_auto_pick_aborts_on_vpn_without_bypass_route(tmp_path, monkeypatch):
     tester = _fake_pick_env(monkeypatch, tmp_path, baseline_ok=3, vpn="AmneziaVPN", bind=None)
     logs = []
     assert tester.auto_pick(logs.append, use_shared=False) == {}
     assert any("VPN" in m for m in logs)
-
-
 def test_quick_check_majority(tmp_path, monkeypatch):
     from app import tester
     monkeypatch.setattr(tester, "vpn_active", lambda: None)
@@ -344,13 +287,10 @@ def test_quick_check_majority(tmp_path, monkeypatch):
     monkeypatch.setattr(tester.time, "sleep", lambda s: None)
     r = tester.quick_check(light=True)
     assert r == {"Discord": True, "YouTube": False, "Голос Discord": True}
-
-
 def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
     tester = _fake_pick_env(monkeypatch, tmp_path, baseline_ok=3)
     settings.save_settings(strategy={"base": "ALT11", "picks": {}})
     keys = [f"T{i}" for i in range(10)]
-
     def fake_test(runner, s, targets, warmup=0):  # EXP passes 1 more probe than everyone else: noise level
         ok = 9 if s.name == "EXP" else 8
         return {k: (0.1 if i < ok else None) for i, k in enumerate(keys)}
@@ -361,14 +301,11 @@ def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
     lp = settings.load_settings()["last_pick"]
     assert lp["before"] == lp["score"] and lp["time"] > 0 and "services" in lp   # summary data for the GUI
     assert settings.load_settings()["networks"]["AS100"]["choice"] == {"base": "ALT11", "picks": {}}
-
-
 def test_dns_poison_detection(monkeypatch):
     from app import diag
     import socket
     fake = {"discord.com": ["10.10.10.10"], "rutracker.org": ["1.2.3.4"], "www.youtube.com": ["142.251.150.4"],
             "youtube.com": None}
-
     def resolve(d):
         if fake[d] is None:  # ISP answers "no such domain" for a blocked site (since August 2026)
             raise socket.gaierror(11001, "host not found")
@@ -381,16 +318,12 @@ def test_dns_poison_detection(monkeypatch):
     assert diag.dns_poisoned() == ["discord.com", "rutracker.org"]  # offline: NXDOMAIN proves nothing
     monkeypatch.setattr(diag, "_doh", lambda d: (_ for _ in ()).throw(OSError("blocked")))
     assert diag.dns_poisoned() == ["discord.com"]  # DoH blocked: what is obviously forged still counts
-
-
 def test_quic_targets_grouped_by_profile():
     pytest.importorskip("curl_cffi")
     from app import tester
     q = {t.key: t for t in tester.load_targets() if t.url.startswith("h3://")}
     assert q["YouTubeQUIC"].group.startswith("udp:443:")
     assert q["DiscordQUIC"].group == "udp:443:list-general"  # discord.com is in Flowseal's general list
-
-
 def test_user_domain_add_remove(tmp_path, monkeypatch):
     from app import lists
     monkeypatch.setattr(paths, "LISTS", tmp_path)
@@ -402,8 +335,6 @@ def test_user_domain_add_remove(tmp_path, monkeypatch):
     lists.remove_user_domain("EXAMPLE.org")
     assert "example" not in (tmp_path / "list-general-user.txt").read_text(encoding="utf-8").lower().replace(
         "domain.example.abc", "")
-
-
 def test_vpn_exclude_file(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LISTS", tmp_path)
     monkeypatch.setattr(vpn, "server_ips", lambda: {"45.132.253.182"})
@@ -412,8 +343,6 @@ def test_vpn_exclude_file(tmp_path, monkeypatch):
     monkeypatch.setattr(vpn, "server_ips", lambda: set())
     vpn.write_exclude()
     assert (tmp_path / "ipset-exclude-vpn.txt").read_text().split() == [vpn.PLACEHOLDER]  # never empty
-
-
 def test_gui_timed_pause(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     import os
@@ -442,8 +371,6 @@ def test_gui_timed_pause(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()  # destroy Qt objects before the interpreter exits (else a crash at shutdown)
         app.processEvents()
-
-
 def test_gui_game_ips_do_not_restart_winws(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     import os
@@ -475,8 +402,6 @@ def test_gui_game_ips_do_not_restart_winws(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
-
-
 def test_vpn_exclude_not_rewritten_when_unchanged(tmp_path, monkeypatch):
     import os
     monkeypatch.setattr(paths, "LISTS", tmp_path)
@@ -486,8 +411,6 @@ def test_vpn_exclude_not_rewritten_when_unchanged(tmp_path, monkeypatch):
     os.utime(f, (1, 1))
     vpn.write_exclude()
     assert f.stat().st_mtime == 1  # untouched: winws would otherwise reload it every minute
-
-
 def test_gui_workers_do_not_leak_handles(tmp_path, monkeypatch):
     """Each finished job must release its thread handle (a reference cycle once leaked ~2 handles per job)."""
     pytest.importorskip("PySide6")
@@ -502,7 +425,6 @@ def test_gui_workers_do_not_leak_handles(tmp_path, monkeypatch):
     from app.gui.window import MainWindow
     w = MainWindow()
     me = psutil.Process()
-
     def run_batch(n):
         for _ in range(n):
             w._run(lambda log: None, lambda r: None)
@@ -522,8 +444,6 @@ def test_gui_workers_do_not_leak_handles(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
-
-
 def test_gui_auto_item_returns_to_last_pick(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     import os
@@ -550,8 +470,6 @@ def test_gui_auto_item_returns_to_last_pick(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
-
-
 def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     import os
@@ -591,8 +509,6 @@ def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
-
-
 def test_gui_update_check_shows_result(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     import os
@@ -618,8 +534,6 @@ def test_gui_update_check_shows_result(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
-
-
 def test_known_game_seeded_on_first_sight(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
@@ -636,8 +550,6 @@ def test_known_game_seeded_on_first_sight(tmp_path, monkeypatch):
         assert "3.164.206.0/24" in w._web_nets
     finally:
         w.stop()
-
-
 def test_game_servers_rotate_cdn_never_learned(tmp_path, monkeypatch):
     """Servers unseen for a week leave; a full list drops the oldest; Cloudflare (login) is never desynced."""
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -660,8 +572,6 @@ def test_game_servers_rotate_cdn_never_learned(tmp_path, monkeypatch):
         assert w._expire(now + gamewatch.IP_TTL + 1) and not g["ips"]
     finally:
         w.stop()
-
-
 def test_gui_zapret_update_keeps_working_strategy(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
     import os
@@ -690,15 +600,11 @@ def test_gui_zapret_update_keeps_working_strategy(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
-
-
 def _games_mod():
     spec = importlib.util.spec_from_file_location("merge_games", ROOT / "scripts" / "merge_games.py")
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
-
-
 def test_games_db_needs_two_reporters():
     m = _games_mod()
     body = lambda g, w=(): "```json\n" + json.dumps({"app": "1.2.0", "games": g, "web": list(w)}) + "\n```"
@@ -713,15 +619,11 @@ def test_games_db_needs_two_reporters():
             m.parse(body(bad))
     with pytest.raises(ValueError):
         m.parse(body({}, ["10.0.0.0/24"]))
-
-
 def test_games_report_url_fits():
     from app import sharedb
     ips = [f"9.{a}.{b}.1" for a in range(10) for b in range(100)]
     url = sharedb.games_report_url("1.2.0", {"big.exe": ips, "small.exe": ["9.9.9.9"]}, ["3.164.206.0/24"])
     assert len(url) <= sharedb.MAX_URL and "small.exe" in url and "%5Bgames%5D" in url
-
-
 def test_shared_games_db_seeds_known_games(tmp_path, monkeypatch):
     from app import sharedb
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -741,8 +643,6 @@ def test_shared_games_db_seeds_known_games(tmp_path, monkeypatch):
         assert gamewatch.GameWatcher._shared_db()["games"]["new.exe"] == ["5.5.5.5"]
     finally:
         w.stop()
-
-
 def test_zapret2_argv_and_mode(tmp_path, monkeypatch):
     from app import zapret2
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -760,8 +660,6 @@ def test_zapret2_argv_and_mode(tmp_path, monkeypatch):
     assert tester.chosen_strategy().name == "ALT8"                      # not downloaded yet: normal engine
     monkeypatch.setattr(zapret2, "installed", lambda: True)
     assert tester.chosen_strategy().name == zapret2.NAME
-
-
 def test_zapret2_install_checks_hashes(tmp_path, monkeypatch):
     from app import zapret2
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -771,8 +669,6 @@ def test_zapret2_install_checks_hashes(tmp_path, monkeypatch):
     assert not zapret2.install(lambda m: None) and not (tmp_path / "zapret2" / "a.txt").exists()
     resp.content = b"good"
     assert zapret2.install(lambda m: None) and zapret2.installed()
-
-
 def _gui(tmp_path, monkeypatch, **st):
     pytest.importorskip("PySide6")
     import os
@@ -785,8 +681,6 @@ def _gui(tmp_path, monkeypatch, **st):
     app = QApplication.instance() or QApplication([])
     from app.gui.window import MainWindow
     return app, MainWindow()
-
-
 def _close(app, w):
     w.tray.hide()
     w._timer.stop()
@@ -794,8 +688,6 @@ def _close(app, w):
     from PySide6.QtCore import QCoreApplication, QEvent
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)  # else every old window stays alive
     app.processEvents()                                                  # and each restyle repolishes them all
-
-
 def test_gui_zapret2_toggle(tmp_path, monkeypatch):
     from app import zapret2
     from PySide6.QtWidgets import QMessageBox
@@ -830,8 +722,6 @@ def test_gui_zapret2_toggle(tmp_path, monkeypatch):
         assert started[-1] == "ALT8" and w.combo.isEnabled()
     finally:
         _close(app, w)
-
-
 def test_gui_share_games(tmp_path, monkeypatch):
     import webbrowser
     from PySide6.QtWidgets import QMessageBox
@@ -851,8 +741,6 @@ def test_gui_share_games(tmp_path, monkeypatch):
     finally:
         w.stop_watcher()
         _close(app, w)
-
-
 def test_gui_known_games_show_after_restart(tmp_path, monkeypatch):
     """Bug: after an app update/restart the games table stayed empty until a game got a new IP."""
     monkeypatch.setattr(gamewatch.GameWatcher, "start", lambda self: None)
@@ -868,8 +756,6 @@ def test_gui_known_games_show_after_restart(tmp_path, monkeypatch):
     finally:
         w.stop_watcher()
         _close(app, w)
-
-
 def test_discord_cache_fix(tmp_path, monkeypatch):
     from app import diag
     monkeypatch.setenv("APPDATA", str(tmp_path))
@@ -882,8 +768,6 @@ def test_discord_cache_fix(tmp_path, monkeypatch):
     assert "очищен" in diag.apply_fix("discord_cache")
     assert not diag._discord_caches() and (tmp_path / "discord" / "Local Storage").exists()  # login kept
     assert "Discord.exe" in killed
-
-
 def test_issue_report_is_redacted_and_fits(tmp_path, monkeypatch):
     from app import logs
     from urllib.parse import unquote
@@ -898,8 +782,6 @@ def test_issue_report_is_redacted_and_fits(tmp_path, monkeypatch):
     assert "Подмена DNS" in text and "BFE" not in text            # only problems from diagnostics
     assert "185.1.2." not in text and "<ip>" in text and "192.168.1.5" in text  # public IPs hidden, LAN kept
     assert "Danil" not in text and "01:00:" in text               # user name hidden; log tail included
-
-
 def test_gui_chips_and_switch_rows(tmp_path, monkeypatch):
     from app.gui.widgets import SettingRow, StatusChip
     from PySide6.QtCore import QPointF, Qt
@@ -923,22 +805,17 @@ def test_gui_chips_and_switch_rows(tmp_path, monkeypatch):
         assert w.tabs.rail.buttons[lists_i].isHidden()                   # Lists only with «Дополнительно»
     finally:
         _close(app, w)
-
-
 def test_app_check_explains_hidden_project(monkeypatch):
     import requests
     import threading
     resp = requests.Response()
     resp.status_code = 404
-
     def gone():
         raise requests.HTTPError(response=resp)
     monkeypatch.setattr(updater, "app_release", gone)
     ev, got = threading.Event(), []
     updater.app_check_async(lambda t, n: (got.append((t, n)), ev.set()))
     assert ev.wait(5) and got == [(None, False)] and "недоступна" in updater.APP_CHECK_ERROR
-
-
 def test_game_ports_custom_and_validated(tmp_path, monkeypatch):
     assert strategies.valid_ports("1024-1934,1936-65535") and strategies.valid_ports("27015")
     for bad in ("", "0-10", "100-50", "70000", "1024-", "a,b", "1024;2048"):
@@ -959,8 +836,6 @@ def test_game_ports_custom_and_validated(tmp_path, monkeypatch):
         assert any("1024-1934,1936-65535" in a for a in s.argv(True))
     finally:
         _close(app, w)
-
-
 def test_gui_pick_summary(tmp_path, monkeypatch):
     app, w = _gui(tmp_path, monkeypatch, last_pick={"score": 26, "total": 28, "before": 18, "time": time.time(),
                                                     "services": {"Discord": True, "YouTube": True,
@@ -973,8 +848,6 @@ def test_gui_pick_summary(tmp_path, monkeypatch):
         assert w.chips.count() >= 3
     finally:
         _close(app, w)
-
-
 def test_gui_follows_windows_theme(tmp_path, monkeypatch):
     from app.gui import style
     app, w = _gui(tmp_path, monkeypatch)
@@ -988,8 +861,6 @@ def test_gui_follows_windows_theme(tmp_path, monkeypatch):
     finally:
         style.set_theme(False)  # tokens are global: leave the dark ones for other tests
         _close(app, w)
-
-
 def test_user_exclude_list_never_empty(tmp_path, monkeypatch):
     from app import lists
     monkeypatch.setattr(paths, "LISTS", tmp_path)
@@ -997,10 +868,7 @@ def test_user_exclude_list_never_empty(tmp_path, monkeypatch):
     assert (tmp_path / "list-exclude-user.txt").read_text(encoding="utf-8") == "bank.ru\n"
     lists.remove_user_domain("bank.ru", "list-exclude-user.txt")
     assert (tmp_path / "list-exclude-user.txt").read_text(encoding="utf-8") == "domain.example.abc\n"  # winws needs 1
-
-
 def test_gui_site_broken_by_bypass_gets_excluded(tmp_path, monkeypatch):
-    from app import lists
     from PySide6.QtWidgets import QInputDialog, QMessageBox
     app, w = _gui(tmp_path, monkeypatch)
     try:
@@ -1022,8 +890,6 @@ def test_gui_site_broken_by_bypass_gets_excluded(tmp_path, monkeypatch):
         w.runner.proc = None
     finally:
         _close(app, w)
-
-
 def test_video_cdn_probe(monkeypatch):
     import sys
     import types
@@ -1039,8 +905,6 @@ def test_video_cdn_probe(monkeypatch):
     assert "109.1.2.3" not in repr(vars(tester).get("_CDN_NODE"))      # the user's IP is not kept
     monkeypatch.setattr(tester, "fetch", lambda *a, **k: (_ for _ in ()).throw(OSError("reset")))
     assert tester.probe(tester.Target("YouTubeVideo", "ytcdn://")) is None and tester._CDN_NODE is None
-
-
 def test_gui_exclude_app(tmp_path, monkeypatch):
     from PySide6.QtWidgets import QFileDialog, QMessageBox
     monkeypatch.setattr(gamewatch.GameWatcher, "start", lambda self: None)
@@ -1062,8 +926,6 @@ def test_gui_exclude_app(tmp_path, monkeypatch):
     finally:
         w.stop_watcher()
         _close(app, w)
-
-
 def test_hosts_block_update_and_remove(tmp_path, monkeypatch):
     from app import diag
     hosts = tmp_path / "hosts"
@@ -1086,8 +948,6 @@ def test_hosts_block_update_and_remove(tmp_path, monkeypatch):
     diag.apply_fix("hosts_remove")
     text = hosts.read_bytes().decode("utf-8-sig")
     assert diag.HOSTS_BEGIN not in text and "telegram" not in text and "myserver.lan" in text
-
-
 def test_autostart_task_has_no_time_limit():
     pytest.importorskip("PySide6")
     from app.gui.window import MainWindow
@@ -1095,8 +955,6 @@ def test_autostart_task_has_no_time_limit():
     assert "-ExecutionTimeLimit ([TimeSpan]::Zero)" in ps        # schtasks default: killed after 72 h
     assert "-AllowStartIfOnBatteries" in ps and "-DontStopIfGoingOnBatteries" in ps
     assert "-RunLevel Highest" in ps and "-AtLogOn" in ps and "--tray" in ps
-
-
 def test_smart_app_control_reported(monkeypatch):
     from app import diag
     monkeypatch.setattr(diag, "_smart_app_control", lambda: 1)
@@ -1109,8 +967,6 @@ def test_smart_app_control_reported(monkeypatch):
     rows = {r["label"]: r for r in diag.run_checks()}
     assert rows["Smart App Control"]["level"] == "err"
     assert "Smart App Control" in diag.first_problem()            # also the cause shown when winws won't start
-
-
 def test_winws_errors_explained(tmp_path, monkeypatch):
     from app import runner
     assert "WinDivert" in runner.explain("windivert: error opening filter: 577 Windows cannot verify the signature")
@@ -1123,8 +979,6 @@ def test_winws_errors_explained(tmp_path, monkeypatch):
     (tmp_path / "logs").mkdir()
     (tmp_path / "logs" / "winws.log").write_bytes(b"\n".join(b"line %d" % i for i in range(50)))
     assert runner.last_output(3) == "line 47\nline 48\nline 49"
-
-
 def test_gui_network_change_restores_its_strategy(tmp_path, monkeypatch):
     from app import sharedb
     mobile = {"base": "ALT3", "picks": {}}
@@ -1144,13 +998,10 @@ def test_gui_network_change_restores_its_strategy(tmp_path, monkeypatch):
         assert w._new_net and tester.load_settings()["net_asn"] == "AS300"  # unknown: may re-pick without the 6 h pause
     finally:
         _close(app, w)
-
-
 def test_portable_update_uses_zip_and_keeps_data(monkeypatch):
     class R:
         def raise_for_status(self):
             pass
-
         def json(self):
             return {"tag_name": "v9.9.9", "assets": [
                 {"name": n, "browser_download_url": f"https://github.com/x/{n}"} for n in
@@ -1165,8 +1016,6 @@ def test_portable_update_uses_zip_and_keeps_data(monkeypatch):
     cmd = updater.portable_swap_command(Path("C:/t/new/ZapretAuto"), Path("D:/Apps/O'Neil/ZapretAuto"), Path("C:/t"))
     ps = cmd[-1]
     assert "/XD data vendor" in ps and r"'D:\Apps\O''Neil\ZapretAuto'" in ps and "--tray" in ps
-
-
 def test_gui_isp_line(tmp_path, monkeypatch):
     from app import sharedb
     app, w = _gui(tmp_path, monkeypatch)
@@ -1183,8 +1032,6 @@ def test_gui_isp_line(tmp_path, monkeypatch):
         assert w.lbl_isp.text() == "Провайдер: Home ISP"
     finally:
         _close(app, w)
-
-
 def test_store_apps_are_not_games(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
@@ -1198,8 +1045,6 @@ def test_store_apps_are_not_games(tmp_path, monkeypatch):
         assert set(w.games()) == {"game.exe"} and set(settings.load_settings()["games"]) == {"game.exe"}
     finally:
         w._pool.shutdown()
-
-
 def test_stats_daily_counts_problems(tmp_path, monkeypatch):
     from app import stats
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -1212,17 +1057,12 @@ def test_stats_daily_counts_problems(tmp_path, monkeypatch):
     assert {k: days[-1][k] for k in ("checks", "fails", "crashes", "repicks")} == \
         {"checks": 2, "fails": 1, "crashes": 1, "repicks": 1}
     assert all(d["checks"] == 0 for d in days[:-1])
-
-
 def test_quiet_detects_calls_not_idle_messengers(monkeypatch):
     from types import SimpleNamespace as NS
-
     from app import quiet
-
     class P:
         def __init__(self, pid):
             self.pid = pid
-
         def name(self):
             return {1: "Discord.exe", 2: "chrome.exe"}[self.pid]
     monkeypatch.setattr(quiet.psutil, "Process", P)
@@ -1231,8 +1071,6 @@ def test_quiet_detects_calls_not_idle_messengers(monkeypatch):
     assert quiet.call_app(idle) is None
     assert quiet.call_app(idle + [NS(pid=1, laddr=NS(ip="0.0.0.0", port=61234))]) == "discord"
     assert quiet.busy_reason(game=True) == "идёт игра"
-
-
 def test_gui_quiet_updates_defer_for_a_day_at_most(tmp_path, monkeypatch):
     from app import quiet
     app, w = _gui(tmp_path, monkeypatch)
@@ -1247,8 +1085,6 @@ def test_gui_quiet_updates_defer_for_a_day_at_most(tmp_path, monkeypatch):
         assert not w._update_deferred(200000.0) and not w._deferred_since
     finally:
         _close(app, w)
-
-
 def test_gui_tray_strategy_and_games(tmp_path, monkeypatch):
     app, w = _gui(tmp_path, monkeypatch)
     try:
@@ -1268,8 +1104,6 @@ def test_gui_tray_strategy_and_games(tmp_path, monkeypatch):
         assert w.settings["games_ignore"] == []
     finally:
         _close(app, w)
-
-
 def test_known_sdr_game_gets_valve_nets_after_reset(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
@@ -1280,8 +1114,6 @@ def test_known_sdr_game_gets_valve_nets_after_reset(tmp_path, monkeypatch):
         assert "155.133.224.0/19" in w._render()
     finally:
         w.stop()
-
-
 def test_game_ip_burst_does_not_delay_the_ipset(tmp_path, monkeypatch):
     """New servers in a login burst: the first one sets the write deadline, the rest don't push it back."""
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -1299,8 +1131,6 @@ def test_game_ip_burst_does_not_delay_the_ipset(tmp_path, monkeypatch):
         assert gamewatch.DEBOUNCE + gamewatch.FAST_INTERVAL <= 1.0
     finally:
         w.stop()
-
-
 def test_auto_hostlist_is_its_own_last_profile():
     """A --hostlist-auto profile takes every 80/443 connection: inside the general profile it kept Cloudflare/AWS
     from the ipset-all profile and the «16 KB» block stalled them (Wardogs' Epic login)."""
@@ -1313,8 +1143,6 @@ def test_auto_hostlist_is_its_own_last_profile():
     last = profiles[-1]
     assert "--hostlist-auto=" in last and "list-general" not in last and "--dpi-desync=fake" in last
     assert "--hostlist-auto" not in " ".join(s.argv(auto_hostlist=False))
-
-
 def test_process_scan_is_throttled(monkeypatch):
     calls = []
     monkeypatch.setattr(gamewatch.psutil, "process_iter", lambda attrs: calls.append(1) or [])
@@ -1322,8 +1150,6 @@ def test_process_scan_is_throttled(monkeypatch):
     for _ in range(10):  # a running game with no new flows asks every 0.5 s tick
         w._running_names()
     assert len(calls) == 1
-
-
 def test_restart_discord_after_vpn(monkeypatch):
     from types import SimpleNamespace
     from app import vpn
@@ -1340,8 +1166,6 @@ def test_restart_discord_after_vpn(monkeypatch):
     killed.clear(), started.clear()
     procs[:] = procs[2:]
     assert vpn.restart_discord() == [] and not started  # Discord wasn't running: don't start it
-
-
 def test_windivert_loaded_from_data_copy(monkeypatch, tmp_path):
     from app import runner
     bin_ = tmp_path / "bin"
@@ -1360,12 +1184,9 @@ def test_windivert_loaded_from_data_copy(monkeypatch, tmp_path):
     second = runner.windivert_dll()
     assert second != first and open(second, "rb").read() == b"dll v2"
     assert len(list((tmp_path / "data" / "windivert").iterdir())) == 1  # old copy cleaned
-
-
 def test_vpn_left_out_of_capture(monkeypatch, tmp_path):
     from app import runner
     monkeypatch.setattr(runner.paths, "DATA", tmp_path)
-
     def fake_save(cmd, **kw):  # winws --wf-save
         open(cmd[-1].split("=", 1)[1], "w").write("outbound and udp.DstPort >= 1024\n")
     monkeypatch.setattr(runner.subprocess, "run", fake_save)
@@ -1379,8 +1200,6 @@ def test_vpn_left_out_of_capture(monkeypatch, tmp_path):
     assert runner.uncapture(argv, {"138.124.5.202"}) == argv  # WinDivert would reject it: keep the bypass up
     assert runner.uncapture(argv, set()) == argv  # no VPN: filter as winws builds it
     assert runner.uncapture([r"C:\z\winws2.exe", "--wf-udp-out=443"], {"1.2.3.4"})[1] == "--wf-udp-out=443"
-
-
 def test_slim_lists(tmp_path):
     from app import runner
     def lst(name, text):
@@ -1405,16 +1224,12 @@ def test_slim_lists(tmp_path):
     (tmp_path / "ipset-exclude-vpn.txt").write_text("138.124.5.202\n", encoding="utf-8")
     assert runner.stale(snap)  # winws no longer watches it: the app restarts it
     assert runner.slim([r"C:\z\winws2.exe", f"--ipset={tg}"])[0] == [r"C:\z\winws2.exe", f"--ipset={tg}"]
-
-
 def test_settings_nested_edit_does_not_leak_into_cache(monkeypatch, tmp_path):
     from app import paths, settings
     monkeypatch.setattr(paths, "DATA", tmp_path)
     settings.save_settings(strategy={"base": "a", "picks": {}})
     settings.load_settings()["strategy"]["picks"]["Discord"] = "x"  # edited, never saved
     assert settings.load_settings()["strategy"]["picks"] == {}
-
-
 def test_flowseal_hosts_only_known_sites(monkeypatch):
     from app import diag
     import requests
@@ -1423,20 +1238,15 @@ def test_flowseal_hosts_only_known_sites(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: type("R", (), {"text": text})())
     hosts = [h for _, h in diag.flowseal_hosts()]
     assert len(hosts) == 10 and all(h.endswith(".discord.com") for h in hosts)
-
-
 def test_codeberg_mirror_when_github_hides_repo(monkeypatch):
     import requests
     from app import sharedb
-
     class R:
         def __init__(self, url):
             self.url, self.status_code = url, 404 if "github" in url else 200
-
         def raise_for_status(self):
             if self.status_code != 200:
                 raise requests.HTTPError("404")
-
         def json(self):
             if "releases" in self.url:
                 return {"tag_name": "v9.0.0", "assets": [
@@ -1450,8 +1260,6 @@ def test_codeberg_mirror_when_github_hides_repo(monkeypatch):
     assert sharedb.games_db()["games"] == {"g.exe": ["1.2.3.4"]}
     assert seen[-1] == "https://codeberg.org/yuav2/ZapretAuto/raw/branch/main/games-db.json"
     updater._check_url("https://codeberg.org/attachments/a")
-
-
 def test_gui_weekly_ipset_update_runs_once(tmp_path, monkeypatch):
     from app import lists
     app, w = _gui(tmp_path, monkeypatch)
@@ -1468,8 +1276,6 @@ def test_gui_weekly_ipset_update_runs_once(tmp_path, monkeypatch):
         assert calls == [1]                                  # the saved time counts, not the window's stale copy
     finally:
         _close(app, w)
-
-
 def test_shared_games_db_retried_when_offline_at_start(tmp_path, monkeypatch):
     from app import sharedb
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -1487,16 +1293,12 @@ def test_shared_games_db_retried_when_offline_at_start(tmp_path, monkeypatch):
         assert waits == [120, 240] and "4.4.4.0/24" in w._web_nets and not answers
     finally:
         w.stop()
-
-
 def test_first_run_defaults_only_on_fresh_install(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     settings._cache = None
     assert settings.first_run() and settings.load_settings() == settings.FIRST_RUN
     settings.save_settings(game_watch=False)
     assert not settings.first_run() and settings.load_settings()["game_watch"] is False   # user's choice kept
-
-
 def test_locked_settings_are_not_wiped(tmp_path, monkeypatch):
     from pathlib import Path
     monkeypatch.setattr(paths, "DATA", tmp_path)
@@ -1513,8 +1315,6 @@ def test_locked_settings_are_not_wiped(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_text", real)
     assert settings.load_settings() == {"strategy": {"base": "ALT8"}, "a": 1}
     assert not (tmp_path / "settings.json.bad").exists()
-
-
 def test_stats_uptime_without_stop_and_locked_file(tmp_path, monkeypatch):
     import json as _json
     from app import stats
@@ -1529,14 +1329,10 @@ def test_stats_uptime_without_stop_and_locked_file(tmp_path, monkeypatch):
     stats.record("crash")                                                  # no exception, history kept
     monkeypatch.undo()
     assert len(_json.loads((tmp_path / "stats.json").read_text(encoding="utf-8"))) == 4
-
-
 def test_hosts_block_without_end_keeps_user_lines():
     from app import diag
     lines = ["127.0.0.1 a", diag.HOSTS_BEGIN, "1.1.1.1 ours", "10.0.0.1 mine"]
     assert diag._strip_block(lines) == ["127.0.0.1 a", "1.1.1.1 ours", "10.0.0.1 mine"]
-
-
 def test_game_client_idling_in_menu_is_not_playing(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
@@ -1561,12 +1357,9 @@ def test_game_client_idling_in_menu_is_not_playing(tmp_path, monkeypatch):
     finally:
         w._handle = None
         w.stop()
-
-
 def test_targets_fallback_and_bind_reset(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "VENDOR", tmp_path)                      # upstream dropped utils/targets.txt
     assert {"DiscordMain", "YouTubeWeb"} <= {t.key for t in tester.load_targets()}
-
     def boom(*a):
         tester.BIND = "192.168.1.5"
         raise RuntimeError("pick failed")
@@ -1574,8 +1367,6 @@ def test_targets_fallback_and_bind_reset(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         tester.auto_pick()
     assert tester.BIND is None
-
-
 def test_udp_game_heuristic_needs_a_burst(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
@@ -1591,8 +1382,6 @@ def test_udp_game_heuristic_needs_a_burst(tmp_path, monkeypatch):
         assert r                                              # a burst is
     finally:
         w.stop()
-
-
 def test_zapret_update_rejects_wrong_digest(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path / "data")
     monkeypatch.setattr(updater, "latest_release", lambda: ("1.99.0", "https://github.com/x.zip", "0" * 64))
@@ -1601,12 +1390,9 @@ def test_zapret_update_rejects_wrong_digest(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="контрольная сумма"):
         updater.update(log=lambda m: None, vendor=v)
     assert not v.exists() and list((tmp_path / "data" / "tmp").iterdir()) == []   # nothing installed, no leftovers
-
-
 def test_fetch_freeze_after_16k_is_a_failure(monkeypatch):
     import sys
     import types
-
     class Sess:
         def __init__(self, **k): pass
         def __enter__(self): return self
@@ -1620,8 +1406,6 @@ def test_fetch_freeze_after_16k_is_a_failure(monkeypatch):
     with pytest.raises(TimeoutError):
         tester.fetch("https://x", tester.READ_BYTES, 5)
     assert tester.probe(tester.Target("YouTubeWeb", "https://x")) is None
-
-
 def test_ipset_hosts_are_scored_for_the_ipset_profile(tmp_path, monkeypatch):
     import socket
     monkeypatch.setattr(paths, "LISTS", tmp_path)
@@ -1633,13 +1417,9 @@ def test_ipset_hosts_are_scored_for_the_ipset_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(socket, "gethostbyname", lambda h: ips[h])
     assert tester.target_group(tester.Target("F", "https://fastly.example")) == "tcp:80,443,8443:ipset-all"
     assert tester.target_group(tester.Target("O", "https://other.example")) == "tcp:80,443:list-general"
-
-
 def test_vpn_process_names():
     assert vpn.is_vpn_proc("Throne.exe") and vpn.is_vpn_proc("AmneziaVPN.exe") and vpn.is_vpn_proc("happ.exe")
     assert not vpn.is_vpn_proc("ThroneAndLiberty.exe") and not vpn.is_vpn_proc("whatsapp.exe")
-
-
 def test_pick_restores_auto_hostlist(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LISTS", tmp_path)
     (tmp_path / "list-auto.txt").write_text("good.example\n", encoding="utf-8")
@@ -1649,10 +1429,13 @@ def test_pick_restores_auto_hostlist(tmp_path, monkeypatch):
     monkeypatch.setattr(tester, "_auto_pick", pick)
     tester.auto_pick()
     assert (tmp_path / "list-auto.txt").read_text(encoding="utf-8") == "good.example\n"
-
-
 def test_rolled_back_servers_are_banned_for_a_while():
     now = time.time()
     s = {"games_bad_ips": ["1.1.1.1", "2.2.2.2", "3.3.3.3"],
          "games_bad_time": {"1.1.1.1": now - 3600, "2.2.2.2": now - 10 * 86400}}
     assert gamewatch.active_bans(s) == {"1.1.1.1"}         # old and untimed bans expire
+def test_codemap_is_current():
+    spec = importlib.util.spec_from_file_location("codemap", ROOT / "tools" / "codemap.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert (ROOT / "CODEMAP.md").read_text(encoding="utf-8") == m.build(), "run: python tools/codemap.py"

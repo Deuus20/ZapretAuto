@@ -8,11 +8,8 @@ a false positive: every file inside scans clean).
 """
 import hashlib
 from pathlib import Path
-
 import requests
-
 from . import paths, strategies
-
 COMMIT = "6eb463a6758fb48cd101bc55dfd057e6e9d98af1"
 BASE = f"https://raw.githubusercontent.com/bol-van/zapret-win-bundle/{COMMIT}/zapret-winws/"
 FILES = {
@@ -31,7 +28,6 @@ FILES = {
 }
 NAME = "zapret2 (эксперимент)"
 GAME_OFF = "12"  # same trick as Flowseal: a port nothing uses when the game filter is off
-
 # strategies circular rotates through for TLS/HTTP (ports of Flowseal favourites + the bundle's example)
 BADSEQ = "tcp_seq=2:tcp_ack=-66000:tcp_ts_up"  # nfqws1 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=2
 TTL = "ip_autottl=-2,3-20:ip6_autottl=-2,3-20"
@@ -58,22 +54,14 @@ ROTATION = [
      ("http_req", f"fake:blob=fake_default_http:repeats=6:{TTL}"),
      ("http_req", f"fakedsplit:pos=method+2:{TTL}")],
 ]
-
-
 def root() -> Path:
     return paths.DATA / "zapret2"
-
-
 def _ok(p: Path, sha: str) -> bool:
     try:
         return hashlib.sha256(p.read_bytes()).hexdigest() == sha
     except OSError:
         return False
-
-
 _cache: tuple | None = None  # (stat key, result): the GUI asks every 2 s, hashing 4 MB each time is waste
-
-
 def installed() -> bool:
     global _cache
     key = []
@@ -87,14 +75,10 @@ def installed() -> bool:
     if _cache is None or _cache[0] != key:
         _cache = (key, all(_ok(root() / name, sha) for name, sha in FILES.items()))
     return _cache[1]
-
-
 def _blob(name: str, file: str, fallback: str) -> str:
     """Flowseal's fake from vendor/bin; a built-in one if an update renamed/removed it (winws2 won't start else)."""
     p = paths.BIN / file
     return f"--blob={name}:@{p}" if p.is_file() else f"--blob={name}:{fallback}"
-
-
 def install(log=print) -> bool:
     """Download missing/changed files; each must match its pinned sha256 (else nothing is replaced)."""
     for name, sha in FILES.items():
@@ -115,8 +99,6 @@ def install(log=print) -> bool:
         tmp.write_bytes(data)
         tmp.replace(dst)
     return True
-
-
 def _circular() -> list[str]:
     """Per-site rotation: count failures, switch the site to the next strategy at 3 within a minute."""
     out = ["--out-range=-s34228", "--in-range=-s5556", "--lua-desync=circular:fails=3", "--in-range=x"]
@@ -124,13 +106,10 @@ def _circular() -> list[str]:
         for payload, call in steps:
             out += [f"--payload={payload}", f"--lua-desync={call}:strategy={n}"]
     return out
-
-
 class Strategy2:
     """Looks like strategies.Strategy to the runner/GUI: a name and argv()."""
     name = NAME
     profiles: list = []
-
     def argv(self, game_tcp: bool = False, game_udp: bool = False, auto_hostlist: bool = False) -> list[str]:
         r, ls = root(), paths.LISTS
         pt, pu = strategies.game_ports()

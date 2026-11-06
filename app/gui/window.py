@@ -4,16 +4,13 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHeaderView, QHBoxLayout, QInputDialog,
                                QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
                                QScrollArea, QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
-
 from app import diag, lists, logs, stats, strategies, tester
 from app.runner import Runner
-
 try:
     from app import updater
 except Exception:  # noqa: BLE001
@@ -22,7 +19,6 @@ try:
     from app import gamewatch
 except Exception:  # noqa: BLE001
     gamewatch = None
-
 from app.paths import ROOT
 TASK = "ZapretAuto"
 AUTO = "Авто (результат подбора)"
@@ -32,8 +28,6 @@ from app.gui.style import COLORS, app_icon, init_fonts  # noqa: E402
 from app.gui.widgets import (InputRow, PowerButton, Pages, Rail, SettingRow, StatusChip,  # noqa: E402
                              Switch)
 from app.gui.worker import Bridge, Worker  # noqa: E402
-
-
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -73,7 +67,6 @@ class MainWindow(QWidget):
         self._net = None
         self._vpn_was = None
         self._next_health = time.time() + 30  # status chips soon after start
-
     # ---------- UI ----------
     SETTINGS = [  # key, title, supporting text, default, section
         ("game_watch", "Следить за играми",
@@ -108,7 +101,6 @@ class MainWindow(QWidget):
          "Новый движок: если сайт начинает блокироваться, обход сам переключает для него другую стратегию — "
          "без перезапуска и подбора. При первом включении скачивается ~4 МБ.", False, "adv"),
     ]
-
     def _build(self):
         QApplication.instance().setStyle("Fusion")
         init_fonts()
@@ -122,7 +114,6 @@ class MainWindow(QWidget):
         outer.addWidget(rail)
         self.tabs = Pages(rail)
         outer.addWidget(self.tabs, 1)
-
         self.tabs.addTab(self._page_home(), "Главная", "home")
         self.page_games = self._page_games()
         self.tabs.addTab(self.page_games, "Игры", "games")
@@ -156,7 +147,6 @@ class MainWindow(QWidget):
         if not gamewatch:
             self.cb["game_watch"].setEnabled(False)
         self.fill_games()  # home games card text, also when watching is off
-
     @staticmethod
     def _page(margins=(20, 16, 20, 16)) -> tuple[QWidget, QVBoxLayout]:
         w = QWidget(objectName="page")
@@ -164,14 +154,12 @@ class MainWindow(QWidget):
         lay.setContentsMargins(*margins)
         lay.setSpacing(10)
         return w, lay
-
     @staticmethod
     def _header(lay: QVBoxLayout, title: str, text: str = "") -> None:
         lay.addWidget(QLabel(title, objectName="h1"))
         if text:
             lay.addWidget(QLabel(text, objectName="muted", wordWrap=True))
         lay.addSpacing(4)
-
     def _page_home(self) -> QWidget:
         page, lay = self._page()
         hero = QHBoxLayout()
@@ -221,7 +209,6 @@ class MainWindow(QWidget):
         self.progress.setRange(0, 0)
         self.progress.hide()
         lay.addWidget(self.progress)
-
         grid = QHBoxLayout()
         grid.setSpacing(10)
         card = QFrame(objectName="card")
@@ -249,7 +236,6 @@ class MainWindow(QWidget):
         cl.addLayout(row)
         cl.addStretch()
         grid.addWidget(card, 1)
-
         games = QFrame(objectName="card")
         gl = QVBoxLayout(games)
         gl.setContentsMargins(14, 12, 14, 14)
@@ -267,7 +253,6 @@ class MainWindow(QWidget):
         gl.addStretch()
         grid.addWidget(games, 1)
         lay.addLayout(grid)
-
         recent = QFrame(objectName="card")
         rl = QVBoxLayout(recent)
         rl.setContentsMargins(14, 12, 14, 12)
@@ -279,7 +264,6 @@ class MainWindow(QWidget):
         rl.addStretch()
         lay.addWidget(recent, 1)
         return page
-
     def _page_games(self) -> QWidget:
         page, lay = self._page()
         self._header(lay, "Игры", "Запущенные игры находятся сами: программа собирает их серверы и включает для них "
@@ -324,7 +308,6 @@ class MainWindow(QWidget):
         r.addWidget(b4)
         lay.addLayout(r)
         return page
-
     def _page_settings(self) -> QWidget:
         page, lay = self._page((20, 16, 20, 0))
         self._header(lay, "Настройки")
@@ -398,7 +381,6 @@ class MainWindow(QWidget):
         area.setWidget(body)
         lay.addWidget(area, 1)
         return page
-
     def _page_diag(self) -> QWidget:
         page, lay = self._page()
         self._header(lay, "Диагностика", "Поиск частых причин, по которым обход не работает: конфликтующие "
@@ -435,7 +417,6 @@ class MainWindow(QWidget):
         self.diag_table.setEditTriggers(QTableWidget.NoEditTriggers)
         lay.addWidget(self.diag_table, 1)
         return page
-
     def _page_log(self) -> QWidget:
         page, lay = self._page()
         self._header(lay, "Журнал")
@@ -449,7 +430,6 @@ class MainWindow(QWidget):
         self.logbox.setMaximumBlockCount(5000)  # runs for weeks: keep the widget small
         lay.addWidget(self.logbox, 1)
         return page
-
     def _page_lists(self) -> QWidget:
         page, lay = self._page()
         self._header(lay, "Списки", "Ваши списки сайтов и адресов. Обход перечитывает их сам после сохранения.")
@@ -477,7 +457,6 @@ class MainWindow(QWidget):
         r.addStretch()
         lay.addLayout(r)
         return page
-
     # ---------- diagnostics / lists ----------
     def run_diag(self):
         self.btn_diag.setEnabled(False)
@@ -487,7 +466,6 @@ class MainWindow(QWidget):
         self._diag_w.finished.connect(lambda w=self._diag_w: self._reap(w))
         self._diag_w.done.connect(self.bridge.diag_done.emit)
         self._diag_w.start()
-
     def on_diag_done(self, res):
         self.btn_diag.setEnabled(True)
         self.btn_diag.setText("Найти проблемы")
@@ -514,18 +492,15 @@ class MainWindow(QWidget):
                 cl.addWidget(b, 0, Qt.AlignVCenter)
                 t.setCellWidget(i, 2, cell)
         t.resizeRowsToContents()
-
     def apply_fix(self, fix):
         """Fixes may hit the network or kill processes: run them off the UI thread, then show the result."""
         self.btn_diag.setEnabled(False)
-
         def done(msg):
             msg = msg or "не удалось — подробности в журнале"
             self.log(f"исправление {fix}: {msg}")
             QMessageBox.information(self, "Диагностика", msg)
             self.run_diag()
         self._run(lambda log: diag.apply_fix(fix), done)
-
     def load_list(self, *_):
         if self.list_combo.currentData() == "apps_exclude":
             self.list_edit.setPlainText("".join(x + "\n" for x in self.settings.get("apps_exclude", [])))
@@ -535,7 +510,6 @@ class MainWindow(QWidget):
             self.list_edit.setPlainText(p.read_text(encoding="utf-8"))
         except OSError:
             self.list_edit.setPlainText("")
-
     def save_list(self):
         if self.list_combo.currentData() == "apps_exclude":
             apps = sorted({ln.strip().lower() for ln in self.list_edit.toPlainText().splitlines()
@@ -554,11 +528,9 @@ class MainWindow(QWidget):
         from app import paths
         paths.write_list(p, text)
         self.log(f"сохранён {p.name}")
-
     def update_ipset(self):
         self.btn_ipset.setEnabled(False)
         self._run(lambda log: lists.update_ipset(log), lambda ok: self.btn_ipset.setEnabled(True))
-
     def _tray(self):
         self.tray = QSystemTrayIcon(app_icon(COLORS["off"]), self)
         m = QMenu()
@@ -595,7 +567,6 @@ class MainWindow(QWidget):
         self.tray.setContextMenu(m)
         self.tray.activated.connect(lambda r: self.show_window() if r in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick) else None)
         self.tray.show()
-
     # ---------- helpers ----------
     def log(self, text: str):
         self.logbox.appendPlainText(time.strftime("%H:%M:%S ") + text)
@@ -603,11 +574,9 @@ class MainWindow(QWidget):
             self._recent = (getattr(self, "_recent", []) + [time.strftime("%H:%M ") + text])[-8:]
             self.lbl_recent.setText("\n".join(self._recent))
         logs.log.info(text)
-
     def showEvent(self, e):
         super().showEvent(e)
         self._title_bar()
-
     def _title_bar(self):
         """Dark or light window title bar to match the theme."""
         try:
@@ -618,7 +587,6 @@ class MainWindow(QWidget):
                     break
         except Exception:  # noqa: BLE001
             pass
-
     def apply_theme(self, force: bool = False):
         """Follow the Windows light/dark setting (checked at start and every ~10 s)."""
         light = style.windows_light()
@@ -634,7 +602,6 @@ class MainWindow(QWidget):
                     self.on_diag_done(self._last_diag)
                 self.fill_games()
                 self.fill_stats()
-
     def set_chips(self, res: dict):
         """Service status chips after an access check: a dot and the name, and the words when it fails."""
         while self.chips.count():
@@ -648,13 +615,11 @@ class MainWindow(QWidget):
             slow = name == "YouTube" and ok and speed is False
             self.chips.addWidget(StatusChip(name, ok and not slow, "медленно" if slow else ""))
         self.chips.addStretch()
-
     def show_window(self):
         self.show()
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
         self.raise_()
         self.activateWindow()
-
     def closeEvent(self, e):
         e.ignore()
         self.hide()
@@ -662,7 +627,6 @@ class MainWindow(QWidget):
             self._hint_shown = True
             self.tray.showMessage("ZapretAuto", "Программа свёрнута в трей и продолжает работать. "
                                   "Выход — правый клик по значку → «Выход».")
-
     def describe(self) -> str:
         if self._zapret2_on():
             from app import zapret2
@@ -674,7 +638,6 @@ class MainWindow(QWidget):
             n = len(set(c["picks"].values()) | {c["base"]})
             return f"авто-комбинация из {n} стратегий"
         return c["base"]
-
     def refresh(self):
         run = self.runner.running
         state = "busy" if self.busy else ("on" if run else "off")
@@ -715,11 +678,9 @@ class MainWindow(QWidget):
         c = self.settings.get("strategy")
         manual = c and not c.get("picks") and c != self._auto_choice()
         self.combo.setCurrentIndex(max(0, self.combo.findText(c["base"])) if manual else 0)
-
     def save(self, **kw):
         tester.save_settings(**kw)
         self.settings = tester.load_settings()
-
     # ---------- runner ----------
     def start_runner(self):
         if self.busy:
@@ -744,7 +705,6 @@ class MainWindow(QWidget):
             self._explain_failure()
         self.refresh()
         return self.runner.running
-
     def _fill_tray_strategies(self):
         m = self.menu_strat
         m.clear()
@@ -754,14 +714,12 @@ class MainWindow(QWidget):
             a.setChecked(i == self.combo.currentIndex())
             a.setEnabled(not self.busy)  # a pick or an update is running: switching would restart winws mid-way
             a.triggered.connect(lambda _=False, i=i: self._tray_strategy(i))
-
     def _tray_strategy(self, i: int):
         if self.busy or i == self.combo.currentIndex():
             return
         self.combo.setCurrentIndex(i)
         self.on_combo(i)
         self.log(f"стратегия из трея: {self.combo.itemText(i)}")
-
     def _fill_tray_games(self):
         """Found games with a check mark: unchecking stops the bypass for that game's servers, checking returns it."""
         m = self.menu_games
@@ -780,7 +738,6 @@ class MainWindow(QWidget):
             a.setCheckable(True)
             a.setChecked(exe not in ign)
             a.triggered.connect(lambda on, exe=exe: self.set_game_ignored(exe, not on))
-
     def send_report(self, what: str | None = None):
         """Publish the problem as a GitHub issue (the user confirms it on the page)."""
         if what is None:
@@ -792,14 +749,12 @@ class MainWindow(QWidget):
         url = logs.issue_url(what, getattr(self, "_last_diag", None))
         webbrowser.open(url)
         self.log("открыта страница отправки отчёта на GitHub")
-
     def save_report(self):
         default = str(Path.home() / "Desktop" / f"ZapretAuto-report-{time.strftime('%Y%m%d-%H%M')}.zip")
         path, _ = QFileDialog.getSaveFileName(self, "Сохранить отчёт", default, "Zip (*.zip)")
         if not path:
             return
         diag_rows = getattr(self, "_last_diag", None)
-
         def done(p):
             if p:
                 self.log(f"отчёт сохранён: {p}")
@@ -811,7 +766,6 @@ class MainWindow(QWidget):
                 rows = diag.run_checks()
             return logs.make_report(Path(path), rows)
         self._run(work, done)
-
     def fill_stats(self):
         s = stats.summary(7)
         last = time.strftime("%d.%m %H:%M", time.localtime(s["last_repick"])) if s["last_repick"] else "не было"
@@ -830,7 +784,6 @@ class MainWindow(QWidget):
             "<table cellspacing='0' cellpadding='3'>"
             + "".join(f"<tr><td style='color:{muted}; padding-right:18px'>{k}</td><td>{v}</td></tr>" for k, v in rows)
             + "</table>")
-
     def set_advanced(self, on: bool, save: bool = True):
         """Show/hide expert settings and the raw lists editor."""
         self.adv_box.setVisible(on)
@@ -838,7 +791,6 @@ class MainWindow(QWidget):
         self.btn_adv.setText("Дополнительно ▾" if on else "Дополнительно ▸")
         if save:
             self.save(show_advanced=on)
-
     def _explain_failure(self):
         """Run diagnostics in the background and put the concrete cause into the status line."""
         def done(cause):
@@ -856,7 +808,6 @@ class MainWindow(QWidget):
             done(cause)
             return
         self._run(lambda log: diag.first_problem(), done)
-
     def pause(self, minutes: int):
         """Turn the bypass off for a while (e.g. a site that dislikes it) and back on automatically."""
         if self.busy or not self.runner.running:
@@ -868,22 +819,18 @@ class MainWindow(QWidget):
         self.log(f"обход выключен на {minutes} мин")
         self.tray.showMessage("ZapretAuto", f"Обход выключен на {minutes} минут, потом включится сам.")
         self.refresh()
-
     def cancel_busy(self):
         self._cancel = True
         self.btn_cancel.setEnabled(False)
         self.substatus.setText("Отменяю… (дождусь окончания текущей проверки)")
-
     def _game_running(self) -> bool:
         return bool(self.watcher and any(g.get("active") for g in self.watcher.games().values()))
-
     def check_site(self):
         """'Site does not open': test it, add to the bypass list, re-test, explain the outcome."""
         text, ok = QInputDialog.getText(self, "Сайт не открывается", "Адрес сайта (например example.com):")
         dom = re.sub(r"^(https?://)?([^/:?#]+).*$", r"\2", (text or "").strip()).lower()
         if not ok or not re.fullmatch(r"[a-z0-9.-]+\.[a-z]{2,}", dom):
             return
-
         def work(log):
             from app import lists, vpn
             tester.BIND = vpn.bind_ip() if tester.vpn_active() else None  # test the direct path
@@ -925,7 +872,6 @@ class MainWindow(QWidget):
             if not ip_ok:
                 return f"{dom} заблокирован по IP-адресу — zapret тут не поможет, нужен VPN. [ip]"
             return f"Не помогло для {dom}. Попробуйте «Подобрать заново» на главной."
-
         def done(msg):
             if msg:
                 if msg.endswith(" [ip]"):  # IP-blocked: hand the domain over for the VPN's site list
@@ -937,13 +883,11 @@ class MainWindow(QWidget):
                 QMessageBox.information(self, "Проверка сайта", msg)
         self.log(f"проверяю {dom}…")
         self._run(work, done)
-
     def _health(self):
         """Background check of key services; two failed checks in a row -> re-pick automatically."""
         if self._health_running or self.busy or not self.runner.running:
             return
         self._health_running = True
-
         def done(res):
             self._health_running = False
             if not res or self.busy:
@@ -986,14 +930,12 @@ class MainWindow(QWidget):
                 self._repair = True
                 self.autopick()
         self._run(lambda log: tester.quick_check(light=True), done)  # no 1 MB speed test every 10 min
-
     def _network_changed(self):
         """Another ISP (ASN): switch to the strategy picked there before, without a pick. An unknown ISP may be
         re-picked at once if checks fail (the 6 h pause between automatic picks is for one network)."""
         if tester.vpn_active():
             return
         from app import sharedb
-
         def done(who):
             if not who or who[0] == self.settings.get("net_asn"):
                 return
@@ -1014,18 +956,15 @@ class MainWindow(QWidget):
                 self.start_runner()
             self.refresh()
         self._run(lambda log: sharedb.isp(), done)
-
     def _vpn_off(self):
         """VPN switched off: Discord stays stuck on connections made through it until restarted."""
         if not self.settings.get("discord_after_vpn", True) or not self.runner.running:
             return
         from app import vpn
-
         def done(names):
             if names:
                 self.log("VPN выключен — перезапустил Discord, чтобы он подключился через обход")
         self._run(lambda log: vpn.restart_discord(), done)
-
     def _tick(self):
         """Detect winws dying on its own (antivirus, driver conflict)."""
         now = time.time()
@@ -1108,7 +1047,6 @@ class MainWindow(QWidget):
             self._next_health = now + 600
             self._health()
         self.refresh()
-
     def _reap(self, w):
         """A worker finished: join its thread (frees the OS thread handle) and drop the QObject — the signal
         connections form a reference cycle that otherwise kept both alive (~2 handles per job, every minute)."""
@@ -1116,7 +1054,6 @@ class MainWindow(QWidget):
             self._workers.remove(w)
         w.wait(1000)
         w.deleteLater()
-
     def _run(self, fn, done, line=None):
         """Start a Worker and keep a reference until its thread has finished."""
         w = Worker(fn)
@@ -1126,11 +1063,9 @@ class MainWindow(QWidget):
         self._workers.append(w)
         w.start()
         return w
-
     def check_access(self, notify: bool = False):
         self.substatus.setText("Проверяю доступ…")
         self.btn_check_access.setEnabled(False)
-
         def done(res):
             self.btn_check_access.setEnabled(True)
             if not res:
@@ -1145,11 +1080,9 @@ class MainWindow(QWidget):
             if notify:  # asked from the tray menu: answer there too
                 self.tray.showMessage("ZapretAuto", txt)
         self._run(lambda log: tester.quick_check(), done)
-
     def _game_udp_wanted(self) -> bool:
         """A game was found: enable the game filter for TCP and UDP (some games log in over TCP high ports)."""
         return bool(self.watcher and any(g.get("ips") for g in self.watcher.games().values()))
-
     def toggle(self):
         if self.busy:
             return
@@ -1164,7 +1097,6 @@ class MainWindow(QWidget):
             self.refresh()
         elif not self.start_runner() and not self.settings.get("strategy"):
             self.ask_autopick()
-
     def _auto_choice(self) -> dict | None:
         """Result of the last auto-pick (a single strategy or a mix). Older versions did not store it: then the
         current strategy counts as auto when it came from a pick (last_pick present) or is a mix."""
@@ -1173,7 +1105,6 @@ class MainWindow(QWidget):
             return c
         cur = self.settings.get("strategy")
         return cur if cur and (self.settings.get("last_pick") or cur.get("picks")) else None
-
     def on_combo(self, i):
         if i == 0:
             auto = self._auto_choice()
@@ -1188,7 +1119,6 @@ class MainWindow(QWidget):
         if self.runner.running:
             self.start_runner()
         self.refresh()
-
     def on_check(self, key, v):
         self.save(**{key: v})
         if key == "autostart":
@@ -1202,14 +1132,12 @@ class MainWindow(QWidget):
             self.set_zapret2(v)
         elif key in ("game_tcp", "game_udp", "auto_hostlist") and self.runner.running and not self.busy:
             self.start_runner()
-
     def _zapret2_on(self) -> bool:
         """zapret2 mode is what runs (or would run): enabled and its files are in place."""
         if not self.settings.get("zapret2"):
             return False
         from app import zapret2
         return zapret2.installed()
-
     def on_ports(self, proto: str):
         """Save the game filter ports; a bad value is shown in red and not applied."""
         e = self.ports[proto]
@@ -1225,11 +1153,9 @@ class MainWindow(QWidget):
         self.log(f"порты игр {proto.upper()}: {text or 'по умолчанию'}")
         if self.runner.running and not self.busy and self._game_flags()[0 if proto == "tcp" else 1]:
             self.start_runner()  # the filter ports are fixed at start
-
     def set_zapret2(self, on: bool):
         """Switch the engine: download winws2 on first use, then restart the bypass with it (or back)."""
         from app import zapret2
-
         def switched(ok):
             if not ok:
                 self.error = "Не удалось скачать zapret2 — подробности в журнале."
@@ -1246,13 +1172,11 @@ class MainWindow(QWidget):
             self._run(lambda log: zapret2.install(log), switched)
         else:
             switched(True)
-
     @staticmethod
     def autostart_command() -> list[str]:
         """PowerShell that (re)creates the logon task. Not schtasks /Create: its defaults kill the task after 72 h
         (the app runs for weeks), don't start it on battery and stop it when a laptop is unplugged."""
         import os
-
         def q(s) -> str:
             return "'" + str(s).replace("'", "''") + "'"
         if getattr(sys, "frozen", False):
@@ -1268,12 +1192,10 @@ class MainWindow(QWidget):
               f"Register-ScheduledTask -TaskName {q(TASK)} -Action $a -Trigger $t -Settings $s -Principal $p "
               "-Force | Out-Null")
         return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]
-
     def set_autostart(self, on: bool):
         cmd = self.autostart_command() if on else ["schtasks", "/Delete", "/F", "/TN", TASK]
         r = subprocess.run(cmd, capture_output=True, text=True, creationflags=0x08000000)
         self.log(f"автозапуск {'вкл' if on else 'выкл'}: " + ("ок" if r.returncode == 0 else (r.stderr or r.stdout).strip()))
-
     # ---------- autopick ----------
     def ask_autopick(self):
         self.show_window()
@@ -1284,7 +1206,6 @@ class MainWindow(QWidget):
                 "пропадать — это нормально. VPN на время подбора лучше выключить.\n\n"
                 "Начать?") == QMessageBox.Yes:
             self.autopick()
-
     def autopick(self, *_):
         if self.busy:
             return
@@ -1311,9 +1232,7 @@ class MainWindow(QWidget):
         self.refresh()
         self.substatus.setText("Обычно 2–4 минуты. Обход на это время выключен.")
         self.tabs.setCurrentIndex(0)
-
         t_start = time.time()
-
         def line(t):
             self.log(t)
             m = re.match(r"\[(\d+)/(\d+)\]", t)
@@ -1330,7 +1249,6 @@ class MainWindow(QWidget):
                 self.progress.setValue(self.progress.maximum() - 2)
         self._cancel, self._cancellable = False, True
         self._run(lambda log: tester.auto_pick(log, stop=lambda: self._cancel), self._autopick_done, line)
-
     def _autopick_done(self, res):
         self.busy = False
         before = (self.settings.get("strategy") or {})
@@ -1361,18 +1279,15 @@ class MainWindow(QWidget):
                 == QMessageBox.Yes:
             self.send_report()
         self.refresh()
-
     def fill_isp(self):
         """«Провайдер: X · в общей базе N отчётов», and whether most of them use the same combination."""
         if tester.vpn_active():
             self.lbl_isp.hide()
             return
         from app import sharedb
-
         def work(log):
             who = sharedb.isp()
             return (who, sharedb.isp_entry(who[0], updater.current_version())) if who else None
-
         def done(r):
             if not r:
                 self.lbl_isp.hide()
@@ -1390,7 +1305,6 @@ class MainWindow(QWidget):
             self.lbl_isp.setText(text)
             self.lbl_isp.show()
         self._run(work, done)
-
     def _pick_summary(self):
         """What the pick achieved, in one line (log + tray), and the service chips from its final runs."""
         lp = self.settings.get("last_pick") or {}
@@ -1406,7 +1320,6 @@ class MainWindow(QWidget):
                 line += ". Не открывается: " + ", ".join(bad)
         self.log(line)
         self.tray.showMessage("ZapretAuto", line)
-
     def _offer_autostart(self):
         """After the first successful setup: most people want the bypass to come up with Windows."""
         if self.settings.get("autostart") or self.settings.get("autostart_asked"):
@@ -1416,7 +1329,6 @@ class MainWindow(QWidget):
                                 "Программа будет тихо стартовать в трее, и Discord/YouTube заработают сразу "
                                 "после включения компьютера.") == QMessageBox.Yes:
             self.cb["autostart"].setChecked(True)  # saves the setting and creates the task
-
     def _offer_share(self):
         lp = self.settings.get("last_pick", {})
         if lp.get("shared") or self.settings.get("share_never") or not lp.get("total"):
@@ -1440,7 +1352,6 @@ class MainWindow(QWidget):
                     webbrowser.open(url)
                 else:
                     self.log("не удалось определить провайдера")
-
             def make(log):
                 from app import __version__, sharedb
                 who = sharedb.isp()
@@ -1449,7 +1360,6 @@ class MainWindow(QWidget):
                 return sharedb.report_url(who[0], who[1], updater.current_version(), __version__,
                                           self.settings.get("strategy", {}), lp["score"], lp["total"])
             self._run(make, done)
-
     # ---------- games ----------
     def start_watcher(self):
         if not gamewatch or self.watcher:
@@ -1458,18 +1368,15 @@ class MainWindow(QWidget):
         self.watcher.start()
         self.log("слежение за играми включено")
         self.fill_games()  # known games show at once: the table used to fill only when a game got new IPs
-
     def stop_watcher(self):
         if self.watcher:
             self.watcher.stop()
             self.watcher = None
             self.log("слежение за играми выключено")
             self.fill_games()
-
     def _game_flags(self) -> tuple[bool, bool]:
         wanted = self._game_udp_wanted()
         return (self.settings.get("game_tcp", False) or wanted, self.settings.get("game_udp", False) or wanted)
-
     def _apply_game_flags(self):
         """Restart winws to switch the game filter on, but not while a game is logging in."""
         if not self.runner.running or self.busy or self._game_flags() == getattr(self, "_run_flags", None):
@@ -1482,7 +1389,6 @@ class MainWindow(QWidget):
             QTimer.singleShot(int(wait * 1000) + 500, self._apply_game_flags)
             return
         self.start_runner()
-
     def on_games_changed(self):
         self.fill_games()
         if self.runner.running and not self.busy:
@@ -1504,7 +1410,6 @@ class MainWindow(QWidget):
                 msg = "обновлены адреса игровых серверов"
             self._games_logged = time.time()
             self.log(msg)
-
     def fill_games(self):
         games = self.watcher.games() if self.watcher else {}
         ign = set(self.settings.get("games_ignore", []))
@@ -1525,7 +1430,6 @@ class MainWindow(QWidget):
                     it.setToolTip(exe)
                 self.table.setItem(i, j, it)
         self._fill_home_games(rows)
-
     def _fill_home_games(self, rows: list) -> None:
         """Home card: running games first, then the ones with most servers; three at most."""
         if not self.settings.get("game_watch"):
@@ -1544,20 +1448,17 @@ class MainWindow(QWidget):
             lines.append(f"<span style='color:{style.C["on_surface"]}'>{name}</span> — {state}")
         more = len(rows) - len(top)
         self.lbl_games.setText("<br>".join(lines) + (f"<br>и ещё {more}" if more > 0 else ""))
-
     def _selected_game(self) -> str | None:
         r = self.table.currentRow()
         if r < 0 or not self.table.item(r, 0):
             QMessageBox.information(self, "ZapretAuto", "Сначала выберите игру в списке.")
             return None
         return self.table.item(r, 0).data(Qt.UserRole)
-
     def ignore_game(self):
         exe = self._selected_game()
         if not exe:
             return
         self.set_game_ignored(exe, True)
-
     def set_game_ignored(self, exe: str, on: bool):
         ign = set(self.settings.get("games_ignore", []))
         nocap = dict(self.settings.get("nocapture", {}))  # exe -> its servers, kept out of winws entirely
@@ -1574,7 +1475,6 @@ class MainWindow(QWidget):
             self.watcher.reset_game(exe)
         self.log(f"{exe}: обход для игры " + ("выключен" if on else "снова включён"))
         self.fill_games()
-
     def reset_game(self):
         exe = self._selected_game()
         if not exe or not self.watcher:
@@ -1582,7 +1482,6 @@ class MainWindow(QWidget):
         self.watcher.reset_game(exe)
         self.log(f"IP игры сброшены: {exe}")
         self.fill_games()
-
     def exclude_app(self):
         """A program broken by the bypass: its web servers (80/443) leave the IP-list profiles, as launchers'.
         The watcher learns them from its traffic, so watching turns on."""
@@ -1591,16 +1490,17 @@ class MainWindow(QWidget):
             return
         exe = path.replace("/", "\\").rsplit("\\", 1)[-1].lower()
         self.save(apps_exclude=sorted(set(self.settings.get("apps_exclude", [])) | {exe}), game_watch=True)
+        self._ensure_watcher()
+        self.log(f"обход не будет трогать серверы {exe}")
+        QMessageBox.information(self, "ZapretAuto", f"Готово: обход перестанет трогать серверы {exe}.\n\n"
+                                "Перезапустите программу — её адреса соберутся сами за пару секунд, и она "
+                                "должна заработать. Отменить: «Списки» → «Программы, которые обход не трогает».")
+    def _ensure_watcher(self):
         if not self.watcher:
             self.cb["game_watch"].blockSignals(True)
             self.cb["game_watch"].setChecked(True)
             self.cb["game_watch"].blockSignals(False)
             self.start_watcher()
-        self.log(f"обход не будет трогать серверы {exe}")
-        QMessageBox.information(self, "ZapretAuto", f"Готово: обход перестанет трогать серверы {exe}.\n\n"
-                                "Перезапустите программу — её адреса соберутся сами за пару секунд, и она "
-                                "должна заработать. Отменить: «Списки» → «Программы, которые обход не трогает».")
-
     def add_game(self):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите exe игры", "", "Программы (*.exe)")
         if path:
@@ -1616,16 +1516,11 @@ class MainWindow(QWidget):
             self.save(games_force=sorted(set(self.settings.get("games_force", [])) | {exe}),
                       games_ignore=[x for x in self.settings.get("games_ignore", []) if x.lower() != name],
                       game_watch=True)  # adding a game by hand means "watch it": also undo an earlier «Не игра»
-            if not self.watcher:
-                self.cb["game_watch"].blockSignals(True)
-                self.cb["game_watch"].setChecked(True)
-                self.cb["game_watch"].blockSignals(False)
-                self.start_watcher()
+            self._ensure_watcher()
             if self.watcher:
                 self.watcher.add_manual(exe)
             self.log(f"игра добавлена: {exe}")
             self.fill_games()
-
     def share_games(self):
         games = self.watcher.games() if self.watcher else {}
         ign = set(self.settings.get("games_ignore", []))
@@ -1642,7 +1537,6 @@ class MainWindow(QWidget):
         from app import __version__, sharedb
         webbrowser.open(sharedb.games_report_url(__version__, found, self.watcher.web_nets()))
         self.log("открыта страница отправки адресов игр")
-
     # ---------- updates ----------
     def check_update(self, manual: bool = False):
         if updater:
@@ -1656,7 +1550,6 @@ class MainWindow(QWidget):
             updater.check_async(lambda tag, newer: self.bridge.update_checked.emit(tag, newer))
             if hasattr(updater, "app_check_async"):
                 updater.app_check_async(lambda tag, newer: self.bridge.app_checked.emit(tag, newer))
-
     def _update_deferred(self, now: float) -> bool:
         """«Обновляться только в тишине»: put the update off while a call or a full-screen app runs, re-checking
         every 10 min; after a day of waiting it goes anyway (old versions break as upstream moves on)."""
@@ -1673,14 +1566,12 @@ class MainWindow(QWidget):
         self._deferred_since = since
         self._next_update_check = now + 600
         return True
-
     def _show_upd(self, key, text):
         self._upd = {**getattr(self, "_upd", {}), key: text}
         if len(self._upd) == 2:  # both answers in (zapret + app)
             self.lbl_upd.show()
             self.lbl_upd.setText(f"{self._upd['app']}. {self._upd['zapret']}. Проверено в {time.strftime('%H:%M')}.")
             self.btn_check.setEnabled(True)
-
     def on_app_checked(self, tag, newer):
         from app import __version__
         auto = self.settings.get("auto_update", True)
@@ -1706,7 +1597,6 @@ class MainWindow(QWidget):
                     self.lbl_upd.setText(f"Не удалось установить ZapretAuto {tag} — подробности в журнале.")
             self._app_updating = True  # two checks at once downloaded and ran the installer twice
             self._run(lambda log: updater.app_update(log), done)
-
     def on_update_checked(self, tag, newer):
         self.log(f"zapret {tag}: " + ("есть обновление" if newer else "последняя версия") if tag else "zapret: проверить обновления не удалось")
         self._show_upd("zapret", "zapret: " + ("не удалось проверить" if not tag else
@@ -1718,7 +1608,6 @@ class MainWindow(QWidget):
                 self._next_update_check = time.time() + 600
             elif newer:
                 self.do_update(True)
-
     def do_update(self, auto: bool):
         if not updater or self.busy:
             return
@@ -1729,7 +1618,6 @@ class MainWindow(QWidget):
         self.refresh()
         self._run(lambda log: updater.update(log, self.runner.stop),
                   lambda ok: self._update_done(ok, was, auto))
-
     def _update_done(self, ok, was, auto):
         self.busy = False
         self.log("обновление завершено" if ok else "обновление не выполнено")
@@ -1739,7 +1627,6 @@ class MainWindow(QWidget):
         if was:
             self.start_runner()
         self.refresh()
-
     def _verify_after_update(self):
         """New zapret: keep the strategy if Discord/YouTube still open with it; re-pick (2–4 min offline) only if not."""
         if not tester.chosen_strategy() or not self.start_runner():
@@ -1748,7 +1635,6 @@ class MainWindow(QWidget):
             return
         self.busy, self.busy_text = True, "Проверяю обход после обновления…"
         self.refresh()
-
         def done(res):
             self.busy = False
             core = [v for k, v in (res or {}).items() if k in ("Discord", "YouTube")]
@@ -1761,7 +1647,6 @@ class MainWindow(QWidget):
                      "проверить после обновления не удалось — стратегия оставлена")
             self.refresh()
         self._run(lambda log: tester.quick_check(light=True), done)
-
     # ---------- lifecycle ----------
     def startup(self, autostart=True):
         if self.settings.get("autostart"):
@@ -1782,7 +1667,6 @@ class MainWindow(QWidget):
             QTimer.singleShot(5000, self.fill_isp)
         if self.settings.get("game_watch"):
             self.start_watcher()
-
     def quit(self):
         self._cancel = True  # let a running pick stop at its next step
         if self.runner.running:

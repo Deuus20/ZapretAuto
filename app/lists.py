@@ -2,16 +2,11 @@
 import re
 import shutil
 import urllib.request
-
 import requests
-
 from . import paths
-
 IPSET_URL = ("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/"
              ".service/ipset-service.txt")
 _IP_RE = re.compile(r"^(\d{1,3}(\.\d{1,3}){3}|[0-9a-fA-F:]+:[0-9a-fA-F:]*)(/\d{1,3})?$")
-
-
 def update_ipset(log=print) -> bool:
     try:
         req = urllib.request.Request(IPSET_URL, headers={"User-Agent": "ZapretAuto"})
@@ -40,11 +35,7 @@ def update_ipset(log=print) -> bool:
     save_settings(ipset_updated=time.time())
     log(f"ipset: обновлено, записей: {len(lines)}")
     return True
-
-
 DOMAIN_PLACEHOLDER = "domain.example.abc"  # winws refuses empty lists: upstream keeps this dummy entry
-
-
 def add_user_domain(domain: str, name: str = "list-general-user.txt") -> bool:
     """Add a domain to a user hostlist (bypass it, or with list-exclude-user.txt: leave it alone).
     False if already there."""
@@ -54,8 +45,6 @@ def add_user_domain(domain: str, name: str = "list-general-user.txt") -> bool:
         return False
     paths.write_list(f, "\n".join([l for l in lines if l.strip()] + [domain]) + "\n")
     return True
-
-
 def remove_user_domain(domain: str, name: str = "list-general-user.txt") -> None:
     f = paths.LISTS / name
     if f.exists():
@@ -64,8 +53,6 @@ def remove_user_domain(domain: str, name: str = "list-general-user.txt") -> None
         if not any(not l.strip().startswith("#") for l in keep):
             keep.append(DOMAIN_PLACEHOLDER)
         paths.write_list(f, "\n".join(keep) + "\n")
-
-
 def user_list_paths() -> dict:
     return {
         "list-general-user.txt": paths.LISTS / "list-general-user.txt",
@@ -73,16 +60,12 @@ def user_list_paths() -> dict:
         "ipset-exclude-user.txt": paths.LISTS / "ipset-exclude-user.txt",
         "games_manual": paths.DATA / "games_manual.txt",
     }
-
-
 TELEGRAM_CIDR_URL = "https://core.telegram.org/resources/cidr.txt"
 # fallback: Telegram's published IPv4 ranges (core.telegram.org itself is often unreachable)
 TELEGRAM_CIDRS = [
     "91.105.192.0/23", "91.108.4.0/22", "91.108.8.0/22", "91.108.12.0/22", "91.108.16.0/22",
     "91.108.20.0/22", "91.108.56.0/22", "95.161.64.0/20", "149.154.160.0/20", "185.76.151.0/24",
 ]
-
-
 def set_telegram(on: bool, log=print) -> None:
     """Fill (or clear) data/lists/ipset-telegram.txt, which every ipset profile also reads."""
     f = paths.LISTS / "ipset-telegram.txt"

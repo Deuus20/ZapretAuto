@@ -1,52 +1,33 @@
 """Environment diagnostics for winws/WinDivert."""
 import re
 import subprocess
-
 import psutil
-
 from . import paths
-
 NOWIN = 0x08000000  # CREATE_NO_WINDOW
 CONFLICT = ["GoodbyeDPI", "Killer", "SmartByte", "TracSrvWrapper", "discordfix_zapret", "winws1", "winws2"]
-
-
 def _run(args: list[str], timeout=20) -> tuple[int, str]:
     try:
         r = subprocess.run(args, capture_output=True, timeout=timeout, creationflags=NOWIN)
         return r.returncode, r.stdout.decode("utf-8", "replace") + r.stderr.decode("utf-8", "replace")
     except Exception as e:  # noqa: BLE001
         return -1, str(e)
-
-
 def _ps(cmd: str) -> tuple[int, str]:
     return _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd])
-
-
 def _svc_status(name: str) -> str | None:
     """Service status string (Running/Stopped/...) or None if absent."""
     rc, out = _ps(f"$s=Get-Service -Name '{name}' -ErrorAction SilentlyContinue; if($s){{$s.Status}}")
     return out.strip() or None
-
-
 def _item(label, level, detail="", fix=None, fix_label=None):
     r = {"label": label, "level": level, "detail": detail, "fix": fix}
     if fix_label:
         r["fix_label"] = fix_label  # button text when "Исправить" would mislead (e.g. «Убрать»)
     return r
-
-
 def _procs() -> set[str]:
     return {(p.info["name"] or "").lower() for p in psutil.process_iter(["name"])}
-
-
 BYPASS_FILES = ("winws.exe", "WinDivert.dll", "WinDivert64.sys", "cygwin1.dll")
-
-
 def missing_files() -> list[str]:
     """Bypass binaries that are gone (antivirus quarantine is the usual reason)."""
     return [f for f in BYPASS_FILES if not (paths.BIN / f).is_file()]
-
-
 def first_problem() -> str | None:
     """Short human-readable cause for a bypass that won't start, or None."""
     for r in run_checks():
@@ -54,19 +35,13 @@ def first_problem() -> str | None:
                                                                             "Остаточный WinDivert")):
             return f"{r['label']}: {r['detail']}"
     return None
-
-
 ANYCAST_DOMAINS = ("discord.com", "rutracker.org")  # Cloudflare anycast: same IPs from any resolver
 STUB_CHECK_DOMAINS = ("www.youtube.com", "youtube.com")
-
-
 # JSON DoH endpoints, tried in order: ISPs block some of them (8.8.8.8 since July 2026)
 DOH_JSON = ("https://1.1.1.1/dns-query", "https://dns.quad9.net:5053/dns-query", "https://dns.google/resolve")
 # DoH templates for browsers, same providers and order (fix_browser_doh picks the first reachable one)
 DOH_TEMPLATES = ("https://cloudflare-dns.com/dns-query", "https://dns.quad9.net/dns-query",
                  "https://dns.google/dns-query{?dns}")
-
-
 def _doh(name: str) -> set[str]:
     """A records of name via DNS-over-HTTPS; raises if no endpoint answers."""
     import requests
@@ -79,8 +54,6 @@ def _doh(name: str) -> set[str]:
         except (requests.RequestException, ValueError) as e:
             err = e
     raise OSError(f"no DoH endpoint answered: {err}")
-
-
 def dns_poisoned() -> list[str] | None:
     """Domains whose system-resolver answers look forged: bogus IPs, "no such domain" for a domain that exists
     (ISPs answer NXDOMAIN for blocked sites since August 2026), or no overlap with DoH for anycast domains.
@@ -113,16 +86,12 @@ def dns_poisoned() -> list[str] | None:
             if doh and not (sys_ips & doh):
                 bad.append(d)
     return bad if bad or not doh_down else None
-
-
 def run_checks() -> list[dict]:
     res = []
     procs = _procs()
-
     st = _svc_status("BFE")
     res.append(_item("Base Filtering Engine", "ok" if st == "Running" else "err",
                      f"служба: {st or 'не найдена'}" + ("" if st == "Running" else " — WinDivert не заработает")))
-
     rc, out = _ps("(Get-NetTCPSetting -SettingName Internet).Timestamps")
     ts = out.strip().lower()
     if rc == 0 and ts in ("enabled", "disabled"):
@@ -130,33 +99,27 @@ def run_checks() -> list[dict]:
                          None if ts == "enabled" else "tcp_timestamps"))
     else:
         res.append(_item("TCP timestamps", "warn", "не удалось определить", "tcp_timestamps"))
-
     missing = missing_files()
     res.append(_item("Файлы обхода", "err" if missing else "ok",
                      ("нет: " + ", ".join(missing) + " — скорее всего, их удалил антивирус. Добавьте папку программы "
                       "в исключения и переустановите ZapretAuto") if missing else "winws.exe, WinDivert на месте"))
-
     bad = []
     for n in CONFLICT:
         if _svc_status(n) == "Running" or n.lower() + ".exe" in procs:
             bad.append(n)
     res.append(_item("Конфликтующие службы", "warn" if bad else "ok", ", ".join(bad) or "нет"))
-
     zs = _svc_status("zapret")
     if zs == "Running":
         res.append(_item("Служба zapret", "warn", "запущена (конфликтует с приложением)", "stop_zapret_service"))
     else:
         res.append(_item("Служба zapret", "ok", zs or "нет"))
-
     ag = "adguardsvc.exe" in procs
     res.append(_item("AdGuard", "warn" if ag else "ok", "AdguardSvc.exe запущен — может мешать" if ag else "нет"))
-
     wd = _svc_status("WinDivert")
     stale = wd == "Running" and "winws.exe" not in procs and "winws2.exe" not in procs  # winws2: zapret2 mode
     res.append(_item("Остаточный WinDivert", "warn" if stale else "ok",
                      "служба WinDivert работает без winws.exe" if stale else (wd or "нет"),
                      "remove_windivert" if stale else None))
-
     rc, out = _ps(
         r"$n=0; $p='HKLM:\System\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters'; "
         r"if(Test-Path $p){ Get-ChildItem $p -Recurse -ErrorAction SilentlyContinue | ForEach-Object { "
@@ -178,7 +141,6 @@ def run_checks() -> list[dict]:
         res.append(_item("Secure DNS (DoH)", "warn", "не включён — провайдер может подменять DNS"))
     else:
         res.append(_item("Secure DNS (DoH)", "ok", "включён"))
-
     bad = dns_poisoned()
     if bad is None:
         res.append(_item("Подмена DNS", "ok", "не удалось проверить (нет доступа к 1.1.1.1)"))
@@ -191,7 +153,6 @@ def run_checks() -> list[dict]:
                           "Яндекс.Браузере"), None if doh_on else "browser_doh"))
     else:
         res.append(_item("Подмена DNS", "ok", "ответы DNS совпадают с DNS-over-HTTPS"))
-
     try:
         from .tester import vpn_active
         v = vpn_active()
@@ -247,8 +208,6 @@ def run_checks() -> list[dict]:
                          if blocked else "включён и проходит; если YouTube в браузере всё же тормозит — «Исправить»",
                          "disable_quic"))
     return res
-
-
 def _quic_blocked() -> bool:
     """HTTP/3 to YouTube fails while HTTPS over TCP works (checked through the running bypass)."""
     try:
@@ -259,12 +218,8 @@ def _quic_blocked() -> bool:
         return tester.probe(tester.Target("YouTubeWeb", "https://www.youtube.com/")) is not None
     except Exception:  # noqa: BLE001 (no curl_cffi / no network: no verdict)
         return False
-
-
 QUIC_POLICIES = (r"SOFTWARE\Policies\Google\Chrome", r"SOFTWARE\Policies\Microsoft\Edge",
                  r"SOFTWARE\Policies\YandexBrowser")
-
-
 def _quic_disabled() -> bool:
     import winreg
     try:
@@ -272,8 +227,6 @@ def _quic_disabled() -> bool:
             return winreg.QueryValueEx(k, "QuicAllowed")[0] == 0
     except OSError:
         return False
-
-
 def _disable_quic() -> str:
     """Browsers then use TCP for YouTube, which the bypass handles more reliably. Restart the browser."""
     import winreg
@@ -281,8 +234,6 @@ def _disable_quic() -> str:
         with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_SET_VALUE) as k:
             winreg.SetValueEx(k, "QuicAllowed", 0, winreg.REG_DWORD, 0)
     return "QUIC отключён для Chrome, Edge и Яндекс.Браузера — перезапустите браузер"
-
-
 def _smart_app_control() -> int | None:
     """Windows 11 Smart App Control: 0 off, 1 on (enforced), 2 evaluation; None where it doesn't exist."""
     import winreg
@@ -291,8 +242,6 @@ def _smart_app_control() -> int | None:
             return int(winreg.QueryValueEx(k, "VerifiedAndReputablePolicyState")[0])
     except (OSError, ValueError):
         return None
-
-
 FLOWSEAL_HOSTS_URL = ("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/"
                       ".service/hosts")
 HOSTS_BEGIN = "# ZapretAuto: адреса от Flowseal (Discord, Telegram, GitHub) — начало"
@@ -304,18 +253,12 @@ HOSTS_DOMAINS = ("discord.com", "discord.gg", "discordapp.com", "discordapp.net"
                  "github.com", "githubusercontent.com", "githubassets.com",
                  "telegram.org", "telegram.me", "telegram.dog", "telegram.space", "cdn-telegram.org",
                  "t.me", "tg.dev", "telesco.pe")
-
-
 def _hosts_allowed(host: str) -> bool:
     return any(host == d or host.endswith("." + d) for d in HOSTS_DOMAINS)
-
-
 def _hosts_file():
     import os
     from pathlib import Path
     return Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "drivers" / "etc" / "hosts"
-
-
 def flowseal_hosts() -> list[tuple[str, str]]:
     """(ip, host) pairs Flowseal maintains: right addresses for Discord, Telegram and GitHub when the ISP's DNS
     lies. Only valid IPs and host names pass."""
@@ -336,8 +279,6 @@ def flowseal_hosts() -> list[tuple[str, str]]:
     if len(out) < 10:
         raise ValueError("список Flowseal пустой или повреждён")
     return out
-
-
 def _read_hosts() -> tuple[list[str], bool]:
     raw = _hosts_file().read_bytes()
     bom = raw.startswith(b"\xef\xbb\xbf")
@@ -346,13 +287,9 @@ def _read_hosts() -> tuple[list[str], bool]:
     except UnicodeDecodeError:
         text = raw.decode("cp1251", errors="replace")
     return text.splitlines(), bom
-
-
 def _write_hosts(lines: list[str], bom: bool) -> None:
     _hosts_file().write_bytes(("\ufeff" if bom else "").encode("utf-8") + ("\r\n".join(lines) + "\r\n").encode())
     _run(["ipconfig", "/flushdns"])
-
-
 def _strip_block(lines: list[str]) -> list[str]:
     if HOSTS_END not in (ln.strip() for ln in lines):  # end marker lost (edited by hand): drop only our markers,
         return [ln for ln in lines if ln.strip() != HOSTS_BEGIN]  # never the user's lines after it
@@ -365,15 +302,11 @@ def _strip_block(lines: list[str]) -> list[str]:
         elif not inside:
             out.append(ln)
     return out
-
-
 def hosts_state(entries: list[tuple[str, str]]) -> tuple[int, bool]:
     """(how many of Flowseal's pairs are in hosts, whether our block is there)."""
     lines, _ = _read_hosts()
     have = {tuple(ln.split("#", 1)[0].split()[:2]) for ln in lines if len(ln.split("#", 1)[0].split()) >= 2}
     return sum(1 for e in entries if e in have), any(ln.strip() == HOSTS_BEGIN for ln in lines)
-
-
 def _hosts_update() -> str:
     """Write Flowseal's pairs as our marked block; older lines for the same names (ours or Flowseal's own
     service.bat) are replaced, everything else in hosts stays."""
@@ -387,21 +320,15 @@ def _hosts_update() -> str:
     _write_hosts(keep + ["", HOSTS_BEGIN] + [f"{ip} {h}" for ip, h in entries] + [HOSTS_END], bom)
     return (f"в hosts записаны адреса от Flowseal ({len(entries)}): Discord, Telegram и GitHub откроются, даже если "
             "провайдер подменяет DNS. Перезапустите Discord. Убрать — здесь же, «Убрать»")
-
-
 def _hosts_remove() -> str:
     lines, bom = _read_hosts()
     if not any(ln.strip() == HOSTS_BEGIN for ln in lines):
         return "в hosts нет записей этой программы"  # don't touch the file for nothing
     _write_hosts(_strip_block(lines), bom)
     return "адреса от Flowseal убраны из hosts"
-
-
 DISCORD_BUILDS = {"discord": "Discord.exe", "discordptb": "DiscordPTB.exe", "discordcanary": "DiscordCanary.exe",
                   "discorddevelopment": "DiscordDevelopment.exe"}
 CACHE_DIRS = ("Cache", "Code Cache", "GPUCache")
-
-
 def _discord_caches() -> list:
     """Cache folders of installed Discord builds (%APPDATA%\\discord*): a stale cache after blocks kept
     Discord stuck at loading/updating; Flowseal's service.bat clears the same folders."""
@@ -409,8 +336,6 @@ def _discord_caches() -> list:
     from pathlib import Path
     base = Path(os.environ.get("APPDATA", ""))
     return [base / b / c for b in DISCORD_BUILDS for c in CACHE_DIRS if (base / b / c).is_dir()]
-
-
 def _clear_discord_cache() -> str:
     import shutil
     for exe in DISCORD_BUILDS.values():
@@ -424,8 +349,6 @@ def _clear_discord_cache() -> str:
             left.append(d.name)
     return ("кэш Discord очищен — запустите Discord заново" if not left else
             "часть кэша не удалилась (" + ", ".join(left) + ") — закройте Discord и нажмите ещё раз")
-
-
 def _browser_doh_on() -> bool:
     import winreg
     try:
@@ -433,8 +356,6 @@ def _browser_doh_on() -> bool:
             return winreg.QueryValueEx(k, "DnsOverHttpsMode")[0] == "secure"
     except OSError:
         return False
-
-
 def _browser_doh() -> str:
     """Secure DNS in Chromium browsers via policy, with the first DoH provider this network can reach."""
     import winreg
@@ -457,8 +378,6 @@ def _browser_doh() -> str:
     host = tpl.split("/")[2]
     return (f"защищённый DNS ({host}) включён в Chrome, Edge и Яндекс.Браузере — перезапустите браузер. "
             "Браузер покажет «Управляется организацией»: это и есть эта настройка")
-
-
 def apply_fix(fix_id: str) -> str:
     funcs = {"disable_quic": _disable_quic, "browser_doh": _browser_doh, "discord_cache": _clear_discord_cache,
              "hosts_update": _hosts_update, "hosts_remove": _hosts_remove}
@@ -479,8 +398,6 @@ def apply_fix(fix_id: str) -> str:
         rc, o = _run(c)
         out.append(f"{' '.join(c)} -> {rc}: {o.strip()[:200]}")
     return "\n".join(out)
-
-
 if __name__ == "__main__":
     for r in run_checks():
         print(r)
