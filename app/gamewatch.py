@@ -1,21 +1,24 @@
 """Detect game processes and collect their remote IPs into data/lists/ipset-games.txt."""
+import contextlib
 import ctypes
 import ipaddress
 import json
 import os
 import re
+import socket
 import statistics
 import subprocess
-import socket
 import threading
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+
 import psutil
+
 from . import known_games, paths
 from .settings import load_settings, save_settings
-import contextlib
+
 PLACEHOLDER = "203.0.113.113/32"
 SKIP_PORTS = {80, 443}  # web/CDN traffic (launchers, login APIs) is covered by hostlists/ipset; desyncing it broke launchers
 MAX_WEB_NETS = 512      # /24s of games' web/login servers kept out of the ipset-all profiles
@@ -134,6 +137,12 @@ def public_ipv4(ip: str) -> bool:
     except ValueError:
         return False
     return a.is_global and not a.is_multicast
+def _is_server_ip(ip: str, port: int, banned: set[str]) -> bool:
+    """Адрес сервера игры: публичный IPv4, не забаненный и не служебный порт (DNS/NTP/DoT игры — не её сервер).
+
+    IPv6 сюда не проходит намеренно: движок и списки winws работают с IPv4, и адрес вида 2a00::1 в ipset
+    сломал бы стратегию."""
+    return public_ipv4(ip) and ip not in banned and port >= 1024
 class _Addr(ctypes.Structure):
     """WINDIVERT_ADDRESS (2.2), FLOW view of the 64-byte union."""
     _fields_ = [("Timestamp", ctypes.c_int64), ("Bits", ctypes.c_uint32), ("Reserved2", ctypes.c_uint32),
@@ -168,6 +177,9 @@ def valve_sdr(ip: str) -> bool:
     return _in(ip, _SDR)
 def cdn(ip: str) -> bool:
     return _in(ip, _CDN)
+def _sort_key(x: str) -> tuple[int, ...]:
+    """Numeric order of "1.2.3.4" and "1.2.3.0/24" (string order would put .10 before .9)."""
+    return tuple(int(o) for o in re.split(r"[./]", x)[:4])
 def _group(ips: set[str]) -> set[str]:
     """Collapse >=4 IPs of one /24 into the /24."""
     by24 = defaultdict(list)
@@ -206,7 +218,7 @@ class GameWatcher(threading.Thread):
         self._lock = threading.Lock()
         self._games: dict[str, dict] = {}
         self._udp_hits: dict[str, dict[str, float]] = {}
-        self._events: list[tuple[int, str, int]] = []
+        self._events: list[tuple[int, str, int, int]] = []  # (pid, ip, port, 6=tcp/17=udp)
         self._ev_lock = threading.Lock()
         self._open_flows: dict[int, int] = {}  # WinDivert EndpointId -> pid of open game (non-web) flows
         self._names: tuple[float, set[str]] = (0.0, set())
@@ -241,6 +253,10 @@ class GameWatcher(threading.Thread):
                                  if k in forced or "\\windowsapps\\" not in v.get("path", "").lower()},
                           games_schema=3)
         self._web_nets: set[str] = set(load_settings().get("games_web", [])) | KNOWN_WEB_NETS
+        # game_capture off: servers are still collected (to keep them out of the ipset-all ranges and to show
+        # them), but never added to the bypass; games_exclude: the same per game
+        self._capture = bool(load_settings().get("game_capture", True))
+        self._excluded = {str(x).lower() for x in load_settings().get("games_exclude", [])}
         now = time.time()
         for exe, g in load_settings().get("games", {}).items():
             ips = set(g.get("ips", []))
@@ -270,7 +286,9 @@ class GameWatcher(threading.Thread):
     def games(self) -> dict[str, dict]:
         with self._lock:
             return {k: {"path": v["path"], "ips": set(v["ips"]), "active": v["active"],
-                        "ping_ms": v["ping_ms"], "started": v.get("started", 0)} for k, v in self._games.items()}
+                        "ping_ms": v["ping_ms"], "started": v.get("started", 0),
+                        "excluded": k in self._excluded or not self._capture}
+                    for k, v in self._games.items()}
     def web_nets(self) -> list[str]:
         """Login/web nets learned on this PC (for sharing; shipped and shared ones are left out)."""
         with self._lock:
@@ -285,6 +303,25 @@ class GameWatcher(threading.Thread):
             g["path"] = path
         self._persist_settings()
         return exe
+    def set_capture(self, on: bool) -> None:
+        """Switch «перехватывать подключения игр»: off leaves every game's servers out of the bypass."""
+        with self._lock:
+            self._capture = bool(on)
+        self._refresh()
+    def set_excluded(self, exe: str, on: bool) -> None:
+        """One game's servers: in the bypass (False) or left alone (True). The caller saves settings."""
+        with self._lock:
+            if on:
+                self._excluded.add(exe.lower())
+            else:
+                self._excluded.discard(exe.lower())
+        self._refresh()
+    def _refresh(self) -> None:
+        """Rewrite both lists now: a toggle must take effect without waiting for new traffic."""
+        try:
+            self._flush()
+        except OSError as e:  # a locked list: the run loop retries; the settings stay as chosen
+            self.log(f"gamewatch: списки не обновлены: {e}")
     @staticmethod
     def _add_ip(g: dict, ip: str, now: float) -> bool:
         """Remember a game server (caller holds the lock); True if the ipset must change. A full list drops the
@@ -404,6 +441,8 @@ class GameWatcher(threading.Thread):
     def _recv_loop(self) -> None:
         a = _Addr()
         dll, h = self._dll, self._handle
+        if dll is None or h is None:
+            return
         while not self._stop_ev.is_set() and self._handle is not None:
             if not dll.WinDivertRecv(h, None, 0, None, ctypes.byref(a)):
                 if not self._stop_ev.is_set():  # driver stopped/handle broken: psutil until run() reopens it
@@ -468,10 +507,10 @@ class GameWatcher(threading.Thread):
             self._ping[ip] = ms
             for g in self._games.values():
                 if ip in g["ips"]:
-                    vals = [self._ping[i] for i in g["ips"] if self._ping.get(i) is not None]
+                    vals = [v for i in g["ips"] if (v := self._ping.get(i)) is not None]
                     g["ping_ms"] = min(vals) if vals else None
         self._pinging.discard(ip)
-    def _udp_game(self, exe: str, path: str, ip: str, port: int, proto: int, settings: dict) -> bool:
+    def _udp_game(self, exe: str, path: str | None, ip: str, port: int, proto: int, settings: dict) -> bool:
         """Heuristic for games outside known launcher dirs: UDP to several public peers on high ports."""
         p = (path or "").lower()
         if (proto != 17 or port < 1024 or exe in NON_GAME_EXES or exe in UDP_NON_GAME_EXES
@@ -509,7 +548,7 @@ class GameWatcher(threading.Thread):
                         self._web_nets.add(net)
                     new_web = True
                 continue
-            if not public_ipv4(ip) or ip in banned or port < 1024:  # DNS/NTP/DoT of a game dir are not its servers
+            if not _is_server_ip(ip, port, banned):
                 continue
             exe, path = self._proc(pid)
             if not exe or not (classify(path, settings) or self._udp_game(exe, path, ip, port, proto, settings)):
@@ -577,13 +616,17 @@ class GameWatcher(threading.Thread):
             web = sorted(self._web_nets)
         save_settings(games=data, games_web=web)
     def _render_web(self) -> str:
-        """ipset-exclude-games.txt. Off by default now (games_web_bypass=false turns it on): the «16 KB» whitelist
-        block stalls these very servers (Wardogs' Epic login on Cloudflare) unless they are desynced."""
+        """ipset-exclude-games.txt: what the ipset profiles must not touch. Login/web nets of games are off by
+        default (games_web_bypass=false turns them on): the «16 KB» whitelist block stalls those very servers
+        (Wardogs' Epic login on Cloudflare) unless they are desynced. Servers of a game the user put out of the
+        bypass (or of every game when capture is off) go here too, so the ipset-all ranges leave them alone."""
         with self._lock:
-            nets = sorted(self._web_nets, key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
-        if not nets or load_settings().get("games_web_bypass", True):
-            nets = [PLACEHOLDER]
-        return "\n".join(nets) + "\n"
+            nets = [] if load_settings().get("games_web_bypass", True) else list(self._web_nets)
+            extra: set[str] = set()
+            for exe, g in self._games.items():
+                if not self._capture or exe in self._excluded:
+                    extra |= set(g["ips"])
+        return "\n".join(sorted(set(nets) | extra, key=_sort_key) or [PLACEHOLDER]) + "\n"
     @staticmethod
     def _write(name: str, text: str) -> None:
         paths.LISTS.mkdir(parents=True, exist_ok=True)
@@ -600,10 +643,10 @@ class GameWatcher(threading.Thread):
                 time.sleep(0.02)
     def _render(self) -> str:
         with self._lock:
-            ips = set().union(*[g["ips"] for g in self._games.values()]) if self._games else set()
-            sdr = any(g.get("sdr") for g in self._games.values())
-        lines = sorted(_group(ips) | (set(VALVE_SDR_NETS) if sdr else set()),
-                       key=lambda x: tuple(int(o) for o in re.split(r"[./]", x)[:4]))
+            live = [g for exe, g in self._games.items() if self._capture and exe not in self._excluded]
+            ips = set().union(*[g["ips"] for g in live]) if live else set()
+            sdr = any(g.get("sdr") for g in live)
+        lines = sorted(_group(ips) | (set(VALVE_SDR_NETS) if sdr else set()), key=_sort_key)
         man = paths.DATA / "games_manual.txt"
         if man.exists():
             for ln in man.read_text(encoding="utf-8", errors="ignore").splitlines():
@@ -637,8 +680,8 @@ class GameWatcher(threading.Thread):
         nets = set()
         for host in KNOWN_WEB_HOSTS:
             try:
-                for *_, sa in socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM):
-                    nets.add(sa[0].rsplit(".", 1)[0] + ".0/24")
+                for res in socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM):
+                    nets.add(str(res[4][0]).rsplit(".", 1)[0] + ".0/24")
             except OSError:
                 pass
         # one try at start missed the base for weeks: at boot the network (or winws starting) may not be up yet

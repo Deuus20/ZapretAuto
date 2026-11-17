@@ -2,6 +2,7 @@
 import json
 import logging
 import logging.handlers
+import os
 import platform
 import re
 import sys
@@ -10,16 +11,20 @@ import time
 import traceback
 import zipfile
 from pathlib import Path
+
 from . import paths
+
 LOG_DIR = paths.DATA / "logs"
 log = logging.getLogger("zapretauto")
 _on_crash = None  # callable(str) set by the GUI to show a message
 def setup() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    h = logging.handlers.RotatingFileHandler(LOG_DIR / "zapretauto.log", maxBytes=1_000_000, backupCount=3,
-                                             encoding="utf-8")
-    h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    log.addHandler(h)
+    # повторный вызов (тесты, перезапуск внутри процесса) не должен добавлять второй файл журнала
+    if not any(isinstance(h, logging.handlers.RotatingFileHandler) for h in log.handlers):
+        h = logging.handlers.RotatingFileHandler(LOG_DIR / "zapretauto.log", maxBytes=1_000_000, backupCount=3,
+                                                 encoding="utf-8")
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        log.addHandler(h)
     log.setLevel(logging.INFO)
     sys.excepthook = _excepthook
     threading.excepthook = lambda a: _excepthook(a.exc_type, a.exc_value, a.exc_traceback)
@@ -33,24 +38,44 @@ def _excepthook(t, v, tb) -> None:
             _on_crash(f"{t.__name__}: {v}")
         except Exception:  # noqa: BLE001
             pass
+_USER_DIR = re.compile(r"(?i)([a-z]:[\\/]+users[\\/]+)[^\\/\"'\s]+")
 def _redact(text: str) -> str:
-    """Hide the Windows user name."""
-    return re.sub(r"(?i)(c:[\\/]+users[\\/]+)[^\\/\"']+", r"\1<user>", text)
+    """Hide the Windows user name: в путях на любом диске и отдельным словом (например, в ответе curl)."""
+    text = _USER_DIR.sub(r"\1<user>", text)
+    user = os.environ.get("USERNAME", "")
+    if user and len(user) >= 3:
+        text = re.sub(rf"(?i)(?<![\w.-]){re.escape(user)}(?![\w.-])", "<user>", text)
+    return text
+_IP_TOKEN = re.compile(r"(?<![\w.:])[0-9A-Fa-f:.]{3,}(?![\w:])")
 def _redact_public(text: str) -> str:
-    """For a public GitHub issue: also hide every non-local IPv4 (VPN servers, the user's own address)."""
+    """For a public GitHub issue: also hide every non-local IP (VPN servers, the user's own address).
+
+    Адрес часто стоит с портом (`1.2.3.4:443`) или в скобках: порт сохраняем, адрес прячем — иначе разбор
+    соединений в отчёте теряет смысл, а IP утекает."""
     import ipaddress
-    def ip(m):
-        try:
-            a = ipaddress.IPv4Address(m.group(0))
-        except ValueError:
-            return m.group(0)
-        return m.group(0) if a.is_private or a.is_loopback else "<ip>"
-    return re.sub(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", ip, _redact(text))
+    def mask(m):
+        token = m.group(0)
+        candidates = [token]
+        core, sep, port = token.rpartition(":")
+        if sep and port.isdigit():  # `1.2.3.4:443`: сначала пробуем адрес без порта
+            candidates.insert(0, core)
+        for cand in candidates:
+            try:
+                a = ipaddress.ip_address(cand.strip("[]").rstrip("."))
+            except ValueError:
+                continue
+            local = a.is_private or a.is_loopback or a.is_link_local or a.is_multicast or a.is_unspecified
+            if local:
+                return token
+            return f"<ip>{sep}{port}" if cand != token else "<ip>"
+        return token
+    return _IP_TOKEN.sub(mask, _redact(text))
 ISSUE_URL_MAX = 7500  # GitHub drops prefilled issue text beyond ~8 KB of URL
 def issue_url(what: str = "", diag_results: list | None = None) -> str:
     """Prefilled GitHub issue: versions, the user's words, problems found by diagnostics and the log tail
     (as many last lines as fit). Opened in the browser; the user presses «Create»."""
     from urllib.parse import quote
+
     from . import __version__, tester, updater
     from .updater import APP_REPO
     s = tester.chosen_strategy()

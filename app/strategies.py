@@ -4,7 +4,10 @@ import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
+
 from . import paths
+
 GAME_OFF = "12"  # upstream uses a dummy port when the game filter is disabled
 GAME_TCP = "1024-1934,1936-65535"  # game filter TCP minus RTMP (1935): desyncing it broke OBS streams (Flowseal 1.10.3)
 GAME_UDP = "1024-65535"
@@ -40,9 +43,14 @@ class Profile:
         if "GameFilter" in ports:
             ports = "game"
         lists = sorted(Path(re.sub(r"%\w+%", "", v.strip('"'))).stem for k in ("hostlist", "ipset") for v in self.opt(k))
-        lists = [l for l in lists if not l.endswith("-user")]
+        lists = [ln for ln in lists if not ln.endswith("-user")]
         extra = self.opt("filter-l7") + self.opt("hostlist-domains")
         return ":".join([proto, ports, "+".join(lists + extra) or "any"])
+class StrategyLike(Protocol):
+    """Что нужно от стратегии остальным: имя, профили и argv(). Реализуют Strategy и zapret2.Strategy2."""
+    name: str
+    profiles: list
+    def argv(self, game_tcp: bool = False, game_udp: bool = False, auto_hostlist: bool = False) -> list[str]: ...
 @dataclass
 class Strategy:
     name: str
@@ -114,8 +122,19 @@ def parse_bat(path: Path) -> Strategy:
         profiles.append(Profile(cur))
     name = re.sub(r"^general\s*\(?|\)?$", "", path.stem) or "default"
     return Strategy(name, wf_tcp, wf_udp, profiles)
+_CACHE: tuple[tuple, list[Strategy]] | None = None
+def _stamp() -> tuple:
+    """Версия содержимого vendor: имена и mtime general*.bat. Дешевле разбора и меняется после обновления."""
+    return (str(paths.VENDOR),) + tuple(sorted((p.name, p.stat().st_mtime_ns) for p in paths.VENDOR.glob("general*.bat")))
 def load_all(log=None) -> list[Strategy]:
-    """All parseable strategies; a broken .bat (upstream format change) is skipped, not fatal."""
+    """All parseable strategies; a broken .bat (upstream format change) is skipped, not fatal.
+
+    Разбор 22 файлов стоит ~37 мс, а вызывается и при старте обхода, и при заполнении списка в окне: держим
+    результат до изменения general*.bat (после updater.update() mtime меняется и кэш сам устаревает)."""
+    global _CACHE
+    stamp = _stamp()
+    if _CACHE and _CACHE[0] == stamp:
+        return list(_CACHE[1])
     out = []
     for p in sorted(paths.VENDOR.glob("general*.bat")):
         try:
@@ -134,7 +153,8 @@ def load_all(log=None) -> list[Strategy]:
     if not out and not _skipped_all:
         _skipped_all.append(1)
         logging.getLogger("zapretauto").error("ни одна стратегия zapret не распознана — формат general*.bat изменился?")
-    return out
+    _CACHE = (stamp, out)
+    return list(out)
 _skipped: set[str] = set()
 _skipped_all: list[int] = []
 def mix(name: str, picks: dict[str, Strategy], base: Strategy) -> Strategy:

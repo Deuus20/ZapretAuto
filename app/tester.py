@@ -1,15 +1,22 @@
 """Probe targets through each strategy, score them, build the best mix."""
-import socket
+import bisect
+import contextlib
 import json
 import re
+import socket
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Any
+
 import psutil
 import requests
+from requests.adapters import HTTPAdapter
+
 from . import paths, strategies
-from .settings import load_settings, save_settings  # noqa: F401 (re-exported)
 from .runner import Runner
+from .settings import load_settings, save_settings  # noqa: F401 (re-exported)
+
 READ_BYTES = 32 * 1024  # DPI often freezes TLS sessions after ~16 KB
 TIMEOUT = 4
 ROUNDS = 2
@@ -29,10 +36,10 @@ class Target:
     @property
     def is_speed(self) -> bool:
         return self.url.startswith("speed://")
-from .vpn import VPN_RE  # noqa: E402
-import contextlib
+from .vpn import VPN_RE  # noqa: E402  (vpn imports tester: держим импорт после классов, чтобы не было цикла)
+
 BIND: str | None = None  # source IP of a physical adapter when testing around a full-tunnel VPN
-class _SrcAdapter(requests.adapters.HTTPAdapter):
+class _SrcAdapter(HTTPAdapter):
     def __init__(self, src: str):
         self.src = src
         super().__init__()
@@ -62,7 +69,7 @@ def fetch(url: str, max_bytes: int, deadline: float, h3: bool = False) -> tuple[
             got += len(data)
             if got >= max_bytes or time.perf_counter() - t0 > deadline:
                 raise _Enough
-        kw = {"interface": BIND} if BIND else {}
+        kw: dict[str, Any] = {"interface": BIND} if BIND else {}
         if h3:  # QUIC (UDP 443): browsers use it for YouTube/Google, and strategies have separate UDP profiles
             kw["http_version"] = "v3only"
         with cr.Session(impersonate="chrome") as sess:
@@ -169,11 +176,23 @@ def probe_stun(t: Target, timeout: float = 2.0, tries: int = 2) -> float | None:
         except OSError:
             pass
     return None
+_domains_cache: dict[str, tuple[tuple, set[str]]] = {}
 def _domains(name: str) -> set[str]:
+    """Hosts of a list file, cached until the file changes: подбор читает одни и те же 4 файла на каждый target."""
     p = paths.LISTS / name
     if not p.exists():  # before the first sync_lists(): fall back to the upstream copy
         p = paths.VENDOR / "lists" / name
-    return {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")} if p.exists() else set()
+    try:
+        key = (str(p), p.stat().st_mtime_ns)
+        cached = _domains_cache.get(name)
+        if cached and cached[0] == key:
+            return cached[1]
+        ds = {ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
+              if ln.strip() and not ln.startswith("#")}
+    except OSError:
+        return set()
+    _domains_cache[name] = (key, ds)
+    return ds
 def target_group(t: Target) -> str:
     """Profile group that handles this target's host."""
     if t.group:
@@ -189,28 +208,39 @@ def target_group(t: Target) -> str:
     if _in_ipset_all(t.host) or not load_settings().get("auto_hostlist", True):  # unresolved: as before
         return "tcp:80,443,8443:ipset-all"
     return "tcp:80,443:list-general"
-_ipset_cache: tuple[float, list] = (0.0, [])
+_ipset_cache: tuple[int, list[int], list[int]] = (0, [], [])  # (mtime, начала диапазонов, концы), по возрастанию
 def _in_ipset_all(host: str) -> bool | None:
-    """Whether host's IPv4 falls in ipset-all.txt; None if it can't be resolved."""
+    """Whether host's IPv4 falls in ipset-all.txt; None if it can't be resolved.
+
+    Интервалы слиты и отсортированы: в ipset-all 26 тыс. строк, и линейный перебор на каждый адрес занимал
+    больше времени, чем сам подбор."""
     import ipaddress
     global _ipset_cache
     try:
         ip = int(ipaddress.IPv4Address(socket.gethostbyname(host)))
         f = paths.LISTS / "ipset-all.txt"
-        m = f.stat().st_mtime
+        m = f.stat().st_mtime_ns
         if _ipset_cache[0] != m:
-            nets = []
+            spans = []
             for ln in f.read_text(encoding="utf-8", errors="ignore").split():
                 try:
                     n = ipaddress.ip_network(ln, strict=False)
                 except ValueError:
                     continue
                 if n.version == 4:
-                    nets.append((int(n.network_address), int(n.broadcast_address)))
-            _ipset_cache = (m, nets)
+                    spans.append((int(n.network_address), int(n.broadcast_address)))
+            spans.sort()
+            merged: list[list[int]] = []
+            for lo, hi in spans:
+                if merged and lo <= merged[-1][1] + 1:  # соседние и пересекающиеся диапазоны — один интервал
+                    merged[-1][1] = max(merged[-1][1], hi)
+                else:
+                    merged.append([lo, hi])
+            _ipset_cache = (m, [a for a, _ in merged], [b for _, b in merged])
     except (OSError, ValueError):
         return None
-    return any(lo <= ip <= hi for lo, hi in _ipset_cache[1])
+    i = bisect.bisect_right(_ipset_cache[1], ip) - 1
+    return i >= 0 and ip <= _ipset_cache[2][i]
 BLOCK_PAGE = re.compile(r"warning\.rt\.ru|blocked|zapret-info|rkn\.gov|eais", re.I)
 SPEED_MIN = 250 * 1024    # B/s below which YouTube counts as throttled
 SPEED_BYTES = 1536 * 1024
@@ -233,7 +263,7 @@ def probe_video_cdn() -> float | None:
     try:
         if not _CDN_NODE:
             from curl_cffi import requests as cr
-            kw = {"interface": BIND} if BIND else {}
+            kw: dict[str, Any] = {"interface": BIND} if BIND else {}
             text = cr.get("https://redirector.googlevideo.com/report_mapping?di=no", impersonate="chrome",
                           timeout=TIMEOUT * 2, **kw).text  # "<your ip> => node (net)": the IP is not kept
             m = re.search(r"=>\s*([a-z0-9-]+)", text)
@@ -373,7 +403,7 @@ def _auto_pick(log, use_shared, stop) -> dict:
                 "(DoH), обход не поможет — см. «Диагностику».")
     except Exception:  # noqa: BLE001
         pass
-    results = {"_baseline": probe_all(targets)}
+    results: dict[str, Any] = {"_baseline": probe_all(targets)}
     n = len(targets)
     base_ok = score(results["_baseline"])[0]
     log(f"Без обхода доступно: {base_ok} из {n}")
@@ -432,12 +462,12 @@ def _auto_pick(log, use_shared, stop) -> dict:
         results[f"final:{s.name}"] = runs
         label = {"mix": "комбинация", "current": "текущая"}.get(s.name, s.name)
         log(f"  {label}: {totals[s.name][0]} из {n * ROUNDS}")
-    win = max(totals, key=totals.get)
+    win = max(totals, key=lambda k: totals[k][0])
     if cur_s and win != "current" and totals[win][0] - totals["current"][0] <= KEEP_MARGIN:
         log(f"Новые варианты не лучше текущей стратегии заметно (не больше чем на {KEEP_MARGIN}) — оставляю текущую.")
         win = "current"
-    if win == "current":
-        choice = current
+    if win == "current" and current:
+        choice: dict = current
     else:
         choice = {"base": best.name, "picks": picks} if win == "mix" else {"base": win, "picks": {}}
     paths.DATA.mkdir(exist_ok=True)
@@ -504,7 +534,7 @@ def _try_shared(runner: Runner, targets, log) -> dict | None:
     except Exception as e:  # noqa: BLE001
         log(f"общая база недоступна: {e}")
     return None
-def chosen_strategy() -> strategies.Strategy | None:
+def chosen_strategy() -> strategies.StrategyLike | None:
     if load_settings().get("zapret2"):  # experimental mode: winws2 rotates strategies per site by itself
         from . import zapret2
         if zapret2.installed():

@@ -13,6 +13,7 @@ import os
 import re
 import sys
 from pathlib import Path
+
 DB = Path(__file__).resolve().parent.parent / "games-db.json"
 EXE = re.compile(r"^[a-z0-9][a-z0-9 ._()+-]{0,79}\.exe$")
 MIN_VOTES = 2

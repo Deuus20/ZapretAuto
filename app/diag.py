@@ -1,22 +1,69 @@
 """Environment diagnostics for winws/WinDivert."""
+import ctypes
 import re
 import subprocess
+import time
+
 import psutil
-from . import paths
+
+from . import paths, vendorcheck
+
 NOWIN = 0x08000000  # CREATE_NO_WINDOW
 CONFLICT = ["GoodbyeDPI", "Killer", "SmartByte", "TracSrvWrapper", "discordfix_zapret", "winws1", "winws2"]
+SERVICES = ("BFE", "zapret", "WinDivert", *CONFLICT)
+# Скрипты PowerShell лежат только здесь, а вызывающий код передаёт имя, а не текст: подставленная снаружи строка
+# не может стать кодом (находка 15 отчёта). Состояние всех служб читается одним вызовом — раньше на каждый
+# прогон диагностики уходило 10 процессов вместо одного.
+_SVC_NAMES = ",".join(f"'{n}'" for n in SERVICES)
+SCRIPTS: dict[str, str] = {
+    # Get-Service -Name со списком падает на первом же отсутствующем имени (а winws1/winws2 обычно нет):
+    # берём все службы и фильтруем сами. Отсутствующие просто не попадут в ответ.
+    "services": (f"$want=@({_SVC_NAMES}); Get-Service -ErrorAction SilentlyContinue | "
+                 "Where-Object { $want -contains $_.Name } | "
+                 "ForEach-Object { $_.Name + '=' + $_.Status }"),
+    "timestamps": "(Get-NetTCPSetting -SettingName Internet).Timestamps",
+    "doh": (r"$n=0; $p='HKLM:\System\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters'; "
+            r"if(Test-Path $p){ Get-ChildItem $p -Recurse -ErrorAction SilentlyContinue | ForEach-Object { "
+            r"$v=(Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DohFlags; if($v -gt 0){$n++} } }; "
+            r"$a=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' "
+            r"-EA SilentlyContinue).EnableAutoDoh; "
+            r"$d=((Get-DnsClientServerAddress -AddressFamily IPv4 -EA SilentlyContinue).ServerAddresses -join ' '); "
+            "\"doh=$n;auto=$a;dns=$d\""),
+}
+def _decode(b: bytes, oem: int | None = None) -> str:
+    """Console programs (sc, net, taskkill, powershell) print in the OEM code page, not UTF-8: decoding their
+    Russian messages as UTF-8 left «������» in the diagnostics dialog."""
+    cp = oem or ctypes.windll.kernel32.GetOEMCP()
+    for enc in ("utf-8", f"cp{cp}", "cp1251"):
+        try:
+            return b.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return b.decode("utf-8", "replace")
 def _run(args: list[str], timeout=20) -> tuple[int, str]:
     try:
         r = subprocess.run(args, capture_output=True, timeout=timeout, creationflags=NOWIN)
-        return r.returncode, r.stdout.decode("utf-8", "replace") + r.stderr.decode("utf-8", "replace")
+        return r.returncode, _decode(r.stdout) + _decode(r.stderr)
     except Exception as e:  # noqa: BLE001
         return -1, str(e)
-def _ps(cmd: str) -> tuple[int, str]:
-    return _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd])
+def _ps(name: str) -> tuple[int, str]:
+    """Запустить один из SCRIPTS по имени. Текст команды берётся только оттуда."""
+    return _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", SCRIPTS[name]])
+_svc_cache: dict[str, str] | None = None
 def _svc_status(name: str) -> str | None:
-    """Service status string (Running/Stopped/...) or None if absent."""
-    rc, out = _ps(f"$s=Get-Service -Name '{name}' -ErrorAction SilentlyContinue; if($s){{$s.Status}}")
-    return out.strip() or None
+    """Service status string (Running/Stopped/...) or None if absent. Все службы читаются одним вызовом."""
+    if name not in SERVICES:
+        raise ValueError(f"служба {name!r} не проверяется")
+    global _svc_cache
+    if _svc_cache is None:
+        rc, out = _ps("services")
+        _svc_cache = {}
+        if rc == 0:
+            for line in out.splitlines():
+                k, _, v = line.partition("=")
+                if k.strip() and v.strip():
+                    _svc_cache[k.strip()] = v.strip()
+    return _svc_cache.get(name)
 def _item(label, level, detail="", fix=None, fix_label=None):
     r = {"label": label, "level": level, "detail": detail, "fix": fix}
     if fix_label:
@@ -86,13 +133,23 @@ def dns_poisoned() -> list[str] | None:
             if doh and not (sys_ips & doh):
                 bad.append(d)
     return bad if bad or not doh_down else None
-def run_checks() -> list[dict]:
+_CACHE: tuple[float, list[dict]] | None = None
+CACHE_TTL = 10.0  # s: «Найти проблемы» и авто-разбор сбоя идут подряд, но после «Исправить» нужен свежий ответ
+def forget() -> None:
+    """Забыть прошлый прогон: после исправления проверки должны быть заново."""
+    global _CACHE, _svc_cache
+    _CACHE, _svc_cache = None, None
+def run_checks(fresh: bool = False) -> list[dict]:
+    global _CACHE, _svc_cache
+    if not fresh and _CACHE and time.monotonic() - _CACHE[0] < CACHE_TTL:
+        return _CACHE[1]
+    _svc_cache = None
     res = []
     procs = _procs()
     st = _svc_status("BFE")
     res.append(_item("Base Filtering Engine", "ok" if st == "Running" else "err",
                      f"служба: {st or 'не найдена'}" + ("" if st == "Running" else " — WinDivert не заработает")))
-    rc, out = _ps("(Get-NetTCPSetting -SettingName Internet).Timestamps")
+    rc, out = _ps("timestamps")
     ts = out.strip().lower()
     if rc == 0 and ts in ("enabled", "disabled"):
         res.append(_item("TCP timestamps", "ok" if ts == "enabled" else "warn", ts,
@@ -103,6 +160,14 @@ def run_checks() -> list[dict]:
     res.append(_item("Файлы обхода", "err" if missing else "ok",
                      ("нет: " + ", ".join(missing) + " — скорее всего, их удалил антивирус. Добавьте папку программы "
                       "в исключения и переустановите ZapretAuto") if missing else "winws.exe, WinDivert на месте"))
+    try:
+        tampered = vendorcheck.ensure()
+    except OSError:
+        tampered = None
+    if tampered:
+        res.append(_item("Файлы обхода изменены", "err",
+                         "не совпадают с манифестом: " + ", ".join(tampered[:5]) + " — подмену или правку файлов "
+                         "вручную видно по этой сверке; «Исправить» скачает zapret заново", "reinstall_vendor"))
     bad = []
     for n in CONFLICT:
         if _svc_status(n) == "Running" or n.lower() + ".exe" in procs:
@@ -116,22 +181,25 @@ def run_checks() -> list[dict]:
     ag = "adguardsvc.exe" in procs
     res.append(_item("AdGuard", "warn" if ag else "ok", "AdguardSvc.exe запущен — может мешать" if ag else "нет"))
     wd = _svc_status("WinDivert")
-    stale = wd == "Running" and "winws.exe" not in procs and "winws2.exe" not in procs  # winws2: zapret2 mode
-    res.append(_item("Остаточный WinDivert", "warn" if stale else "ok",
-                     "служба WinDivert работает без winws.exe" if stale else (wd or "нет"),
+    ours = _own_windivert()  # game flow capture keeps the driver loaded without winws: that is normal
+    stale = (wd == "Running" and "winws.exe" not in procs and "winws2.exe" not in procs and not ours)
+    if stale:
+        detail = "служба WinDivert работает без winws.exe"
+    elif wd == "Running" and ours:
+        detail = "используется слежением за играми — так и должно быть"
+    else:
+        detail = wd or "нет"
+    res.append(_item("Остаточный WinDivert", "warn" if stale else "ok", detail,
                      "remove_windivert" if stale else None))
-    rc, out = _ps(
-        r"$n=0; $p='HKLM:\System\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters'; "
-        r"if(Test-Path $p){ Get-ChildItem $p -Recurse -ErrorAction SilentlyContinue | ForEach-Object { "
-        r"$v=(Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DohFlags; if($v -gt 0){$n++} } }; $n")
+    rc, out = _ps("doh")
+    fields = dict(part.split("=", 1) for part in out.strip().split(";") if "=" in part)
     try:
-        n = int(out.strip().splitlines()[-1])
-    except Exception:  # noqa: BLE001
+        n = int(fields.get("doh", ""))
+    except ValueError:
         n = -1
     if n <= 0:  # Windows 10: auto-DoH via registry + DoH-capable DNS server
-        _, auto = _ps(r"(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' -EA SilentlyContinue).EnableAutoDoh")
-        _, dns = _ps("(Get-DnsClientServerAddress -AddressFamily IPv4).ServerAddresses -join ' '")
-        if auto.strip() == "2" and any(d in dns for d in ("1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9")):
+        auto, dns = (fields.get("auto") or "").strip(), fields.get("dns") or ""
+        if auto == "2" and any(d in dns for d in ("1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9")):
             n = 1
         else:
             n = max(n, 0)
@@ -207,6 +275,7 @@ def run_checks() -> list[dict]:
                          "потом переходит на TCP — видео стартует медленно. «Исправить» отключит QUIC в браузерах"
                          if blocked else "включён и проходит; если YouTube в браузере всё же тормозит — «Исправить»",
                          "disable_quic"))
+    _CACHE = (time.monotonic(), res)
     return res
 def _quic_blocked() -> bool:
     """HTTP/3 to YouTube fails while HTTPS over TCP works (checked through the running bypass)."""
@@ -263,6 +332,7 @@ def flowseal_hosts() -> list[tuple[str, str]]:
     """(ip, host) pairs Flowseal maintains: right addresses for Discord, Telegram and GitHub when the ISP's DNS
     lies. Only valid IPs and host names pass."""
     import ipaddress
+
     import requests
     text = requests.get(FLOWSEAL_HOSTS_URL, timeout=15).text
     out = []
@@ -288,7 +358,23 @@ def _read_hosts() -> tuple[list[str], bool]:
         text = raw.decode("cp1251", errors="replace")
     return text.splitlines(), bom
 def _write_hosts(lines: list[str], bom: bool) -> None:
-    _hosts_file().write_bytes(("\ufeff" if bom else "").encode("utf-8") + ("\r\n".join(lines) + "\r\n").encode())
+    """Атомарно и с резервной копией: hosts читает вся система, а запись поверх файла, прерванная сбоем или
+    антивирусом, может оставить его усечённым — тогда перестанет работать разрешение имён во всей Windows."""
+    import os
+    import shutil
+    p = _hosts_file()
+    data = ("\ufeff" if bom else "").encode("utf-8") + ("\r\n".join(lines) + "\r\n").encode()
+    try:
+        shutil.copy2(p, p.with_name("hosts.zapretauto.bak"))
+    except OSError:
+        pass  # копия — страховка, а не условие записи
+    tmp = p.with_name("hosts.zapretauto.tmp")
+    tmp.write_bytes(data)
+    try:
+        os.replace(tmp, p)
+    except OSError:
+        time.sleep(0.3)  # файл на миг занят (антивирус, другой установщик): одна повторная попытка
+        os.replace(tmp, p)
     _run(["ipconfig", "/flushdns"])
 def _strip_block(lines: list[str]) -> list[str]:
     if HOSTS_END not in (ln.strip() for ln in lines):  # end marker lost (edited by hand): drop only our markers,
@@ -359,6 +445,7 @@ def _browser_doh_on() -> bool:
 def _browser_doh() -> str:
     """Secure DNS in Chromium browsers via policy, with the first DoH provider this network can reach."""
     import winreg
+
     import requests
     tpl = None
     for json_url, t in zip(DOH_JSON, DOH_TEMPLATES):
@@ -378,9 +465,48 @@ def _browser_doh() -> str:
     host = tpl.split("/")[2]
     return (f"защищённый DNS ({host}) включён в Chrome, Edge и Яндекс.Браузере — перезапустите браузер. "
             "Браузер покажет «Управляется организацией»: это и есть эта настройка")
+SC_HINT = {2: "служба не найдена", 5: "нужны права администратора", 1051: "есть зависимые службы",
+           1052: "служба не поддерживает остановку", 1060: "служба не установлена",
+           1072: "служба помечена на удаление — завершится после перезагрузки", 1075: "служба отключена"}
+def _svc_msg(label: str, rc: int, out: str = "") -> str:
+    """Human line for a `sc`/`net` result instead of the raw console text (which is also in another code page)."""
+    if rc == 0:
+        return f"{label}: готово"
+    hint = SC_HINT.get(rc)
+    if not hint:
+        lines = (out or "").strip().splitlines()
+        hint = lines[-1][:160] if lines else "не удалось"
+    return f"{label}: код {rc} — {hint}"
+def _own_windivert() -> bool:
+    """Does this very process hold WinDivert.dll (game flow capture or a filter check)?"""
+    try:
+        return any("windivert" in m.path.lower() for m in psutil.Process().memory_maps())
+    except (psutil.Error, OSError):
+        return False
+def _remove_windivert() -> str:
+    """Delete the leftover WinDivert service. Never while this process keeps the driver loaded: the delete then
+    fails with 1072, the service stays marked until a reboot and WinDivert cannot start in the meantime."""
+    if _own_windivert():
+        return ("служба WinDivert используется самой программой (слежение за играми) — удалять её не нужно, "
+                "она остановится вместе с программой")
+    lines = [_svc_msg("Остановка службы WinDivert", *_run(["sc", "stop", "WinDivert"]))]
+    for name in ("WinDivert", "WinDivert14"):
+        rc, out = _run(["sc", "delete", name])
+        if rc == 1060:  # not installed: nothing to delete
+            continue
+        lines.append(_svc_msg(f"Удаление службы {name}", rc, out))
+    if any("1072" in ln for ln in lines):
+        lines.append("Нужна перезагрузка: пока служба помечена на удаление, WinDivert не запустится.")
+    return "\n".join(lines)
+def _reinstall_vendor() -> str:
+    """Скачать zapret заново: манифест целостности потом перезапишется сам."""
+    from . import updater
+    return "zapret скачан заново" if updater.update(force=True) else "обновлять нечего"
 def apply_fix(fix_id: str) -> str:
+    forget()  # состояние изменится: следующий прогон проверок должен быть новым
     funcs = {"disable_quic": _disable_quic, "browser_doh": _browser_doh, "discord_cache": _clear_discord_cache,
-             "hosts_update": _hosts_update, "hosts_remove": _hosts_remove}
+             "hosts_update": _hosts_update, "hosts_remove": _hosts_remove, "remove_windivert": _remove_windivert,
+             "reinstall_vendor": _reinstall_vendor}
     if fix_id in funcs:
         try:
             return funcs[fix_id]()
@@ -389,15 +515,14 @@ def apply_fix(fix_id: str) -> str:
     cmds = {
         "tcp_timestamps": [["netsh", "interface", "tcp", "set", "global", "timestamps=enabled"]],
         "stop_zapret_service": [["sc", "stop", "zapret"]],
-        "remove_windivert": [["net", "stop", "WinDivert"], ["sc", "delete", "WinDivert"], ["sc", "delete", "WinDivert14"]],
     }
     if fix_id not in cmds:
         return f"неизвестное исправление: {fix_id}"
     out = []
     for c in cmds[fix_id]:
         rc, o = _run(c)
-        out.append(f"{' '.join(c)} -> {rc}: {o.strip()[:200]}")
+        out.append(_svc_msg(" ".join(c), rc, o))
     return "\n".join(out)
 if __name__ == "__main__":
-    for r in run_checks():
+    for r in run_checks(fresh=True):
         print(r)

@@ -1,8 +1,11 @@
 """Coexistence with VPN clients: never desync VPN tunnels; test around a full-tunnel VPN."""
 import re
 import subprocess
+
 import psutil
+
 from . import paths
+
 CREATE_NO_WINDOW = 0x08000000
 VPN_RE = re.compile(r"vpn|wireguard|amnezia|outline|nekoray|hiddify|openvpn|warp|^(wg|tun|tap)\d*$|\b(tun|tap)\b",
                     re.I)
@@ -86,6 +89,7 @@ def restart_discord() -> list[str]:
     «connecting» until restarted. Relaunched through explorer: started from our elevated process it would run as
     admin (no drag-and-drop from Explorer, its own settings folder rights)."""
     import time
+
     from .diag import DISCORD_BUILDS
     names = {n.lower() for n in DISCORD_BUILDS.values()}
     exes = {}

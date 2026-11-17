@@ -1,8 +1,12 @@
-$ver = (Select-String -Path app\__init__.py -Pattern '"(.+)"').Matches[0].Groups[1].Value
+$ver = (& .venv\Scripts\python -c "import app; print(app.__version__)").Trim()
+if ($LASTEXITCODE -ne 0 -or -not $ver) { throw 'cannot read app.__version__' }
 # Build dist\ZapretAuto\ZapretAuto.exe (onedir, admin manifest), prune Qt, bundle vendor/, make installer
 $ErrorActionPreference = 'Continue'
-# own basetemp: pytest's numbered dirs + "pytest-current" symlink broke the run with access denied at cleanup
-& .venv\Scripts\python -m pytest -q -p no:cacheprovider --basetemp "$env:TEMP\zapretauto-pytest" tests
+# own basetemp inside the repo: pytest's numbered dirs + "pytest-current" symlink in %TEMP% broke the run with
+# access denied at cleanup, and a %TEMP% copy left by an elevated run can't be deleted by a normal user at all
+$bt = Join-Path $PSScriptRoot 'build\pytest'
+Remove-Item $bt -Recurse -Force -ErrorAction SilentlyContinue
+& .venv\Scripts\python -m pytest -q -p no:cacheprovider --basetemp $bt tests
 if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
 & .venv\Scripts\pyinstaller --noconfirm --clean --windowed --uac-admin --icon assets\icon.ico --collect-all curl_cffi --name ZapretAuto `
   --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.Qt3DCore --exclude-module PySide6.QtQuick `
@@ -21,6 +25,8 @@ foreach ($p in 'translations', 'plugins\platforminputcontexts', 'plugins\platfor
 $env:PYTHONIOENCODING = 'utf-8'
 & .venv\Scripts\python -c "from app import updater; updater.update()"
 if ($LASTEXITCODE -ne 0) { Write-Warning 'zapret update check failed: bundling vendor as is' }
+# манифест целостности: приложение сверяет с ним bin/winws.exe и драйвер при каждом старте
+& .venv\Scripts\python -c "from app import vendorcheck; print('manifest files:', vendorcheck.write_manifest())"
 Copy-Item vendor dist\ZapretAuto\vendor -Recurse -Force
 # Russian Yes/No/Cancel in dialogs (Qt's translations folder is pruned above)
 New-Item -ItemType Directory -Force dist\ZapretAuto\assets | Out-Null

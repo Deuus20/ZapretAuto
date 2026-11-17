@@ -1,0 +1,14 @@
+# Инструменты сборки, проверок и тестов (в exe не попадают). Ставятся только для разработки и CI.
+-r requirements.txt
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.8
+pillow==13.0.0
+pytest==9.1.1
+pytest-cov==7.1.0
+pyflakes==4.0.3
+ruff==0.17.4
+pyright==1.1.414
+pip-audit==2.10.1
+cyclonedx-bom==8.0.1
+pip-tools==7.7.0
+pyyaml==6.0.3

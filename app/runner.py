@@ -1,4 +1,5 @@
 """Start/stop winws.exe (single instance)."""
+import contextlib
 import ctypes
 import hashlib
 import os
@@ -6,10 +7,12 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+
 import psutil
+
 from . import paths, vpn
-from .strategies import Strategy
-import contextlib
+from .strategies import StrategyLike
+
 EXES = ("winws.exe", "winws2.exe")  # winws2: experimental zapret2 mode
 CREATE_NO_WINDOW = 0x08000000
 ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000  # every captured game packet waits for winws: don't queue it behind the game
@@ -26,7 +29,7 @@ def _stray_winws() -> bool:
 class Runner:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
-        self.current: Strategy | None = None
+        self.current: StrategyLike | None = None
         self._out = None  # winws output file of the current run
         self._lock = threading.RLock()
         self.vpn_ips: set[str] = set()  # VPN servers left out of the capture filter at start
@@ -35,8 +38,8 @@ class Runner:
     def running(self) -> bool:
         p = self.proc
         return p is not None and p.poll() is None
-    def start(self, s: Strategy, game_tcp: bool = False, game_udp: bool = False,
-              auto_hostlist: bool = False, skip: set[str] = frozenset()) -> None:
+    def start(self, s: StrategyLike, game_tcp: bool = False, game_udp: bool = False,
+              auto_hostlist: bool = False, skip: set[str] | frozenset[str] = frozenset()) -> None:
         """skip: servers of games switched off by hand, left out of the capture like VPN servers."""
         with self._lock:
             self.stop()
@@ -71,8 +74,9 @@ class Runner:
                         subprocess.run(["taskkill", "/F", "/IM", exe], capture_output=True,
                                        creationflags=CREATE_NO_WINDOW, timeout=10)
             self.proc = self.current = None
-            if getattr(self, "_out", None):
-                self._out.close()
+            out = getattr(self, "_out", None)
+            if out:
+                out.close()
                 self._out = None
 PLACEHOLDERS = {"203.0.113.113/32", "domain.example.abc"}  # paths.USER_LISTS fillers: winws refuses empty lists
 INLINE_MAX = 200  # entries: an exclude list this small goes on the command line instead of a file
@@ -164,10 +168,18 @@ def windivert_dll(**kw):
     our process can't be unloaded safely and would block the zapret updater renaming vendor/."""
     src = paths.BIN / "WinDivert.dll"
     body = src.read_bytes()
+    digest = hashlib.sha256(body).hexdigest()
     root = paths.DATA / "windivert"
-    d = root / hashlib.sha256(body).hexdigest()[:12]
+    d = root / digest[:12]
     dll = d / "WinDivert.dll"
     with _dll_lock:
+        if dll.exists():
+            try:
+                same = hashlib.sha256(dll.read_bytes()).hexdigest() == digest
+            except OSError:
+                same = False
+            if not same:  # подменённая копия в data/: в админский процесс грузим только совпадающий файл
+                dll.unlink(missing_ok=True)
         if not dll.exists():
             d.mkdir(parents=True, exist_ok=True)
             drv = paths.BIN / "WinDivert64.sys"  # the DLL installs the driver from its own folder

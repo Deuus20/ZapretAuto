@@ -1,0 +1,10 @@
+line-length = 120
+target-version = "py312"
+
+[lint]
+# F — pyflakes (импорты, неизвестные имена), I — порядок импортов, E/W — стиль PEP 8.
+select = ["E4", "E7", "E9", "F", "W", "I"]
+ignore = ["E501"]  # длину строк держим глазами: 120 символов в этом проекте — мягкий ориентир
+
+[lint.isort]
+known-first-party = ["app"]

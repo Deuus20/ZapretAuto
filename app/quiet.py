@@ -1,7 +1,9 @@
 """Is the user in the middle of something an update would break: a call or a full-screen app (game, film, slides)?
 Used by the «Обновляться только в тишине» setting; an update restarts winws and drops connections for a minute."""
 import ctypes
+
 import psutil
+
 CALL_APPS = {"discord.exe", "discordptb.exe", "discordcanary.exe", "telegram.exe", "zoom.exe", "teams.exe",
              "ms-teams.exe", "skype.exe", "whatsapp.exe", "viber.exe"}
 # idle background UDP of these apps: mDNS, SSDP, NetBIOS, DHCP — not a call

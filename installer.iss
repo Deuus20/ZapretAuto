@@ -1,4 +1,4 @@
-﻿#ifndef AppVer
+#ifndef AppVer
 #define AppVer "1.0.0"
 #endif
 [Setup]
@@ -17,15 +17,28 @@ OutputBaseFilename=ZapretAuto-Setup
 UninstallDisplayIcon={app}\ZapretAuto.exe
 SetupIconFile=assets\icon.ico
 WizardStyle=modern
-CloseApplications=force
+; yes, not force: Restart Manager просит программы закрыться сами (force убивает их без сохранения состояния).
+; Приложение и winws всё равно досылаются taskkill'ом в PrepareToInstall — им файлы нужны на диске.
+CloseApplications=yes
+; Подпись включается только когда есть сертификат: ISCC /DSignToolCmd="signtool.exe sign /fd sha256 ... $f".
+; Пока сертификата нет — SmartScreen предупреждает, см. docs/install.md.
+#ifdef SignToolCmd
+SignTool=zapretauto
+SignedUninstaller=yes
+#endif
+
+#ifdef SignToolCmd
+[SignTools]
+Name: "zapretauto"; Command: "{#SignToolCmd}"
+#endif
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
-russian.DefExcl=Добавить папку в исключения Защитника Windows
-english.DefExcl=Add the folder to Windows Defender exclusions
+russian.DefExcl=Добавить папку zapret в исключения Защитника Windows
+english.DefExcl=Add the zapret folder to Windows Defender exclusions
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
@@ -39,7 +52,8 @@ Name: "{group}\ZapretAuto"; Filename: "{app}\ZapretAuto.exe"
 Name: "{autodesktop}\ZapretAuto"; Filename: "{app}\ZapretAuto.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}'"""; Flags: runhidden; Tasks: defexcl
+; исключение только для папки zapret (winws.exe, WinDivert): остальной каталог программы остаётся под защитой
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Add-MpPreference -ExclusionPath '{app}\vendor'"""; Flags: runhidden; Tasks: defexcl
 Filename: "{app}\ZapretAuto.exe"; Description: "{cm:LaunchProgram,ZapretAuto}"; Flags: nowait postinstall skipifsilent shellexec
 Filename: "{app}\ZapretAuto.exe"; Parameters: "--tray"; Flags: nowait shellexec; Check: IsSelfUpdate
 Filename: "{sys}\ie4uinit.exe"; Parameters: "-show"; Flags: runhidden
@@ -52,7 +66,7 @@ Filename: "{app}\ZapretAuto.exe"; Parameters: "--cleanup"; Flags: runhidden wait
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ZapretAuto /F"; Flags: runhidden; RunOnceId: "DelTask"
 Filename: "sc.exe"; Parameters: "stop WinDivert"; Flags: runhidden; RunOnceId: "StopWD"
 Filename: "sc.exe"; Parameters: "delete WinDivert"; Flags: runhidden; RunOnceId: "DelWD"
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Remove-MpPreference -ExclusionPath '{app}'"""; Flags: runhidden; RunOnceId: "DelExcl"
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Remove-MpPreference -ExclusionPath '{app}\vendor'"""; Flags: runhidden; RunOnceId: "DelExcl"
 ; browser policies set by diagnostics fixes (QUIC off, secure DNS): otherwise browsers keep saying "managed"
 Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\Google\Chrome"" /v QuicAllowed /f"; Flags: runhidden; RunOnceId: "PolCQ"
 Filename: "reg.exe"; Parameters: "delete ""HKLM\SOFTWARE\Policies\Google\Chrome"" /v DnsOverHttpsMode /f"; Flags: runhidden; RunOnceId: "PolCM"

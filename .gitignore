@@ -3,6 +3,15 @@
 /dist/
 /data/
 __pycache__/
-/build/
-/dist/
 *.spec
+/.claude/settings.local.json
+# артефакты прогонов и инструментов: в коммит не должны попадать даже случайно
+/.coverage
+/coverage.xml
+/bom.json
+*.log
+/.pytest_cache/
+# закрытый ключ подписи релиза — только вне репозитория
+*.ed25519
+# манифест целостности vendor пишется сборкой и после обновления zapret
+/vendor/zapret/MANIFEST.sha256

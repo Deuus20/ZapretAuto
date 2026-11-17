@@ -1,6 +1,9 @@
 """Background work for the GUI: a worker on a Python thread, and cross-thread signals."""
 import threading
+
 from PySide6.QtCore import QObject, Signal
+
+
 class Worker(QObject):
     """Run fn(log) off the UI thread; progress via `line`, result via `done`, then `finished`.
 

@@ -1,12 +1,22 @@
 """User list helpers and ipset update."""
+import ipaddress
 import re
 import shutil
 import urllib.request
+
 import requests
+
 from . import paths
+
 IPSET_URL = ("https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/refs/heads/main/"
              ".service/ipset-service.txt")
-_IP_RE = re.compile(r"^(\d{1,3}(\.\d{1,3}){3}|[0-9a-fA-F:]+:[0-9a-fA-F:]*)(/\d{1,3})?$")
+def _valid_cidr(line: str) -> bool:
+    """Настоящий адрес/подсеть, а не похожая на адрес строка: winws не должен получить 999.999.999.999."""
+    try:
+        ipaddress.ip_network(line, strict=False)
+    except ValueError:
+        return False
+    return True
 def update_ipset(log=print) -> bool:
     try:
         req = urllib.request.Request(IPSET_URL, headers={"User-Agent": "ZapretAuto"})
@@ -15,11 +25,11 @@ def update_ipset(log=print) -> bool:
     except Exception as e:  # noqa: BLE001
         log(f"ipset: ошибка загрузки: {e}")
         return False
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not lines:
         log("ipset: пустой ответ")
         return False
-    bad = [l for l in lines if not _IP_RE.match(l)]
+    bad = [ln for ln in lines if not _valid_cidr(ln)]
     if bad:
         log(f"ipset: некорректные строки ({len(bad)}), например {bad[0][:60]!r}")
         return False
@@ -31,6 +41,7 @@ def update_ipset(log=print) -> bool:
     # keep sync_lists from reverting it to the vendor copy
     (paths.LISTS / "ipset-all.txt.custom").write_text("updated from GitHub\n", encoding="utf-8")
     import time
+
     from .settings import save_settings
     save_settings(ipset_updated=time.time())
     log(f"ipset: обновлено, записей: {len(lines)}")
@@ -41,16 +52,16 @@ def add_user_domain(domain: str, name: str = "list-general-user.txt") -> bool:
     False if already there."""
     f = paths.LISTS / name
     lines = f.read_text(encoding="utf-8").splitlines() if f.exists() else []
-    if domain.lower() in {l.strip().lower() for l in lines}:
+    if domain.lower() in {ln.strip().lower() for ln in lines}:
         return False
-    paths.write_list(f, "\n".join([l for l in lines if l.strip()] + [domain]) + "\n")
+    paths.write_list(f, "\n".join([ln for ln in lines if ln.strip()] + [domain]) + "\n")
     return True
 def remove_user_domain(domain: str, name: str = "list-general-user.txt") -> None:
     f = paths.LISTS / name
     if f.exists():
-        keep = [l for l in f.read_text(encoding="utf-8").splitlines()
-                if l.strip() and l.strip().lower() != domain.lower()]
-        if not any(not l.strip().startswith("#") for l in keep):
+        keep = [ln for ln in f.read_text(encoding="utf-8").splitlines()
+                if ln.strip() and ln.strip().lower() != domain.lower()]
+        if not any(not ln.strip().startswith("#") for ln in keep):
             keep.append(DOMAIN_PLACEHOLDER)
         paths.write_list(f, "\n".join(keep) + "\n")
 def user_list_paths() -> dict:
@@ -76,7 +87,7 @@ def set_telegram(on: bool, log=print) -> None:
     cidrs = TELEGRAM_CIDRS
     try:
         r = requests.get(TELEGRAM_CIDR_URL, timeout=8)
-        got = [l.strip() for l in r.text.splitlines() if re.match(r"^\d+\.\d+\.\d+\.\d+/\d+$", l.strip())]
+        got = [ln.strip() for ln in r.text.splitlines() if re.match(r"^\d+\.\d+\.\d+\.\d+/\d+$", ln.strip())]
         if r.ok and len(got) >= 5:
             cidrs = got
     except requests.RequestException:
