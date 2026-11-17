@@ -1,0 +1,33 @@
+Qt 6.12.0 и PySide6 6.12.0, LGPLv3
+
+В состав ZapretAuto входят библиотеки Qt и PySide6:
+
+- Qt6Core.dll
+- Qt6Gui.dll
+- Qt6Widgets.dll
+- Qt6Network.dll
+- Qt6Svg.dll
+- pyside6.abi3.dll
+- shiboken6.abi3.dll
+- Shiboken.pyd
+- assets\qtbase_ru.qm (перевод Qt)
+
+Лицензия: LGPL-3.0-only, GPL-2.0-only или GPL-3.0-only на выбор. В ZapretAuto выбран вариант LGPLv3. Тексты LGPLv3 и GPLv3 лежат в этой папке: LGPL-3.0.txt и GPL-3.0.txt.
+
+Уведомление: библиотеки Qt и PySide6 используются в составе ZapretAuto и покрыты LGPLv3.
+
+Исходный код:
+
+- Qt 6.12.0: https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz
+- PySide6 6.12.0: https://download.qt.io/official_releases/QtForPython/pyside6/
+- Git: https://code.qt.io/cgit/qt/ и https://code.qt.io/cgit/pyside/pyside-setup.git
+
+Замена библиотек:
+
+1. Закройте ZapretAuto.
+2. Замените нужные DLL в папке _internal рядом с ZapretAuto.exe на совместимую сборку той же версии.
+3. Запустите ZapretAuto.
+
+Пересборка из исходников описана в README, раздел «Для разработчиков»: python -m venv .venv, установка requirements-dev.txt, затем powershell -File build.ps1.
+
+Файлы поставляются без изменений. Если вы заменили библиотеку на измененную версию, действуют условия LGPLv3.

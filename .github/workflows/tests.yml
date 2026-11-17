@@ -27,6 +27,14 @@ jobs:
           python -m pip install -q -r requirements-dev.txt
       - name: Lint (ruff)
         run: python -m ruff check main.py app scripts tools tests
+      - name: Licenses (файлы на месте)
+        shell: pwsh
+        run: |
+          $need = 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'LICENSES\LGPL-3.0.txt', 'LICENSES\GPL-3.0.txt',
+                  'LICENSES\GPL-2.0.txt', 'LICENSES\MIT-zapret.txt', 'LICENSES\MIT-flowseal.txt',
+                  'LICENSES\WinDivert-LICENSE.txt', 'LICENSES\PSF-2.0.txt', 'LICENSES\INSTALLER-NOTICE.txt'
+          $missing = $need | Where-Object { -not (Test-Path $_) }
+          if ($missing) { throw "нет файлов лицензий: $($missing -join ', ')" }
       - name: "Types (pyright, блокирует: app, main.py, tools, scripts)"
         run: python -m pyright
       - name: Tests (with coverage floor)

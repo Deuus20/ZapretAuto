@@ -29,6 +29,13 @@ if ($LASTEXITCODE -ne 0) { Write-Warning 'zapret update check failed: bundling v
 # манифест целостности: приложение сверяет с ним bin/winws.exe и драйвер при каждом старте
 & .venv\Scripts\python -c "from app import vendorcheck; print('manifest files:', vendorcheck.write_manifest())"
 Copy-Item vendor dist\ZapretAuto\vendor -Recurse -Force
+# лицензии и уведомления о сторонних компонентах: попадают и в установщик, и в portable zip
+foreach ($p in 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'LICENSES\LGPL-3.0.txt', 'LICENSES\GPL-3.0.txt', 'LICENSES\INSTALLER-NOTICE.txt') {
+  if (-not (Test-Path $p)) { throw "license file missing: $p" }
+}
+New-Item -ItemType Directory -Force dist\ZapretAuto\LICENSES | Out-Null
+Copy-Item LICENSES\* dist\ZapretAuto\LICENSES -Recurse -Force
+Copy-Item LICENSE, THIRD-PARTY-NOTICES.md dist\ZapretAuto -Force
 # Russian Yes/No/Cancel in dialogs (Qt's translations folder is pruned above)
 New-Item -ItemType Directory -Force dist\ZapretAuto\assets | Out-Null
 Copy-Item assets\qtbase_ru.qm dist\ZapretAuto\assets\ -Force

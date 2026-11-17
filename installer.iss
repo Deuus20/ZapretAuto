@@ -17,6 +17,8 @@ OutputBaseFilename=ZapretAuto-Setup
 UninstallDisplayIcon={app}\ZapretAuto.exe
 SetupIconFile=assets\icon.ico
 WizardStyle=modern
+; Лицензия на первой странице установщика: MIT плюс список сторонних компонентов.
+LicenseFile=LICENSES\INSTALLER-NOTICE.txt
 ; yes, not force: Restart Manager просит программы закрыться сами (force убивает их без сохранения состояния).
 ; Приложение и winws всё равно досылаются taskkill'ом в PrepareToInstall, им файлы нужны на диске.
 CloseApplications=yes

@@ -1,0 +1,14 @@
+Cygwin 3.4.10, cygwin1.dll
+
+Библиотека Cygwin API (winsup) распространяется по GNU Lesser General Public License версии 3 или более поздней. Текст LGPLv3 лежит в этой папке: LGPL-3.0.txt.
+
+Cygwin linking exception, цитата с https://cygwin.com/licensing.html:
+
+"As a special exception, the copyright holders of the Cygwin library grant you additional permission to link libcygwin.a, crt0.o, and gcrt0.o with independent modules to produce an executable, and to convey the resulting executable under terms of your choice, without any need to comply with the conditions of LGPLv3 section 4. An independent module is a module which is not itself based on the Cygwin library."
+
+Пояснение: исключение снимает требования §4 LGPLv3 для независимых модулей, которые линкуются с библиотекой. Оно не отменяет обязанность передавать вместе с программой текст лицензии и исходный код самой библиотеки.
+
+Исходный код Cygwin: https://cygwin.com/git/ (тег cygwin-3.4.10).
+Условия лицензирования: https://cygwin.com/licensing.html.
+
+Замена: файл vendor\zapret\bin\cygwin1.dll.

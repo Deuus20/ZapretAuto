@@ -122,6 +122,10 @@ powershell -File build.ps1                   # тесты, exe и установ
 Устройство кода описано в [AGENTS.md](AGENTS.md). Данные пользователя хранятся в `data\` рядом с exe,
 либо в `%PROGRAMDATA%\ZapretAuto\data`, если папка программы недоступна для записи.
 
+## Лицензии
+
+Код ZapretAuto распространяется по MIT, текст в [LICENSE](LICENSE). В состав входят сторонние компоненты: zapret и стратегии Flowseal (MIT), WinDivert (LGPLv3), Qt и PySide6 (LGPLv3), Cygwin (LGPLv3+ с исключением), Python (PSF-2.0), PyInstaller (GPLv2+ с исключением). Полные тексты, copyright и ссылки на исходники: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) и папка `LICENSES`.
+
 ## Благодарности
 
 - [bol-van/zapret](https://github.com/bol-van/zapret): движок обхода DPI
@@ -145,3 +149,5 @@ blocking. It wraps [zapret](https://github.com/bol-van/zapret) (winws + WinDiver
 - **Shared ISP database**: proven picks per ASN, crowd-sourced through issues and merged by a GitHub Action.
 
 The UI is Russian. Install: download `ZapretAuto-Setup.exe` from [Releases](https://github.com/Deuus20/ZapretAuto/releases/latest).
+
+License: MIT, see [LICENSE](LICENSE). Third-party components and their licenses are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

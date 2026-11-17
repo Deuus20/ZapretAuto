@@ -51,6 +51,14 @@ jobs:
       - name: Build (tests + exe + installer)
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+      - name: Licenses in dist
+        shell: pwsh
+        run: |
+          $need = 'dist\ZapretAuto\LICENSE', 'dist\ZapretAuto\THIRD-PARTY-NOTICES.md',
+                  'dist\ZapretAuto\LICENSES\LGPL-3.0.txt', 'dist\ZapretAuto\LICENSES\GPL-3.0.txt',
+                  'dist\ZapretAuto\LICENSES\INSTALLER-NOTICE.txt'
+          $missing = $need | Where-Object { -not (Test-Path $_) }
+          if ($missing) { throw "в dist нет файлов лицензий: $($missing -join ', ')" }
       - name: Self-test the frozen exe
         shell: pwsh
         run: |
