@@ -4,7 +4,7 @@ import time
 import pytest
 from helpers import _close, _gui
 
-from app import gamewatch, lists, paths, settings, sharedb, tester, updater, zapret2
+from app import gamewatch, lists, paths, settings, sharedb, tester, updater, whitelist, zapret2
 
 
 def test_gui_smoke(tmp_path, monkeypatch):
@@ -281,9 +281,50 @@ def test_gui_zapret2_toggle(tmp_path, monkeypatch):
         w.runner.proc = type("P", (), {"poll": lambda self: None})()          # looks running
         w._health()
         assert not w.busy and w._health_fails == 0
-        w.runner.proc = None
-        w.cb["zapret2"].setChecked(False)
+        # zapret2 не справился: приложение само вернулось к обычному движку
+        assert not w.cb["zapret2"].isChecked() and settings.load_settings()["zapret2"] is False
         assert started[-1] == "ALT8" and w.combo.isEnabled()
+    finally:
+        _close(app, w)
+
+def test_gui_whitelist_check(tmp_path, monkeypatch):
+    """Кнопка «Проверить белые списки»: обход на время проверки выключается и возвращается."""
+    from PySide6.QtWidgets import QMessageBox
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        shown = []
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a[2])))
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        monkeypatch.setattr(whitelist, "check", lambda: {"verdict": "whitelist"})
+        monkeypatch.setattr(tester, "vpn_active", lambda: None)
+        state = {"on": True}
+        monkeypatch.setattr(type(w.runner), "running", property(lambda self: state["on"]))
+        monkeypatch.setattr(w.runner, "stop", lambda: state.update(on=False))
+        monkeypatch.setattr(w, "start_runner", lambda: state.update(on=True))
+        w.check_whitelist()
+        assert shown and "белые списки" in shown[0] and state["on"] is True
+        assert settings.load_settings().get("white_checked")
+        assert w.btn_white.isEnabled() and w.btn_white.text() == "Проверить белые списки"
+    finally:
+        _close(app, w)
+
+def test_gui_no_pick_says_whitelist(tmp_path, monkeypatch):
+    """Подбор не помог и проверка увидела белые списки: советуем VPN, а не крутим подбор снова."""
+    from PySide6.QtWidgets import QMessageBox
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        shown, started = [], []
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a[2])))
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        monkeypatch.setattr(whitelist, "check", lambda: {"verdict": "whitelist"})
+        monkeypatch.setattr(tester, "vpn_active", lambda: None)
+        monkeypatch.setattr(w, "start_runner", lambda: started.append(1) or True)
+        w.show()
+        w._autopick_done(None)
+        assert shown and "белые списки" in shown[0]
+        assert started and not w.busy
     finally:
         _close(app, w)
 

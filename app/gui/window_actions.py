@@ -19,7 +19,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.gui.shared import ROOT, TASK, UPDATE_EVERY, Worker, diag, lists, logs, q, stats, strategies, tester, updater
+from app.gui.shared import (
+    ROOT,
+    TASK,
+    UPDATE_EVERY,
+    Worker,
+    diag,
+    lists,
+    logs,
+    q,
+    stats,
+    strategies,
+    tester,
+    updater,
+    whitelist,
+)
 from app.gui.sitecheck import _site_check, _with_direct_path
 
 from .window_base import WindowBase
@@ -220,6 +234,7 @@ class ActionsMixin(WindowBase):
             self.set_chips(res)
             if all(core):
                 self._health_fails = 0
+                self._telegram_hint(res)
                 if not getattr(self, "_net_remembered", False) and not self._zapret2_on():
                     self._net_remembered = True  # works here: remember it for this ISP (once per network)
                     c = self.settings.get("strategy")
@@ -232,7 +247,7 @@ class ActionsMixin(WindowBase):
             self._next_health = time.time() + 60  # re-check soon
             if self._health_fails >= 2 and self._zapret2_on():
                 self._health_fails = 0  # a pick would test winws strategies: not what runs now
-                self.log("режим zapret2: стратегии для сайтов переключаются сами, автоподбор не запускаю")
+                self._zapret2_revert(bad)
                 return
             if self._health_fails >= 2 and self.settings.get("auto_repick", True):
                 self._health_fails = 0
@@ -253,6 +268,67 @@ class ActionsMixin(WindowBase):
                 self._repair = True
                 self.autopick()
         self._run(lambda log: tester.quick_check(light=True, speed=speed), done)  # no 1 MB test every 10 min
+
+    def _telegram_hint(self, res: dict):
+        """Telegram gets its own answer: the bypass beats DPI on its sites, but not a block by IP address."""
+        app, web = res.get("Telegram (приложение)"), res.get("Telegram (веб)")
+        if app is not False:
+            self._tg_advised = False
+            return
+        if getattr(self, "_tg_advised", False):
+            return
+        self._tg_advised = True
+        if web is False:
+            self.log("Telegram: не отвечают ни сайт, ни серверы. Похоже на блокировку по IP: нужен прокси или VPN.")
+        else:
+            self.log("Telegram: сайт открывается, а приложение не подключается к серверам. Похоже на блокировку "
+                     "по IP: стратегия обхода тут не поможет, нужен прокси или VPN.")
+
+    def _zapret2_revert(self, bad: str):
+        """zapret2 не справился: вернуться к обычному движку и сохранённой стратегии этой сети."""
+        from app import zapret2
+        if zapret2.decide(2, True, self.settings.get("zapret2_auto", True),
+                          self.settings.get("last_zapret2_switch", 0)) != "revert":
+            self.log(f"режим zapret2: не работает {bad}, но движок меняю не чаще раза в 6 часов")
+            return
+        if not self.settings.get("strategy"):
+            self.log(f"zapret2: не работает {bad}, а вернуть не на что: нажмите «Подобрать заново»")
+            return
+        self.save(zapret2=False, last_zapret2_switch=time.time())
+        self.cb["zapret2"].blockSignals(True)
+        self.cb["zapret2"].setChecked(False)
+        self.cb["zapret2"].blockSignals(False)
+        self.log(f"zapret2 не справился ({bad}), возвращаюсь к обычному обходу")
+        self.tray.showMessage("ZapretAuto", "zapret2 не справился, вернул обычный обход.")
+        self.start_runner()
+        self.refresh()
+
+    def _zapret2_offer(self) -> bool:
+        """Подбор не нашёл рабочую стратегию: другой движок может. В первый раз спрашиваем, дальше решаем сами."""
+        from app import zapret2
+        if not self.settings.get("zapret2_auto", True) or self._zapret2_on():
+            return False
+        if zapret2.decide(2, False, True, self.settings.get("last_zapret2_switch", 0)) != "install":
+            self.log("движок не меняю: недавно уже переключал (не чаще раза в 6 часов)")
+            return False
+        if not self.settings.get("zapret2_asked"):
+            self.save(zapret2_asked=True)
+            box = QMessageBox(self)
+            box.setWindowTitle("Не помогло автоматически")
+            box.setText("Подбор не нашёл рабочую стратегию. Попробовать движок zapret2?\n\n"
+                        "Он подбирает стратегию для каждого сайта сам. При первом включении скачается около 4 МБ, "
+                        "файлы проверяются по контрольным суммам.")
+            yes = box.addButton("Попробовать zapret2", QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Остаться на обычном обходе", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            if box.clickedButton() is not yes:
+                self.save(zapret2_auto=False)
+                self.log("zapret2 сам включать не буду, можно включить вручную в «Дополнительно»")
+                return False
+        self.save(last_zapret2_switch=time.time())
+        self._expect_running = True
+        self.set_zapret2(True)
+        return True
 
     def _network_changed(self):
         """Another ISP (ASN): switch to the strategy picked there before, without a pick. An unknown ISP may be
@@ -409,6 +485,39 @@ class ActionsMixin(WindowBase):
             if notify:  # asked from the tray menu: answer there too
                 self.tray.showMessage("ZapretAuto", txt)
         self._run(lambda log: tester.quick_check(), done)
+
+    def check_whitelist(self):
+        """Диагностика: не пропускает ли провайдер только разрешённые сайты. На время проверки обход выключается."""
+        if self.busy or getattr(self, "_wl_running", False):
+            return
+        if tester.vpn_active():
+            QMessageBox.information(self, "Проверка", "Включён VPN: он сам решает, что открывается. "
+                                    "Выключите VPN и повторите проверку.")
+            return
+        self._wl_running = True
+        was = self.runner.running
+        if was:
+            self.runner.stop()
+        self.btn_white.setEnabled(False)
+        self.btn_white.setText("Проверяю...")
+        def done(rep):
+            self._wl_running = False
+            self.btn_white.setEnabled(True)
+            self.btn_white.setText("Проверить белые списки")
+            self.save(white_checked=time.time())
+            v = (rep or {}).get("verdict")
+            self.log(f"проверка белых списков: {v}")
+            if was:
+                self.start_runner()
+            if v == "whitelist":
+                QMessageBox.warning(self, "Белые списки", whitelist.TEXT)
+            elif v == "ok":
+                QMessageBox.information(self, "Проверка", "Фильтра по белому списку не видно: заблокированные сайты "
+                                        "открываются и без обхода. Значит, дело в стратегии или в самом сайте.")
+            else:
+                QMessageBox.information(self, "Проверка", "Ничего не открылось без обхода: похоже на выключенный "
+                                        "кабель или VPN. Проверку понять нельзя.")
+        self._run(lambda log: whitelist.check(), done)
 
     def _game_udp_wanted(self) -> bool:
         """A game was found: enable the game filter for TCP and UDP (some games log in over TCP high ports).
@@ -612,23 +721,56 @@ class ActionsMixin(WindowBase):
         self.log("автоподбор завершён" if res else ("подбор отменён" if cancelled else "автоподбор не дал результата"))
         if not res and not cancelled:
             self.error = "Подбор не удался, подробности в разделе «Журнал»."
-        if res or self.settings.get("strategy"):
-            self.start_runner()  # the pick stopped the bypass: always bring it back (old strategy if pick failed)
         if getattr(self, "_repair", False):  # this pick was an automatic repair: tell how it ended
             self._repair = False
             self.tray.showMessage("ZapretAuto", f"Обход починен: {self.describe()}" if res else
                                   "Починить автоматически не удалось, откройте окно программы")
         if res:
+            self.start_runner()
             self._pick_summary()
             self._offer_autostart()
             self._offer_share()
             self.fill_isp()
-        elif not cancelled and self.isVisible() and QMessageBox.question(
+        elif cancelled:
+            if self.settings.get("strategy"):
+                self.start_runner()
+        else:
+            self._no_pick_help()  # why did nothing work: allowlist network? another engine? then the report offer
+        self.refresh()
+
+    def _no_pick_help(self):
+        """Nothing worked: check for an allowlist network before offering another engine or a report."""
+        if time.time() - self.settings.get("white_checked", 0) < 6 * 3600 or tester.vpn_active():
+            self._no_pick_fallback()  # checked recently (or VPN hides the real picture): don't probe again
+            return
+        self.log("подбор не помог, проверяю, не белые ли списки у провайдера…")
+        def done(rep):
+            self.save(white_checked=time.time())
+            if (rep or {}).get("verdict") == "whitelist":
+                self.log(whitelist.TEXT)
+                self.tray.showMessage("ZapretAuto", whitelist.TEXT)
+                if self.isVisible():
+                    QMessageBox.warning(self, "Белые списки", whitelist.TEXT)
+                if self.settings.get("strategy"):
+                    self.start_runner()
+                return
+            self._no_pick_fallback()
+        self._run(lambda log: whitelist.check(), done)
+
+    def _no_pick_fallback(self):
+        """Another engine may cope where no winws strategy did; otherwise offer a report."""
+        if self._zapret2_offer():
+            return  # set_zapret2 restarts the bypass itself
+        if self.settings.get("strategy"):
+            self.start_runner()
+        self._offer_failed_report()
+
+    def _offer_failed_report(self):
+        if self.isVisible() and QMessageBox.question(
                 self, "ZapretAuto", "Подбор не помог. Отправить отчёт разработчику?\n\nОткроется страница GitHub "
                 "с готовым отчётом (версии и конец журнала, имя пользователя и IP скрыты). Нужен аккаунт GitHub.") \
                 == QMessageBox.StandardButton.Yes:
             self.send_report()
-        self.refresh()
 
     def _explain_failure(self):
         """Run diagnostics in the background and put the concrete cause into the status line."""

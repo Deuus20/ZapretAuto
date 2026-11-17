@@ -31,7 +31,8 @@ def test_quick_check_majority(tmp_path, monkeypatch):
     monkeypatch.setattr(tester, "probe_all", lambda ts: {t.key: (0.1 if t.key in ok else None) for t in ts})
     monkeypatch.setattr(tester.time, "sleep", lambda s: None)
     r = tester.quick_check(light=True)
-    assert r == {"Discord": True, "YouTube": False, "Голос Discord": True}
+    assert r["Discord"] is True and r["YouTube"] is False and r["Голос Discord"] is True
+    assert r["Telegram (веб)"] is False and r["Telegram (приложение)"] is False  # checked with the option off
 
 def test_quick_check_speed_sample_is_hourly(monkeypatch):
     """The periodic check skips the 1 MB test; once an hour it adds a short sample instead."""
@@ -44,10 +45,33 @@ def test_quick_check_speed_sample_is_hourly(monkeypatch):
         seen.extend(t.key for t in ts)
         return {t.key: 0.1 for t in ts}
     monkeypatch.setattr(tester, "probe_all", probe_all)
-    assert tester.quick_check(light=True) == {}
-    assert "YouTubeSpeedLight" not in seen
+    r = tester.quick_check(light=True)
+    assert "YouTubeSpeedLight" not in seen and r.get("Скорость YouTube") is None
     r = tester.quick_check(light=True, speed=True)
     assert "YouTubeSpeedLight" in seen and r["Скорость YouTube"] is True
+    assert "TelegramDC2" in seen and "TelegramDC4" in seen  # Telegram gets its own probes in every check
+
+def test_telegram_targets_are_checked_with_and_without_the_option(tmp_path, monkeypatch):
+    """Web, the t.me site and two data centres: the app talks to them directly, so this is its own answer."""
+    monkeypatch.setattr(paths, "VENDOR", tmp_path)
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    settings._cache = None
+    (tmp_path / "utils").mkdir()
+    (tmp_path / "utils" / "targets.txt").write_text('DiscordMain = "https://discord.com"\n', encoding="utf-8")
+    monkeypatch.setattr(tester, "vpn_active", lambda: None)
+    monkeypatch.setattr(tester, "egress_ip", lambda: "1.2.3.4")
+    seen = []
+    def probe_all(ts):
+        seen.extend(t.key for t in ts)
+        return {t.key: 0.1 for t in ts}
+    monkeypatch.setattr(tester, "probe_all", probe_all)
+    r = tester.quick_check()
+    assert r["Telegram (веб)"] is True and r["Telegram (приложение)"] is True
+    assert {"TelegramWeb", "TelegramDC2", "TelegramDC4"} <= set(seen)
+    settings.save_settings(telegram=True)
+    seen.clear()
+    tester.quick_check()
+    assert seen.count("TelegramDC2") == 1              # in load_targets and not added twice
 
 def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
     tester = _fake_pick_env(monkeypatch, tmp_path, baseline_ok=3)

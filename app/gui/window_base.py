@@ -50,11 +50,13 @@ class WindowBase(QWidget):
     _run_flags: Any
     _tick: Any
     _ticks: Any
+    _tg_advised: Any
     _timer: Any
     _title_bar: Any
     _upd: Any
     _update_deferred: Any
     _vpn_was: Any
+    _wl_running: Any
     _workers: Any
     _zapret2_on: Any
     act_toggle: Any
@@ -81,6 +83,7 @@ class WindowBase(QWidget):
     btn_site: Any
     btn_toggle: Any
     btn_update: Any
+    btn_white: Any
     busy: Any
     busy_text: Any
     cancel_busy: Any
@@ -88,6 +91,7 @@ class WindowBase(QWidget):
     check_access: Any
     check_site: Any
     check_update: Any
+    check_whitelist: Any
     chips: Any
     combo: Any
     describe: Any

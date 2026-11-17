@@ -7,6 +7,7 @@ release zip itself is flagged by Windows Defender's archive reputation check (Tr
 a false positive: every file inside scans clean).
 """
 import hashlib
+import time
 from pathlib import Path
 
 import requests
@@ -30,6 +31,18 @@ FILES = {
         "f243ddc22758b9e04838211a3815e43fb3abe615e6be29e6a812ae4c72b392e0",
 }
 NAME = "zapret2 (эксперимент)"
+SWITCH_PAUSE = 6 * 3600  # s between automatic engine switches: flapping between engines only tires the network
+
+
+def decide(fails: int, on: bool, auto: bool, last: float, now: float | None = None) -> str:
+    """Что делать после двух неудачных проверок подряд: 'install' (обычный обход не справляется, пробуем zapret2),
+    'revert' (zapret2 не справился, вернуться к обычному), 'none' (ничего: рано или выключено)."""
+    if not auto or fails < 2:
+        return "none"
+    if (time.time() if now is None else now) - last < SWITCH_PAUSE:
+        return "none"
+    return "revert" if on else "install"
+
 GAME_OFF = "12"  # same trick as Flowseal: a port nothing uses when the game filter is off
 # strategies circular rotates through for TLS/HTTP (ports of Flowseal favourites + the bundle's example)
 BADSEQ = "tcp_seq=2:tcp_ack=-66000:tcp_ts_up"  # nfqws1 --dpi-desync-fooling=badseq --dpi-desync-badseq-increment=2

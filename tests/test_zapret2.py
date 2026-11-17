@@ -28,3 +28,16 @@ def test_zapret2_install_checks_hashes(tmp_path, monkeypatch):
     assert not zapret2.install(lambda m: None) and not (tmp_path / "zapret2" / "a.txt").exists()
     resp.content = b"good"
     assert zapret2.install(lambda m: None) and zapret2.installed()
+
+
+def test_decide_when_to_switch_engines():
+    now = 1_000_000.0
+    # обычный движок не справился: пробуем zapret2 (не чаще раза в 6 часов)
+    assert zapret2.decide(2, False, True, 0, now) == "install"
+    assert zapret2.decide(1, False, True, 0, now) == "none"                      # одна неудача: рано
+    assert zapret2.decide(2, False, False, 0, now) == "none"                     # автопереключение выключено
+    assert zapret2.decide(2, False, True, now - 60, now) == "none"              # недавно уже переключали
+    assert zapret2.decide(2, False, True, now - zapret2.SWITCH_PAUSE, now) == "install"
+    # zapret2 не справился: обратно на обычный движок
+    assert zapret2.decide(2, True, True, 0, now) == "revert"
+    assert zapret2.decide(2, True, True, now - 60, now) == "none"

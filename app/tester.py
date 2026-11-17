@@ -142,9 +142,17 @@ def load_targets() -> list[Target]:
     out.append(Target("YouTubeSpeed", "speed://youtube", "tcp:443:list-google"))
     out.append(Target("YouTubeVideo", "ytcdn://", "tcp:443:list-google"))  # the video cache server itself
     if load_settings().get("telegram"):
-        out.append(Target("TelegramWeb", "https://web.telegram.org"))
-        out.append(Target("TelegramDC2", "tcp://149.154.167.50:443"))
+        out += TELEGRAM_TARGETS
     return out
+# Telegram is checked even when its bypass option is off: people expect a separate answer for it, and the web
+# front and the app differ (the app talks MTProto to the data centres). Two chips, so «веб» never hides «приложение».
+# TCP probes go to the data centres themselves, so their failure is an IP-level block, not a DNS one.
+# IPv4s are from Pyrogram's DC list (Telegram publishes only CIDR ranges, not per-DC addresses).
+TELEGRAM_TARGETS = [
+    Target("TelegramWeb", "https://web.telegram.org"),
+    Target("TelegramDC2", "tcp://149.154.167.50:443"),
+    Target("TelegramDC4", "tcp://149.154.167.91:443"),
+]
 STUN_TARGETS = [
     Target("STUN_Google19302", "stun://stun.l.google.com:19302",
            "udp:19294-19344,50000-50100:discord,stun"),  # = the voice profile's group, else never tuned
@@ -341,7 +349,8 @@ def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float
 QUICK = {"Discord": ("DiscordMain", "DiscordGateway", "DiscordCDN"),
          "YouTube": ("YouTubeWeb", "YouTubeImage", "YouTubeVideoRedirect", "YouTubeVideo"),
          "Скорость YouTube": ("YouTubeSpeed", "YouTubeSpeedLight"), "Голос Discord": ("STUN_Google19302",),
-         "Telegram": ("TelegramWeb",)}
+         "Telegram (веб)": ("TelegramWeb",),
+         "Telegram (приложение)": ("TelegramDC2", "TelegramDC4")}
 def quick_check(light: bool = False, speed: bool = False) -> dict[str, bool]:
     """Check key services through the currently running bypass (does not touch winws).
     light=True skips the ~1 MB YouTube speed test (periodic background checks: ~144 MB/day otherwise).
@@ -355,6 +364,8 @@ def quick_check(light: bool = False, speed: bool = False) -> dict[str, bool]:
         return {}  # full tunnel with a kill switch: the bypass isn't on the path, failures would be false alarms
     keys = {k for ks in QUICK.values() for k in ks}
     ts = [t for t in load_targets() if t.key in keys and not (light and t.is_speed)]
+    have = {t.key for t in ts}
+    ts += [t for t in TELEGRAM_TARGETS if t.key not in have]  # its own answer, even with the option off
     if light and speed:
         ts.append(Target("YouTubeSpeedLight", "speed://youtube?light", "tcp:443:list-google"))
     res = probe_all(ts)
