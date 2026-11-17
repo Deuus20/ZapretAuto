@@ -30,7 +30,10 @@ jobs:
       - name: "Types (pyright, блокирует: app, main.py, tools, scripts)"
         run: python -m pyright
       - name: Tests (with coverage floor)
-        run: python -m pytest -q tests --basetemp build/pytest --cov=app --cov-report=term --cov-fail-under=70
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null  # база для --basetemp в чистом клоне
+          python -m pytest -q tests --basetemp build/pytest --cov=app --cov-report=term --cov-fail-under=70
 
   audit:
     # Уязвимости в зависимостях и SBOM: pip-audit падает на найденной CVE, поэтому сборка не пройдёт.
