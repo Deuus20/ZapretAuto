@@ -68,7 +68,7 @@ class ActionsMixin(WindowBase):
         """Fixes may hit the network or kill processes: run them off the UI thread, then show the result."""
         self.btn_diag.setEnabled(False)
         def done(msg):
-            msg = msg or "не удалось — подробности в журнале"
+            msg = msg or "не удалось, подробности в журнале"
             self.log(f"исправление {fix}: {msg}")
             QMessageBox.information(self, "Диагностика", msg)
             self.run_diag()
@@ -112,7 +112,7 @@ class ActionsMixin(WindowBase):
             return False
         s = tester.chosen_strategy()
         if not s:
-            self.error = "Стратегия не выбрана — нажмите «Подобрать лучшую стратегию»."
+            self.error = "Стратегия не выбрана, нажмите «Подобрать лучшую стратегию»."
             self.refresh()
             return False
         try:
@@ -194,7 +194,7 @@ class ActionsMixin(WindowBase):
                 if msg.endswith(" [ip]"):  # IP-blocked: hand the domain over for the VPN's site list
                     msg = msg[:-5]
                     QApplication.clipboard().setText(dom)
-                    msg += (f" Адрес «{dom}» скопирован — вставьте его в список сайтов раздельного "
+                    msg += (f" Адрес «{dom}» скопирован, вставьте его в список сайтов раздельного "
                             "туннелирования вашего VPN.")
                 self.log(msg)
                 QMessageBox.information(self, "Проверка сайта", msg)
@@ -240,7 +240,7 @@ class ActionsMixin(WindowBase):
                     return
                 if (time.time() - self.settings.get("last_auto_repick", 0) < 6 * 3600
                         and not getattr(self, "_new_net", False)):
-                    self.log("автоподбор уже был недавно — жду, чтобы не дёргать обход")
+                    self.log("автоподбор уже был недавно, жду, чтобы не дёргать обход")
                     return
                 self.save(last_auto_repick=time.time())
                 self._new_net = False
@@ -265,7 +265,7 @@ class ActionsMixin(WindowBase):
             mem = (self.settings.get("networks") or {}).get(who[0])
             if not mem:
                 self._new_net = True
-                self.log(f"новая сеть: {who[1]} ({who[0]}) — если что-то не откроется, подберу стратегию для неё")
+                self.log(f"новая сеть: {who[1]} ({who[0]}), если что-то не откроется, подберу стратегию для неё")
                 return
             self._new_net = False
             if mem["choice"] == self.settings.get("strategy") or self.busy or self._zapret2_on():
@@ -284,7 +284,7 @@ class ActionsMixin(WindowBase):
         from app import vpn
         def done(names):
             if names:
-                self.log("VPN выключен — перезапустил Discord, чтобы он подключился через обход")
+                self.log("VPN выключен, перезапустил Discord, чтобы он подключился через обход")
         self._run(lambda log: vpn.restart_discord(), done)
 
     def _tick(self):
@@ -307,17 +307,17 @@ class ActionsMixin(WindowBase):
             self.apply_theme()  # Windows light/dark switched: follow it live
             from app import runner as runner_mod
             if self.runner.running and not self.busy and runner_mod.stale(self.runner.unwatched):
-                self.log("изменился список исключений — перезапускаю обход, чтобы он его учёл")
+                self.log("изменился список исключений, перезапускаю обход, чтобы он его учёл")
                 self.start_runner()
         if self._ticks % 30 == 0 and self.runner.running and not self.busy:  # ~1 min: VPN may have moved
             from app import vpn
             def vpn_moved(ips):  # the list reloads by itself, the capture filter only on restart
                 if ips is not None and ips != self.runner.vpn_ips and self.runner.running and not self.busy:
-                    self.log("сменился сервер VPN — перезапускаю обход, чтобы не пропускать туннель через winws")
+                    self.log("сменился сервер VPN, перезапускаю обход, чтобы не пропускать туннель через winws")
                     self.start_runner()
             self._run(lambda log: vpn.write_exclude(), vpn_moved)
         if now - self._last_tick > 60:  # timer is 2 s: a long gap means sleep/hibernate
-            self.log("пробуждение после сна — перезапускаю обход")
+            self.log("пробуждение после сна, перезапускаю обход")
             if self._expect_running and not self.busy:
                 self.start_runner()
             self._next_health = now + 30
@@ -328,17 +328,17 @@ class ActionsMixin(WindowBase):
             if len(self._crashes) <= 3:
                 from app import runner as runner_mod
                 why = runner_mod.explain(runner_mod.last_output())
-                self.log(f"winws завершился сам — перезапуск ({len(self._crashes)}/3)" + (f": {why}" if why else ""))
+                self.log(f"winws завершился сам, перезапуск ({len(self._crashes)}/3)" + (f": {why}" if why else ""))
                 self.start_runner()
             else:
                 self._expect_running = False
                 self.error = "Обход постоянно падает. Проверьте антивирус и раздел «Диагностика»."
-                self.log("winws падает слишком часто — автоперезапуск остановлен")
+                self.log("winws падает слишком часто, автоперезапуск остановлен")
                 self.tray.showMessage("ZapretAuto", self.error)
                 self._explain_failure()
         if self._repick_pending and not self.busy and not self._game_running():
             self._repick_pending = False
-            self.log("игра закрыта — чиню обход")
+            self.log("игра закрыта, чиню обход")
             self.autopick()
         net = tester.egress_ip() if int(now) % 10 < 2 else self._net  # ~every 10 s; psutil-free (it leaked handles)
         if self._net is not None and net != self._net:
@@ -371,7 +371,7 @@ class ActionsMixin(WindowBase):
         self.refresh()
 
     def _reap(self, w):
-        """A worker finished: join its thread (frees the OS thread handle) and drop the QObject — the signal
+        """A worker finished: join its thread (frees the OS thread handle) and drop the QObject, the signal
         connections form a reference cycle that otherwise kept both alive (~2 handles per job, every minute)."""
         if w in self._workers:
             self._workers.remove(w)
@@ -394,14 +394,14 @@ class ActionsMixin(WindowBase):
         def done(res):
             self.btn_check_access.setEnabled(True)
             if not res:
-                self.substatus.setText("VPN не пускает трафик мимо себя — проверка невозможна, пока он включён"
+                self.substatus.setText("VPN не пускает трафик мимо себя, проверка невозможна, пока он включён"
                                        if tester.vpn_active() else "Не удалось проверить")
                 return
             txt = "   ".join(f"{k} {'✓' if ok else '✗'}" for k, ok in res.items())
             self.set_chips(res)
             self.log("проверка доступа: " + txt)
             self.substatus.setText("Всё работает" if all(res.values()) else
-                                   "Если что-то ✗ — нажмите «Подобрать лучшую стратегию»")
+                                   "Если что-то ✗, нажмите «Подобрать лучшую стратегию»")
             if notify:  # asked from the tray menu: answer there too
                 self.tray.showMessage("ZapretAuto", txt)
         self._run(lambda log: tester.quick_check(), done)
@@ -500,7 +500,7 @@ class ActionsMixin(WindowBase):
         from app import zapret2
         def switched(ok):
             if not ok:
-                self.error = "Не удалось скачать zapret2 — подробности в журнале."
+                self.error = "Не удалось скачать zapret2, подробности в журнале."
                 self.cb["zapret2"].blockSignals(True)
                 self.cb["zapret2"].setChecked(False)
                 self.cb["zapret2"].blockSignals(False)
@@ -546,8 +546,8 @@ class ActionsMixin(WindowBase):
         if QMessageBox.question(
                 self, "Первая настройка",
                 "Нужно один раз подобрать стратегию под вашего провайдера.\n\n"
-                "Это займёт 2–4 минуты. В это время Discord и YouTube могут ненадолго "
-                "пропадать — это нормально. VPN на время подбора лучше выключить.\n\n"
+                "Это займёт 2-4 минуты. В это время Discord и YouTube могут ненадолго "
+                "пропадать, это нормально. VPN на время подбора лучше выключить.\n\n"
                 "Начать?") == QMessageBox.StandardButton.Yes:
             self.autopick()
 
@@ -568,14 +568,14 @@ class ActionsMixin(WindowBase):
                 QMessageBox.warning(self, "VPN", f"Активен VPN ({vpn}), и проверить сеть мимо него не получается. "
                                     "Отключите VPN на время подбора.")
                 return
-            self.log(f"VPN {vpn} включён — подбор пойдёт мимо него")
+            self.log(f"VPN {vpn} включён, подбор пойдёт мимо него")
         self._expect_running = False
         self.runner.stop()
         self.busy = True
         self.busy_text = "Подбираю стратегию…"
         self.error = ""
         self.refresh()
-        self.substatus.setText("Обычно 2–4 минуты. Обход на это время выключен.")
+        self.substatus.setText("Обычно 2-4 минуты. Обход на это время выключен.")
         self.tabs.setCurrentIndex(0)
         t_start = time.time()
         def line(t):
@@ -607,13 +607,13 @@ class ActionsMixin(WindowBase):
         self.btn_cancel.setEnabled(True)
         self.log("автоподбор завершён" if res else ("подбор отменён" if cancelled else "автоподбор не дал результата"))
         if not res and not cancelled:
-            self.error = "Подбор не удался — подробности в разделе «Журнал»."
+            self.error = "Подбор не удался, подробности в разделе «Журнал»."
         if res or self.settings.get("strategy"):
             self.start_runner()  # the pick stopped the bypass: always bring it back (old strategy if pick failed)
         if getattr(self, "_repair", False):  # this pick was an automatic repair: tell how it ended
             self._repair = False
             self.tray.showMessage("ZapretAuto", f"Обход починен: {self.describe()}" if res else
-                                  "Починить автоматически не удалось — откройте окно программы")
+                                  "Починить автоматически не удалось, откройте окно программы")
         if res:
             self._pick_summary()
             self._offer_autostart()
@@ -662,7 +662,7 @@ class ActionsMixin(WindowBase):
         box.setWindowTitle("Поделиться результатом")
         box.setText("Подбор завершён. Отправить результат в общую базу?\n\n"
                     "Другие пользователи вашего провайдера смогут настроиться за секунды. "
-                    "Отправляется только номер сети провайдера (AS) и найденная комбинация — "
+                    "Отправляется только номер сети провайдера (AS) и найденная комбинация, "
                     "без вашего IP. Откроется страница GitHub (нужен аккаунт).")
         yes = box.addButton("Поделиться", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Не сейчас", QMessageBox.ButtonRole.RejectRole)

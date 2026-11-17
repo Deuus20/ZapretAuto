@@ -110,7 +110,7 @@ def test_strategies_cached_until_vendor_changes(tmp_path, monkeypatch):
     first = strategies.load_all()
     parsed = len(calls)
     second = strategies.load_all()
-    assert len(calls) == parsed and second is not first        # разбор не повторился, список — копия
+    assert len(calls) == parsed and second is not first        # разбор не повторился, список, копия
     assert [s.name for s in second] == [s.name for s in first]
     (tmp_path / "general.bat").write_text(src + "\nrem touched\n", encoding="utf-8")
     strategies.load_all()

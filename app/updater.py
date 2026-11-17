@@ -28,7 +28,7 @@ def _stage(prefix: str) -> Path:
     """A fresh dir for downloads under data/ (admin-only when installed): %TEMP% is writable by any process of
     this user, which could swap a checked file before the elevated app runs or installs it."""
     if not paths.staging_trusted():  # ProgramData-каталог, который мы не смогли запереть: туда нельзя качать
-        raise RuntimeError("каталог данных не защищён от записи другими пользователями — файлы обновления "
+        raise RuntimeError("каталог данных не защищён от записи другими пользователями, файлы обновления "
                            f"может подменить кто угодно ({paths.DATA}). Запустите программу от администратора "
                            "или удалите этот каталог: при следующем запуске он создастся заново")
     base = paths.DATA / "tmp"
@@ -124,7 +124,7 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
         # winws.exe и драйвер запускаются от администратора: непроверяемый архив не ставим.
         # force снимает только проверку версии (переустановка того же выпуска), но не требование хэша.
         if not digest and not allow_unsigned:
-            raise RuntimeError("в релизе zapret нет контрольной суммы (GitHub asset digest) — файл не проверить, "
+            raise RuntimeError("в релизе zapret нет контрольной суммы (GitHub asset digest), файл не проверить, "
                                "обновление отменено")
         if digest and _sha256(zpath) != digest:
             raise RuntimeError("контрольная сумма архива zapret не совпала")
@@ -157,8 +157,8 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
         if had_old:
             shutil.rmtree(old, ignore_errors=True)
         try:
-            vendorcheck.write_manifest(vendor)  # новый vendor — новый манифест целостности
-        except OSError as e:  # устаревший манифест даст ложное «файлы обхода изменены» — скажем об этом
+            vendorcheck.write_manifest(vendor)  # новый vendor, новый манифест целостности
+        except OSError as e:  # устаревший манифест даст ложное «файлы обхода изменены», скажем об этом
             log(f"не удалось записать манифест целостности: {e}")
     finally:
         shutil.rmtree(td, ignore_errors=True)
@@ -166,7 +166,7 @@ def update(log=print, before_replace=None, vendor: Path = paths.VENDOR, force=Fa
     return True
 class AppRelease(NamedTuple):
     """Что публикует наш релиз: файл для скачивания и подписанный манифест, где записан его хэш. У старых
-    релизов (до 2.2) манифеста нет — такой релиз виден в проверке, но обновиться на него нельзя."""
+    релизов (до 2.2) манифеста нет, такой релиз виден в проверке, но обновиться на него нельзя."""
     tag: str
     name: str
     url: str
@@ -174,7 +174,7 @@ class AppRelease(NamedTuple):
     signature: str | None
 def app_release() -> AppRelease:
     """Last ZapretAuto release: the installer, or the zip for a portable copy (it must not install itself into
-    Program Files). Отсутствие манифеста — не ошибка связи: его проверяет app_update перед установкой."""
+    Program Files). Отсутствие манифеста, не ошибка связи: его проверяет app_update перед установкой."""
     j = get_json(f"https://api.github.com/repos/{APP_REPO}/releases/latest")
     assets = {a.get("name", "").lower(): (a.get("name", ""), a.get("browser_download_url", ""))
               for a in j.get("assets", [])}
@@ -207,7 +207,7 @@ def app_update(log=print) -> bool:
     if not TAG_RE.match(rel.tag) or not is_newer(rel.tag, __version__):
         return False
     if not rel.manifest or not rel.signature:
-        raise RuntimeError("в релизе нет подписанного манифеста — обновление не проверить")
+        raise RuntimeError("в релизе нет подписанного манифеста, обновление не проверить")
     shutil.rmtree(paths.DATA / "tmp", ignore_errors=True)  # earlier updates' files
     d = _stage("app_")
     f = d / rel.name

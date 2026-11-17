@@ -90,7 +90,7 @@ def _entries(f: Path) -> list[str] | None:
 def slim(argv: list[str]) -> tuple[list[str], dict[Path, list[str] | None]]:
     """Fewer list files for winws. For every NEW connection winws (a Cygwin build) checks each list file of each
     profile for changes: 56 references cost ~3 ms per new flow, so a torrent client opening dozens of connections
-    a second queued all captured traffic — game packets waited 0.4-1.9 s. Placeholder lists are dropped, small
+    a second queued all captured traffic, game packets waited 0.4-1.9 s. Placeholder lists are dropped, small
     exclude lists inlined. Returns the new argv and the files it no longer watches with their entries: when one
     changes, winws must be restarted (stale())."""
     if Path(argv[0]).name.lower() != "winws.exe":
@@ -213,7 +213,7 @@ def explain(output: str) -> str | None:
     import re
     low = output.lower()
     if "already running with the same filter" in low:
-        return "уже запущен другой обход zapret (служба или .bat) — закройте его или «Диагностика» → «Исправить»"
+        return "уже запущен другой обход zapret (служба или .bat), закройте его или «Диагностика» → «Исправить»"
     m = re.search(r"error opening filter: (.*)", output, re.I)
     if m:
         why = m.group(1).strip()
@@ -223,13 +223,13 @@ def explain(output: str) -> str | None:
             return ("Windows не загрузила драйвер WinDivert (подпись не принята). Чаще всего мешает антивирус или "
                     "«Изоляция ядра → Целостность памяти»")
         if c == 5 or "denied" in why.lower() or "отказано" in why.lower():
-            return "нет прав администратора для драйвера WinDivert — запустите ZapretAuto от администратора"
+            return "нет прав администратора для драйвера WinDivert, запустите ZapretAuto от администратора"
         if c == 2 or "not find" in why.lower() or "не удается найти" in why.lower():
-            return "нет файла драйвера WinDivert — скорее всего, его удалил антивирус; добавьте папку в исключения"
+            return "нет файла драйвера WinDivert, скорее всего, его удалил антивирус; добавьте папку в исключения"
         if c in (1058, 1275) or "blocked" in why.lower() or "заблокирован" in why.lower():
             return "драйвер WinDivert заблокирован системой или антивирусом"
         return f"драйвер WinDivert не запустился: {why[:120]}"
     m = re.search(r"cannot access (?:hostlist|ipset) file '([^']+)'", output)
     if m:
-        return f"обход не может прочитать список {Path(m.group(1)).name} — проверьте антивирус"
+        return f"обход не может прочитать список {Path(m.group(1)).name}, проверьте антивирус"
     return None

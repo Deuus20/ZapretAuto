@@ -56,7 +56,7 @@ def test_removed_manifest_is_not_silently_rebaselined(tmp_path):
 
 
 def test_first_run_writes_manifest_instead_of_warning(tmp_path):
-    """Обновление со старой версии: манифеста нет — создаём по текущему состоянию, а не пугаем пользователя."""
+    """Обновление со старой версии: манифеста нет, создаём по текущему состоянию, а не пугаем пользователя."""
     v = _vendor(tmp_path)
     assert vendorcheck.ensure(v) is None
     assert vendorcheck.manifest_path(v).exists()

@@ -55,6 +55,6 @@ def test_runtime_lock_has_hashes_for_every_pin():
     lock = (ROOT / "requirements.lock").read_text(encoding="utf-8")
     for name, ver in pins.items():
         block = lock.split(f"\n{name}=={ver}", 1)
-        assert len(block) == 2, f"{name}=={ver} нет в requirements.lock — пересоберите lock"
+        assert len(block) == 2, f"{name}=={ver} нет в requirements.lock, пересоберите lock"
         assert "--hash=sha256:" in block[1].split("\n\n", 1)[0], f"у {name}=={ver} нет хэшей"
 

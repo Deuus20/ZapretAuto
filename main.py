@@ -82,7 +82,7 @@ def main() -> int:
     settings.first_run()  # fresh install: games watched, autostart on, full settings shown
     try:
         bad = vendorcheck.ensure()  # bin/winws.exe и драйвер сверяются с манифестом: подмену видно в журнале
-    except Exception as e:  # noqa: BLE001 — занятый settings.json не должен мешать запуску
+    except Exception as e:  # noqa: BLE001, занятый settings.json не должен мешать запуску
         logs.log.warning("не удалось проверить целостность файлов обхода: %s", e)
         bad = None
     if bad:

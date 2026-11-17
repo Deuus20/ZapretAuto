@@ -72,14 +72,14 @@ class UpdatesMixin(WindowBase):
                 else:
                     self.log("самообновление не выполнено")
                     self.lbl_upd.show()
-                    self.lbl_upd.setText(f"Не удалось установить ZapretAuto {tag} — подробности в журнале.")
+                    self.lbl_upd.setText(f"Не удалось установить ZapretAuto {tag}, подробности в журнале.")
             self._app_updating = True  # two checks at once downloaded and ran the installer twice
             self._run(lambda log: updater.app_update(log), done)
 
     def on_update_checked(self, tag, newer):
         self.log(f"zapret {tag}: " + ("есть обновление" if newer else "последняя версия") if tag else "zapret: проверить обновления не удалось")
         self._show_upd("zapret", "zapret: " + ("не удалось проверить" if not tag else
-                                              f"есть версия {tag} — нажмите «Обновить»" if newer and not self._auto_check
+                                              f"есть версия {tag}, нажмите «Обновить»" if newer and not self._auto_check
                                               else f"обновляю до {tag}" if newer else f"{tag}, последняя версия"))
         if self._auto_check:
             self._auto_check = False
@@ -110,9 +110,9 @@ class UpdatesMixin(WindowBase):
         self.refresh()
 
     def _verify_after_update(self):
-        """New zapret: keep the strategy if Discord/YouTube still open with it; re-pick (2–4 min offline) only if not."""
+        """New zapret: keep the strategy if Discord/YouTube still open with it; re-pick (2-4 min offline) only if not."""
         if not tester.chosen_strategy() or not self.start_runner():
-            self.log("стратегии после обновления нет — подбираю заново")
+            self.log("стратегии после обновления нет, подбираю заново")
             self.autopick()
             return
         self.busy, self.busy_text = True, "Проверяю обход после обновления…"
@@ -122,10 +122,10 @@ class UpdatesMixin(WindowBase):
             core = [v for k, v in (res or {}).items() if k in ("Discord", "YouTube")]
             if res and not all(core):
                 self.log("после обновления не работает: " + ", ".join(k for k, v in res.items() if not v)
-                         + " — подбираю стратегию заново")
+                         + ", подбираю стратегию заново")
                 self.autopick()
                 return
-            self.log("после обновления всё работает — стратегия оставлена" if res else
-                     "проверить после обновления не удалось — стратегия оставлена")
+            self.log("после обновления всё работает, стратегия оставлена" if res else
+                     "проверить после обновления не удалось, стратегия оставлена")
             self.refresh()
         self._run(lambda log: tester.quick_check(light=True), done)

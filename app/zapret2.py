@@ -1,7 +1,7 @@
 """Experimental zapret2 mode: winws2 rotates strategies per site by itself (Lua 'circular' orchestrator).
 
 When a site's connections start failing (RST from DPI, retransmissions), winws2 switches that site to the next
-strategy on the fly: no restart and no 2–4 min re-pick. Strategies are ports of Flowseal's favourites.
+strategy on the fly: no restart and no 2-4 min re-pick. Strategies are ports of Flowseal's favourites.
 Files come one by one from bol-van/zapret-win-bundle at a pinned commit and are checked by sha256: the zapret2
 release zip itself is flagged by Windows Defender's archive reputation check (Trojan:Win32/Suschil!rfn,
 a false positive: every file inside scans clean).
@@ -95,7 +95,7 @@ def install(log=print) -> bool:
             log(f"zapret2: не удалось скачать {name}: {e}")
             return False
         if hashlib.sha256(data).hexdigest() != sha:
-            log(f"zapret2: {name} не совпал по контрольной сумме — не устанавливаю")
+            log(f"zapret2: {name} не совпал по контрольной сумме, не устанавливаю")
             return False
         dst.parent.mkdir(parents=True, exist_ok=True)
         tmp = dst.with_name(dst.name + ".tmp")

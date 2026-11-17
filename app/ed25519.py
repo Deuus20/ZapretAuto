@@ -1,7 +1,7 @@
 """Ed25519 по RFC 8032 на чистом Python.
 
 Нужен ровно для одного: проверять подпись манифеста релиза в exe. Ради этого тянуть cryptography или
-libsodium не хочется — в сборке прибавилось бы несколько мегабайт DLL, а здесь двести строк и hashlib.
+libsodium не хочется, в сборке прибавилось бы несколько мегабайт DLL, а здесь двести строк и hashlib.
 Подпись тоже здесь: tools/sign_release.py подписывает тем же кодом, что и проверяет, поэтому расхождения
 между «чем подписали» и «чем проверили» быть не может.
 """
@@ -80,14 +80,14 @@ G = _decode(bytes.fromhex("58" + "66" * 31))
 
 
 def _small_order(p) -> bool:
-    """Точка малого порядка: 8P — нейтральный элемент. Такие ключи и R дают подписи, которые «сходятся»
+    """Точка малого порядка: 8P, нейтральный элемент. Такие ключи и R дают подписи, которые «сходятся»
     при любом сообщении (identity: public=01 00…, R=01 00…, S=0). Настоящий ключ всегда кратен G."""
     q = _mul(p, 8)
     return q[0] % P == 0 and (q[1] - q[2]) % P == 0
 
 
 def verify(public: bytes, msg: bytes, sig: bytes) -> bool:
-    """True, если sig — 64-байтная подпись msg ключом public (32 байта)."""
+    """True, если sig, 64-байтная подпись msg ключом public (32 байта)."""
     if len(public) != 32 or len(sig) != 64:
         return False
     a, r = _decode(public), _decode(sig[:32])
@@ -104,7 +104,7 @@ def verify(public: bytes, msg: bytes, sig: bytes) -> bool:
 
 def _expand(seed: bytes):
     if len(seed) != 32:
-        raise ValueError("ключ Ed25519 — ровно 32 байта")
+        raise ValueError("ключ Ed25519, ровно 32 байта")
     h = hashlib.sha512(seed).digest()
     a = int.from_bytes(h[:32], "little")
     a = (a & ((1 << 254) - 8)) | (1 << 254)

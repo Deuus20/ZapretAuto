@@ -69,7 +69,7 @@ def test_update_ipset_rejects_garbage_and_keeps_the_old_file(tmp_path, monkeypat
     monkeypatch.setattr(paths, "LISTS", tmp_path)
     (tmp_path / "ipset-all.txt").write_text("10.0.0.0/8\n", encoding="utf-8")
     logs = []
-    # каждая строка «похожа на адрес», но неверна: регулярка их пропускала, ipaddress — нет
+    # каждая строка «похожа на адрес», но неверна: регулярка их пропускала, ipaddress, нет
     _serve(monkeypatch, "10.1.0.0/16\n999.999.999.999\n1:2:3\n10.0.0.0/999\n")
     assert lists.update_ipset(logs.append) is False
     assert (tmp_path / "ipset-all.txt").read_text(encoding="utf-8") == "10.0.0.0/8\n"
@@ -102,7 +102,7 @@ def test_ipv6_never_reaches_the_game_pipeline():
     assert gamewatch._is_server_ip("1.2.3.4", 5000, set()) is True
     for ip in ("2a00:1450:4001::1", "::ffff:1.2.3.4", "fe80::1"):
         assert gamewatch._is_server_ip(ip, 5000, set()) is False
-    assert gamewatch._is_server_ip("1.2.3.4", 53, set()) is False      # DNS игры — не её сервер
+    assert gamewatch._is_server_ip("1.2.3.4", 53, set()) is False      # DNS игры, не её сервер
     assert gamewatch._is_server_ip("1.2.3.4", 5000, {"1.2.3.4"}) is False  # откатанный сервер
 
 

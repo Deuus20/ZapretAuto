@@ -10,7 +10,7 @@ body:
     id: what
     attributes:
       label: Что не работает
-      placeholder: Например — не подключается голосовой чат Discord, YouTube грузит, но видео стоит
+      placeholder: Например, не подключается голосовой чат Discord, YouTube грузит, но видео стоит
     validations:
       required: true
   - type: input
@@ -28,4 +28,4 @@ body:
     id: report
     attributes:
       label: Отчёт об ошибке
-      description: Диагностика → «Сохранить отчёт об ошибке…» — перетащите zip сюда
+      description: Диагностика → «Сохранить отчёт об ошибке…», перетащите zip сюда

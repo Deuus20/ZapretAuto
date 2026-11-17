@@ -13,7 +13,7 @@ on:
         type: boolean
         default: true
 
-# Каждый шаг — с минимальными правами: сборка только читает репозиторий, публикация пишет, и только после
+# Каждый шаг, с минимальными правами: сборка только читает репозиторий, публикация пишет, и только после
 # подтверждения в environment `release`. Действия прибиты к коммитам: тег можно перевесить на чужой код.
 permissions:
   contents: read
@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           python -m venv .venv
-          # runtime — строго по хэшам из lock; инструменты сборки — из dev (они в exe не попадают)
+          # runtime, строго по хэшам из lock; инструменты сборки, из dev (они в exe не попадают)
           .venv\Scripts\python -m pip install -q --upgrade pip
           .venv\Scripts\python -m pip install -q --require-hashes -r requirements.lock
           .venv\Scripts\python -m pip install -q -r requirements-dev.txt
@@ -109,12 +109,12 @@ jobs:
                      'dist\ZapretAuto-portable.zip.sha256', 'dist\manifest.json', 'dist\manifest.json.sig')
           $missing = $files | Where-Object { -not (Test-Path $_) }
           if ($missing) { throw "нет файлов релиза: $($missing -join ', ')" }
-          $notes = "**Как установить:** скачайте ZapretAuto-Setup.exe ниже и запустите. Если программа уже стоит, она обновится сама. Без установки: ZapretAuto-portable.zip — распакуйте и запустите ZapretAuto.exe. Подробнее — в [инструкции](https://github.com/${{ github.repository }}/blob/main/docs/install.md)."
+          $notes = "**Как установить:** скачайте ZapretAuto-Setup.exe ниже и запустите. Если программа уже стоит, она обновится сама. Без установки: ZapretAuto-portable.zip, распакуйте и запустите ZapretAuto.exe. Подробнее, в [инструкции](https://github.com/${{ github.repository }}/blob/main/docs/install.md)."
           # what changed: this version's section of CHANGELOG.md goes on top of the release page
           $md = Get-Content CHANGELOG.md -Raw -Encoding UTF8
           $v = [regex]::Escape($tag.TrimStart('v'))
           if ($md -match "(?ms)^## $v\b[^\n]*\n(.*?)(?=^## |\z)") { $notes = $Matches[1].Trim() + "`n`n" + $notes }
-          $notes += "`n`n**Проверка файла:** подпись манифеста Ed25519 — ключ вшит в ZapretAuto.exe, вручную: ``python tools/sign_release.py verify``."
+          $notes += "`n`n**Проверка файла:** подпись манифеста Ed25519, ключ вшит в ZapretAuto.exe, вручную: ``python tools/sign_release.py verify``."
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $files --clobber

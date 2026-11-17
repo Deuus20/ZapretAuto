@@ -12,9 +12,9 @@ DATA_LOCKED = False  # ProgramData-копия: удалось ли остави�
 def _suspicious(d: Path) -> str | None:
     """Почему каталогу нельзя доверять файлы обновления, или None.
 
-    Каталог данных в ProgramData по умолчанию может создать любой пользователь, в том числе заранее — и
+    Каталог данных в ProgramData по умолчанию может создать любой пользователь, в том числе заранее, и
     подменить его junction'ом на свою папку. Повышенный процесс пишет туда список загрузки и запускает из
-    него установщик, поэтому путь, который ведёт не туда, чем кажется, — это чужой код с правами админа."""
+    него установщик, поэтому путь, который ведёт не туда, чем кажется, это чужой код с правами админа."""
     try:
         if d.is_symlink():
             return "это символическая ссылка"
@@ -28,7 +28,7 @@ def _lock_down(d: Path) -> bool:
 
     icacls /grant:r не годится: он не убирает явные ACE, которые кто-то успел поставить заранее, а
     /inheritance:r снимает только унаследованные. Поэтому DACL заменяется целиком, а потом читается обратно:
-    True — только если запись осталась лишь у администраторов и владелец каталога не чужой пользователь."""
+    True, только если запись осталась лишь у администраторов и владелец каталога не чужой пользователь."""
     if _suspicious(d) or not _is_admin():
         return False
     try:
@@ -108,7 +108,7 @@ def _aces(dacl) -> list[tuple[str, int]]:
         if not adv.GetAce(dacl, i, ctypes.byref(ace)) or not ace.value:
             continue
         allow = ctypes.cast(ace, ctypes.POINTER(_Allow)).contents
-        if allow.Header.AceType != 0:  # 0 — ACCESS_ALLOWED: остальные (deny, audit) запись не дают
+        if allow.Header.AceType != 0:  # 0, ACCESS_ALLOWED: остальные (deny, audit) запись не дают
             continue
         out.append((_sid_str(ctypes.c_void_p(ace.value + 8)), int(allow.Mask)))
     return out
@@ -120,7 +120,7 @@ def _writable_by_others(d: Path) -> bool:
         return True
     try:
         if not dacl:
-            return True  # DACL нет — писать может любой
+            return True  # DACL нет, писать может любой
         for sid, mask in _aces(dacl):
             if sid in _OWNERS:
                 continue
@@ -182,7 +182,7 @@ def _set_dacl(d: Path) -> None:
     finally:
         _free(sd)
 def _data_dir_safe(d: Path) -> bool:
-    """Каталог заперт: чужих ACE на запись нет, а владелец — мы или администраторы (иначе он вернёт права)."""
+    """Каталог заперт: чужих ACE на запись нет, а владелец, мы или администраторы (иначе он вернёт права)."""
     try:
         owner, _, sd = _security(d, _OWNER_INFO)
         try:
@@ -199,8 +199,7 @@ def _shared_dir(p: Path) -> bool:
 def staging_trusted() -> bool:
     """Можно ли качать файлы обновления в DATA: папку программы или запертый ProgramData-каталог.
 
-    Для уже установленных копий это мягкий режим: каждый запуск заново выставляет ACL, а если не вышло —
-    программа работает, но обновление откажется ставить непроверяемый файл."""
+    Для уже установленных копий это мягкий режим: каждый запуск заново выставляет ACL, а если не вышло, программа работает, но обновление откажется ставить непроверяемый файл."""
     if not _shared_dir(DATA):  # своя папка (Program Files, портативная копия, тесты): её пишет только админ
         return True
     return DATA_LOCKED and not _suspicious(DATA) and _data_dir_safe(DATA)

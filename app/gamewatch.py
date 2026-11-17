@@ -138,7 +138,7 @@ def public_ipv4(ip: str) -> bool:
         return False
     return a.is_global and not a.is_multicast
 def _is_server_ip(ip: str, port: int, banned: set[str]) -> bool:
-    """Адрес сервера игры: публичный IPv4, не забаненный и не служебный порт (DNS/NTP/DoT игры — не её сервер).
+    """Адрес сервера игры: публичный IPv4, не забаненный и не служебный порт (DNS/NTP/DoT игры, не её сервер).
 
     IPv6 сюда не проходит намеренно: движок и списки winws работают с IPv4, и адрес вида 2a00::1 в ipset
     сломал бы стратегию."""

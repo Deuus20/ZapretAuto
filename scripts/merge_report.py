@@ -73,7 +73,7 @@ def merge(db: dict, rep: dict, reporter: str = "?") -> dict:
         return db
     best = max(stats, key=lambda k: (len(stats[k][0]), sum(stats[k][1]) / len(stats[k][1])))
     e["votes"] = len(stats[best][0])
-    if e["votes"] < MIN_AUTHORS:  # один голос — ещё не выбор провайдера
+    if e["votes"] < MIN_AUTHORS:  # один голос, ещё не выбор провайдера
         e.pop("choice", None)
         return db
     e["choice"] = json.loads(best)

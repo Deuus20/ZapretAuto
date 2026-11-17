@@ -87,7 +87,7 @@ class _Resp:
         for i in range(0, len(self._body), size):
             yield self._body[i:i + size]
 def _release_net(tag, files):
-    """requests.get для релиза: API отдаёт assets по именам файлов, сами файлы — из files."""
+    """requests.get для релиза: API отдаёт assets по именам файлов, сами файлы, из files."""
     def get(url, **kw):
         if url.endswith("/releases/latest"):
             return _Resp(url, js={"tag_name": tag, "assets": [

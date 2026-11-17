@@ -4,7 +4,7 @@
     python tools/sign_release.py sign --key C:\\keys\\zapretauto.ed25519 --tag v2.2.0
     python tools/sign_release.py verify --tag v2.2.0
 
-`sign` пишет dist/manifest.json и dist/manifest.json.sig — их публикует release.yml; `verify` проверяет
+`sign` пишет dist/manifest.json и dist/manifest.json.sig, их публикует release.yml; `verify` проверяет
 собранные файлы тем же кодом, которым их проверяет приложение, и годится как шаг перед публикацией.
 Ключ, открытая часть которого не вписана в app/signing.py, для сборки не годится: приложение такой
 манифест отвергнет, поэтому sign в этом случае падает.
@@ -37,7 +37,7 @@ def _read_key(path: Path) -> bytes:
 
 def new_key(path: Path) -> None:
     if path.exists():
-        raise SystemExit(f"{path} уже существует — старый ключ не перезаписываю")
+        raise SystemExit(f"{path} уже существует, старый ключ не перезаписываю")
     seed = os.urandom(32)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(base64.b64encode(seed).decode("ascii") + "\n", encoding="ascii")
@@ -67,7 +67,7 @@ def sign(key: Path, tag: str, dist: Path, allow_unknown: bool = False) -> None:
     public = ed25519.public_key(seed)
     kid = signing.key_id(public)
     if kid not in signing.KEYS and not allow_unknown:
-        raise SystemExit(f"открытый ключ {kid} не вписан в app/signing.py — приложение отвергнет такой манифест "
+        raise SystemExit(f"открытый ключ {kid} не вписан в app/signing.py, приложение отвергнет такой манифест "
                          "(--allow-unknown-key, если это временный ключ)")
     m, data = _manifest(tag, dist)
     dist.mkdir(parents=True, exist_ok=True)
@@ -90,7 +90,7 @@ def verify(tag: str, dist: Path) -> None:
     if missing:  # подписанный манифест без части файлов: выпуск будет неполным
         raise SystemExit(f"в манифесте нет файлов релиза: {', '.join(missing)}")
     for a in m["assets"]:
-        signing.check_release(m, tag, APP_REPO, dist / a["name"])  # репозиторий — константа, не из манифеста
+        signing.check_release(m, tag, APP_REPO, dist / a["name"])  # репозиторий, константа, не из манифеста
     print(f"манифест {tag} верен: подпись и {len(m['assets'])} файлов сходятся")
 
 

@@ -232,7 +232,7 @@ def _in_ipset_all(host: str) -> bool | None:
             spans.sort()
             merged: list[list[int]] = []
             for lo, hi in spans:
-                if merged and lo <= merged[-1][1] + 1:  # соседние и пересекающиеся диапазоны — один интервал
+                if merged and lo <= merged[-1][1] + 1:  # соседние и пересекающиеся диапазоны, один интервал
                     merged[-1][1] = max(merged[-1][1], hi)
                 else:
                     merged.append([lo, hi])
@@ -390,7 +390,7 @@ def _auto_pick(log, use_shared, stop) -> dict:
             log(f"Включён VPN «{vpn}», а обойти его для проверки не удалось. "
                 "Отключите VPN или настройте раздельное туннелирование.")
             return {}
-        log(f"Включён VPN «{vpn}» — проверяю мимо него, через адаптер {BIND}.")
+        log(f"Включён VPN «{vpn}», проверяю мимо него, через адаптер {BIND}.")
     if use_shared is None:  # shared picks are a fast first setup; re-picks always search fully
         use_shared = not load_settings().get("strategy")
     shared = _try_shared(runner, targets, log) if use_shared else None
@@ -400,7 +400,7 @@ def _auto_pick(log, use_shared, stop) -> dict:
         from .diag import dns_poisoned
         if forged := dns_poisoned():
             log("Внимание: провайдер подменяет DNS (" + ", ".join(forged) + "). Пока не включён защищённый DNS "
-                "(DoH), обход не поможет — см. «Диагностику».")
+                "(DoH), обход не поможет, см. «Диагностику».")
     except Exception:  # noqa: BLE001
         pass
     results: dict[str, Any] = {"_baseline": probe_all(targets)}
@@ -408,12 +408,12 @@ def _auto_pick(log, use_shared, stop) -> dict:
     base_ok = score(results["_baseline"])[0]
     log(f"Без обхода доступно: {base_ok} из {n}")
     if base_ok == 0:
-        log("Похоже, интернета нет — подбор отменён.")
+        log("Похоже, интернета нет, подбор отменён.")
         return {}
     current = load_settings().get("strategy")
     if current and base_ok >= n - 2:
         # DPI is barely active right now (often at night): every strategy passes, so a pick would be noise
-        log(f"Сейчас почти ничего не блокируется ({base_ok} из {n} без обхода) — сравнивать стратегии не на чем. "
+        log(f"Сейчас почти ничего не блокируется ({base_ok} из {n} без обхода), сравнивать стратегии не на чем. "
             "Текущая стратегия сохранена; подберите заново днём, если что-то перестанет работать.")
         return current
     for i, s in enumerate(all_s, 1):
@@ -429,7 +429,7 @@ def _auto_pick(log, use_shared, stop) -> dict:
         return {}
     best = max(tested.values(), key=lambda s: score(results[s.name]))
     if score(results[best.name])[0] <= base_ok and base_ok < n:
-        log("Ни одна стратегия не улучшила доступ — выбор не изменён.")
+        log("Ни одна стратегия не улучшила доступ, выбор не изменён.")
         return {}
     picks = {}
     for g in set(groups.values()):
@@ -464,7 +464,7 @@ def _auto_pick(log, use_shared, stop) -> dict:
         log(f"  {label}: {totals[s.name][0]} из {n * ROUNDS}")
     win = max(totals, key=lambda k: totals[k][0])
     if cur_s and win != "current" and totals[win][0] - totals["current"][0] <= KEEP_MARGIN:
-        log(f"Новые варианты не лучше текущей стратегии заметно (не больше чем на {KEEP_MARGIN}) — оставляю текущую.")
+        log(f"Новые варианты не лучше текущей стратегии заметно (не больше чем на {KEEP_MARGIN}), оставляю текущую.")
         win = "current"
     if win == "current" and current:
         choice: dict = current
@@ -495,7 +495,7 @@ def remember_network(choice: dict, who: tuple[str, str] | None = None) -> None:
         nets[who[0]] = {"isp": who[1], "choice": choice, "time": time.time()}
         save_settings(networks=nets, net_asn=who[0])
 def _services(runs: list[dict]) -> dict[str, bool]:
-    """Per service (QUICK): passed in most of these runs — the status chips right after a pick."""
+    """Per service (QUICK): passed in most of these runs, the status chips right after a pick."""
     out = {}
     for name, ks in QUICK.items():
         got = [r[k] is not None for r in runs for k in ks if k in r]
@@ -512,7 +512,7 @@ def _try_shared(runner: Runner, targets, log) -> dict | None:
         ver = updater.current_version()
         c = sharedb.suggestion(who[0], ver)
         if not c:
-            log(f"Провайдер {who[1]} ({who[0]}): в общей базе пока нет данных — полный подбор.")
+            log(f"Провайдер {who[1]} ({who[0]}): в общей базе пока нет данных, полный подбор.")
             return None
         by = {s.name: s for s in strategies.load_all()}
         if c["base"] not in by or any(n not in by for n in c.get("picks", {}).values()):
@@ -530,7 +530,7 @@ def _try_shared(runner: Runner, targets, log) -> dict | None:
             remember_network(c, who)
             log("Готово: взята проверенная комбинация для вашего провайдера.")
             return c
-        log("Комбинация из базы здесь работает хуже — запускаю полный подбор.")
+        log("Комбинация из базы здесь работает хуже, запускаю полный подбор.")
     except Exception as e:  # noqa: BLE001
         log(f"общая база недоступна: {e}")
     return None

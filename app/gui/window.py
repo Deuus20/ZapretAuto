@@ -1,4 +1,4 @@
-"""Окно программы: трей и жизненный цикл; страницы, действия, игры и обновления — в отдельных миксинах."""
+"""Окно программы: трей и жизненный цикл; страницы, действия, игры и обновления, в отдельных миксинах."""
 import time
 
 from PySide6.QtCore import Qt, QTimer
@@ -60,19 +60,19 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
     # ---------- UI ----------
     SETTINGS = [  # key, title, supporting text, default, section
         ("game_watch", "Следить за играми",
-         "Находить запущенные игры и включать обход для их серверов. Если с обходом стало хуже — адрес убирается.",
+         "Находить запущенные игры и включать обход для их серверов. Если с обходом стало хуже, адрес убирается.",
          False, "main"),
         ("game_capture", "Перехватывать подключения игр",
          "Добавлять серверы найденных игр в обход zapret. Выключите, если с обходом игра работает хуже: серверы "
          "игр останутся вне обхода, а слежение за играми можно оставить.", True, "main"),
         ("auto_repick", "Чинить обход самостоятельно",
-         "Каждые 10 минут и при смене сети проверять Discord и YouTube. Если не открываются дважды подряд — "
+         "Каждые 10 минут и при смене сети проверять Discord и YouTube. Если не открываются дважды подряд, "
          "подобрать стратегию заново (не посреди игры).", True, "main"),
         ("auto_update", "Обновляться автоматически",
          "Ставить новые версии zapret и ZapretAuto при запуске и раз в 6 часов, но не во время игры.", True, "main"),
         ("quiet_updates", "Обновляться только в тишине",
          "Не ставить обновления, пока идёт звонок (Discord, Telegram, Zoom…) или открыто полноэкранное приложение "
-         "— игра, фильм, презентация. Обновление перезапускает обход, и связь рвётся на минуту. "
+         ", игра, фильм, презентация. Обновление перезапускает обход, и связь рвётся на минуту. "
          "Дольше суток не откладывается.", False, "main"),
         ("discord_after_vpn", "Перезапускать Discord после VPN",
          "Когда VPN выключается, Discord остаётся на старых соединениях и висит на «Подключение». "
@@ -81,9 +81,9 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
          "ZapretAuto тихо стартует в трее при входе в Windows.", False, "main"),
         ("auto_hostlist", "Находить заблокированные сайты",
          "Обход сам замечает сайты, которые не открываются из-за DPI, и включает для них обход. "
-         "Найденное — в разделе «Списки» → list-auto.txt.", True, "adv"),
+         "Найденное, в разделе «Списки» → list-auto.txt.", True, "adv"),
         ("game_udp", "Обход UDP для игр",
-         "Обход UDP-трафика игр на портах 1024–65535. Включается сам, когда найдена игра.", False, "adv"),
+         "Обход UDP-трафика игр на портах 1024-65535. Включается сам, когда найдена игра.", False, "adv"),
         ("game_tcp", "Обход TCP для игр",
          "То же для TCP: некоторые игры входят в онлайн по TCP. Включается сам, когда найдена игра. "
          "Порт 1935 (трансляции OBS) не трогает.", False, "adv"),
@@ -91,7 +91,7 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
          "Добавить подсети Telegram в обход. Помогает не всем провайдерам: при блокировке по IP нужен прокси или VPN.",
          False, "adv"),
         ("zapret2", "zapret2 (эксперимент)",
-         "Новый движок: если сайт начинает блокироваться, обход сам переключает для него другую стратегию — "
+         "Новый движок: если сайт начинает блокироваться, обход сам переключает для него другую стратегию, "
          "без перезапуска и подбора. При первом включении скачивается ~4 МБ.", False, "adv"),
     ]
     # ---------- diagnostics / lists ----------
@@ -152,7 +152,7 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
         if not self._hint_shown:
             self._hint_shown = True
             self.tray.showMessage("ZapretAuto", "Программа свёрнута в трей и продолжает работать. "
-                                  "Выход — правый клик по значку → «Выход».")
+                                  "Выход, правый клик по значку → «Выход».")
     def save(self, **kw):
         tester.save_settings(**kw)
         self.settings = tester.load_settings()
@@ -189,8 +189,8 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
             m.addAction("Игр пока не найдено").setEnabled(False)
             return
         for exe, g in sorted(games.items(), key=lambda kv: (not kv[1].get("active"), kv[0] in excl, kv[0])):
-            a = m.addAction(gamewatch.display_name(exe, g.get("path")) + (" — играете" if g.get("active") else "")
-                            + (" — вне обхода" if exe in excl else ""))
+            a = m.addAction(gamewatch.display_name(exe, g.get("path")) + (", играете" if g.get("active") else "")
+                            + (", вне обхода" if exe in excl else ""))
             a.setCheckable(True)
             a.setChecked(exe not in excl)
             a.triggered.connect(lambda on, exe=exe: self.set_game_excluded(exe, not on))

@@ -62,7 +62,7 @@ def test_portable_update_uses_zip_and_keeps_data(monkeypatch):
 
 
 def test_portable_swap_keeps_a_copy_and_marks_completion(tmp_path):
-    """Обрыв посреди копирования не должен оставить смесь версий: рядом лежит копия, в конце — отметка."""
+    """Обрыв посреди копирования не должен оставить смесь версий: рядом лежит копия, в конце, отметка."""
     ps = updater.portable_swap_command(tmp_path / "new", tmp_path / "root", tmp_path / "tmp")[-1]
     assert "update.done" in ps and "root.update-old" in ps and "zapretauto-backup" in ps
     assert "/XD data vendor" in ps and "$LASTEXITCODE -ge 8" in ps  # ошибка robocopy: старые файлы возвращаются
@@ -249,7 +249,7 @@ def test_sign_release_tool_roundtrip(tmp_path, monkeypatch, capsys):
 
 
 def test_sign_release_requires_all_four_files(tmp_path, monkeypatch, capsys):
-    """Манифест без portable.zip проходил verify — выпуск мог остаться неполным."""
+    """Манифест без portable.zip проходил verify, выпуск мог остаться неполным."""
     import json as _json
 
     from app import ed25519
@@ -294,7 +294,7 @@ def test_github_requests_retried_before_giving_up(monkeypatch):
     answers = [503, 200]
     monkeypatch.setattr(requests, "get", lambda url, **kw: calls.append(url) or R(answers.pop(0)))
     assert netcache.get_retry("https://api.github.com/x").status_code == 200 and len(calls) == 2
-    calls.clear()  # 404 — окончательный ответ: повторять его нет смысла
+    calls.clear()  # 404, окончательный ответ: повторять его нет смысла
     monkeypatch.setattr(requests, "get", lambda url, **kw: calls.append(url) or R(404))
     assert netcache.get_retry("https://api.github.com/x").status_code == 404 and len(calls) == 1
     calls.clear()
@@ -304,10 +304,10 @@ def test_github_requests_retried_before_giving_up(monkeypatch):
     monkeypatch.setattr(requests, "get", boom)
     with pytest.raises(requests.Timeout):
         netcache.get_retry("https://api.github.com/x")
-    assert len(calls) == 3, "три попытки — и честная ошибка, а не бесконечные повторы"
+    assert len(calls) == 3, "три попытки, и честная ошибка, а не бесконечные повторы"
 
 def test_github_answers_cached_and_revalidated_by_etag(monkeypatch):
-    """Повторная проверка не тратит лимит: свежий ответ из кэша, устаревший — условным запросом (304)."""
+    """Повторная проверка не тратит лимит: свежий ответ из кэша, устаревший, условным запросом (304)."""
     import requests
 
     from app import netcache
@@ -373,7 +373,7 @@ def test_zapret_update_rejects_wrong_digest(tmp_path, monkeypatch):
 
 
 def test_zapret_update_needs_digest_even_when_forced(tmp_path, monkeypatch):
-    """force — это «переустановить тот же выпуск», а не разрешение ставить непроверяемый архив."""
+    """force, это «переустановить тот же выпуск», а не разрешение ставить непроверяемый архив."""
     monkeypatch.setattr(paths, "DATA", tmp_path / "data")
     monkeypatch.setattr(updater, "latest_release", lambda: ("1.99.0", "https://github.com/x.zip", None))
     monkeypatch.setattr(updater, "_download", lambda url, dest, log=print: dest.write_bytes(b"zip"))

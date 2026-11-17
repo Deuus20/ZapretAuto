@@ -83,7 +83,7 @@ class Strategy:
                 if p.group != "udp:game:ipset-all":  # Telegram calls must not get the game UDP fakes
                     args.insert(1, f"--ipset={paths.LISTS / 'ipset-telegram.txt'}")
                 # games' own web/login servers (CloudFront, Cloudflare...) sit inside ipset-all's huge ranges;
-                # desyncing them hung Wardogs at "logging in" — gamewatch collects them here
+                # desyncing them hung Wardogs at "logging in", gamewatch collects them here
                 args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-games.txt'}")
                 if any(a.startswith("--filter-tcp") for a in args):  # Steam's client link shares SDR games' nets
                     args.append(f"--ipset-exclude={paths.LISTS / 'ipset-exclude-steam.txt'}")
@@ -91,7 +91,7 @@ class Strategy:
         if auto_src:
             # winws adds domains whose connections fail (RST / retransmits) and desyncs them from then on. Its own
             # profile, last: a --hostlist-auto profile takes every 80/443 connection, so inside the general profile
-            # it kept Cloudflare/AWS from the ipset-all profile below it — and the «16 KB» whitelist block (no RST,
+            # it kept Cloudflare/AWS from the ipset-all profile below it, and the «16 KB» whitelist block (no RST,
             # the transfer just stalls) hung Wardogs' Epic login and any Cloudflare site off the lists
             out += ["--new"] + [a for a in auto_src if not a.startswith(("--hostlist=", "--hostlist-domains="))]
             out += [f"--hostlist-auto={paths.LISTS / 'list-auto.txt'}", "--hostlist-auto-fail-threshold=3"]
@@ -155,7 +155,7 @@ def load_all(log=None) -> list[Strategy]:
                 logging.getLogger("zapretauto").warning(msg)
     if not out and not _skipped_all:
         _skipped_all.append(1)
-        logging.getLogger("zapretauto").error("ни одна стратегия zapret не распознана — формат general*.bat изменился?")
+        logging.getLogger("zapretauto").error("ни одна стратегия zapret не распознана, формат general*.bat изменился?")
     _CACHE = (stamp, out)
     return list(out)
 _skipped: set[str] = set()

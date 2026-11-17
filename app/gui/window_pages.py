@@ -147,7 +147,7 @@ class PagesMixin(WindowBase):
         self.btn_site.clicked.connect(self.check_site)
         self.btn_app = q(QPushButton("Программа не работает…"), objectName="text")
         self.btn_app.setToolTip("Программа (Spotify, лаунчер, мод игры…) работает без обхода, а с обходом нет? "
-                                "Укажите её exe — обход перестанет трогать её серверы")
+                                "Укажите её exe, обход перестанет трогать её серверы")
         self.btn_app.clicked.connect(self.exclude_app)
         self.btn_cancel = q(QPushButton("Отменить подбор"), objectName="text")
         self.btn_cancel.setToolTip("Остановить подбор; обход вернётся к прежней стратегии")
@@ -173,19 +173,19 @@ class PagesMixin(WindowBase):
         cl.setSpacing(8)
         cl.addWidget(q(QLabel("Стратегия"), objectName="h2"))
         self.combo = QComboBox()
-        self.combo.setToolTip("«Авто» — результат подбора. Можно выбрать стратегию вручную.")
+        self.combo.setToolTip("«Авто», результат подбора. Можно выбрать стратегию вручную.")
         self.combo.addItem(AUTO)
         self.combo.addItems([s.name for s in strategies.load_all()])
         self.combo.activated.connect(self.on_combo)
         cl.addWidget(self.combo)
-        # провайдер приходит из ipinfo.io — это данные, а не разметка
+        # провайдер приходит из ipinfo.io, это данные, а не разметка
         self.lbl_isp = q(QLabel(), objectName="muted", wordWrap=True, textFormat=Qt.TextFormat.PlainText)  # ISP + shared base
         self.lbl_isp.hide()
         cl.addWidget(self.lbl_isp)
         self.btn_auto = q(QPushButton("Подобрать заново"), objectName="primary")
         self.btn_auto.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_auto.setToolTip("Проверить все стратегии на Discord, YouTube и голосе и собрать лучшую "
-                                 "комбинацию. Занимает 2–4 минуты, обход на это время выключен.")
+                                 "комбинацию. Занимает 2-4 минуты, обход на это время выключен.")
         self.btn_auto.clicked.connect(self.autopick)
         row = QHBoxLayout()
         row.addWidget(self.btn_auto)
@@ -215,7 +215,7 @@ class PagesMixin(WindowBase):
         rl.setContentsMargins(14, 12, 14, 12)
         rl.setSpacing(4)
         rl.addWidget(q(QLabel("Последние события"), objectName="h2"))
-        self.lbl_recent = q(QLabel("Пока ничего не происходило."), objectName="muted", wordWrap=True, textFormat=Qt.TextFormat.PlainText)  # строки журнала — данные, не HTML
+        self.lbl_recent = q(QLabel("Пока ничего не происходило."), objectName="muted", wordWrap=True, textFormat=Qt.TextFormat.PlainText)  # строки журнала, данные, не HTML
         self.lbl_recent.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         rl.addWidget(self.lbl_recent)
         rl.addStretch()
@@ -225,7 +225,7 @@ class PagesMixin(WindowBase):
     def _page_games(self) -> QWidget:
         page, lay = self._page()
         self._header(lay, "Игры", "Запущенные игры находятся сами: программа собирает их серверы и включает для них "
-                                  "обход. Серверы входа и лаунчеров обход не трогает. Галочка «Обход» — для серверов "
+                                  "обход. Серверы входа и лаунчеров обход не трогает. Галочка «Обход», для серверов "
                                   "этой игры; снятая галочка оставляет игру в списке, но вне обхода.")
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Игра", "Адресов", "Пинг, мс", "Сейчас", "Обход"])
@@ -313,8 +313,8 @@ class PagesMixin(WindowBase):
             groups["adv"].addWidget(InputRow(
                 f"Порты игр, {proto.upper()}",
                 f"Какие порты {proto.upper()} обходить для игр (когда обход для игр включён). Через запятую, "
-                f"диапазоны через дефис. Пусто — по умолчанию: {default}"
-                + (" (1935 пропущен — трансляции OBS)." if proto == "tcp" else "."), e))
+                f"диапазоны через дефис. Пусто, по умолчанию: {default}"
+                + (" (1935 пропущен, трансляции OBS)." if proto == "tcp" else "."), e))
         bl.addWidget(q(QLabel("Обновления"), objectName="section"))
         upd = q(QFrame(), objectName="group")
         ul = QVBoxLayout(upd)
@@ -322,7 +322,7 @@ class PagesMixin(WindowBase):
         ul.setSpacing(10)
         self.lbl_ver = q(QLabel(), objectName="rowTitle")
         ul.addWidget(self.lbl_ver)
-        self.lbl_upd = q(QLabel(), objectName="muted", wordWrap=True, textFormat=Qt.TextFormat.PlainText)  # тег релиза — данные
+        self.lbl_upd = q(QLabel(), objectName="muted", wordWrap=True, textFormat=Qt.TextFormat.PlainText)  # тег релиза, данные
         ul.addWidget(self.lbl_upd)
         self.lbl_upd.hide()  # shown once there is a result: an empty line left a gap
         r = QHBoxLayout()
@@ -484,7 +484,7 @@ class PagesMixin(WindowBase):
                 ("Неожиданных остановок обхода", str(s["crashes"])),
                 ("Обновлений IP-списка", str(s["ipset"]))]
         if s["switches"]:
-            rows.append(("Смены стратегии", ", ".join(f"{time.strftime('%d.%m %H:%M', time.localtime(t))} — {n}"
+            rows.append(("Смены стратегии", ", ".join(f"{time.strftime('%d.%m %H:%M', time.localtime(t))}, {n}"
                                                       for t, n in s["switches"][-3:])))
         muted = style.C["on_surface_variant"]
         self.lbl_stats.setText(
@@ -530,7 +530,7 @@ class PagesMixin(WindowBase):
             self.substatus.style().unpolish(self.substatus)
             self.substatus.style().polish(self.substatus)
         last = getattr(self, "_last_check", None)
-        tip = f"ZapretAuto — {title}\n{self.describe()}"
+        tip = f"ZapretAuto, {title}\n{self.describe()}"
         if last:
             ok = "всё работает" if last[1] else "есть сбои"
             tip += f"\nпроверка {time.strftime('%H:%M', time.localtime(last[0]))}: {ok}"
@@ -555,8 +555,8 @@ class PagesMixin(WindowBase):
         rows = [(k, v) for k, v in games.items() if k not in ign]
         self.games_empty.setVisible(not rows)
         self.games_empty.setText(
-            "Пока игр не найдено. Запустите игру — она появится здесь сама." if self.settings.get("game_watch") else
-            "Включите «Следить за играми» в настройках — запущенные игры появятся здесь сами.")
+            "Пока игр не найдено. Запустите игру, она появится здесь сама." if self.settings.get("game_watch") else
+            "Включите «Следить за играми» в настройках, запущенные игры появятся здесь сами.")
         self.table.setVisible(bool(rows))
         self.table.blockSignals(True)  # a check state set while filling must not call back
         try:
@@ -566,7 +566,7 @@ class PagesMixin(WindowBase):
                 out = exe in excl or not capture
                 state = "вне обхода" if out else ("играете" if g.get("active") else "")
                 for j, t in enumerate([gamewatch.display_name(exe, g.get("path")), str(len(g.get("ips", ()))),
-                                       "—" if ping is None else f"{ping:.0f}", state]):
+                                       ", " if ping is None else f"{ping:.0f}", state]):
                     it = QTableWidgetItem(t)
                     if j == 0:
                         it.setData(Qt.ItemDataRole.UserRole, exe)  # the exe is the key; the name is for people
@@ -574,7 +574,7 @@ class PagesMixin(WindowBase):
                     self.table.setItem(i, j, it)
                 box = QTableWidgetItem()
                 box.setToolTip("Перехват игр выключен в настройках" if not capture else
-                               "Снимите галочку — серверы этой игры останутся вне обхода, игра останется в списке")
+                               "Снимите галочку, серверы этой игры останутся вне обхода, игра останется в списке")
                 box.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
                 if not capture:
                     box.setFlags(Qt.ItemFlag.NoItemFlags)
@@ -587,10 +587,10 @@ class PagesMixin(WindowBase):
     def _fill_home_games(self, rows: list) -> None:
         """Home card: running games first, then the ones with most servers; three at most."""
         if not self.settings.get("game_watch"):
-            self.lbl_games.setText("Слежение за играми выключено — включите его в «Настройках».")
+            self.lbl_games.setText("Слежение за играми выключено, включите его в «Настройках».")
             return
         if not rows:
-            self.lbl_games.setText("Пока игр не найдено. Запустите игру — она появится здесь сама.")
+            self.lbl_games.setText("Пока игр не найдено. Запустите игру, она появится здесь сама.")
             return
         top = sorted(rows, key=lambda r: (not r[1].get("active"), -len(r[1].get("ips", ()))))[:3]
         lines = []
@@ -604,7 +604,7 @@ class PagesMixin(WindowBase):
                          + (f", {ping:.0f} мс" if ping else ""))
             else:
                 state = f"{len(g.get('ips', ()))} адресов в обходе"
-            lines.append(f"<span style='color:{style.C["on_surface"]}'>{html.escape(name)}</span> — {state}")
+            lines.append(f"<span style='color:{style.C["on_surface"]}'>{html.escape(name)}</span>, {state}")
         more = len(rows) - len(top)
         self.lbl_games.setText("<br>".join(lines) + (f"<br>и ещё {more}" if more > 0 else ""))
 
@@ -640,7 +640,7 @@ class PagesMixin(WindowBase):
         lp = self.settings.get("last_pick") or {}
         if not lp.get("total") or time.time() - lp.get("time", 0) > 600:
             return
-        line = f"Готово: {self.describe()} — проходит {lp['score']} из {lp['total']} проверок"
+        line = f"Готово: {self.describe()}, проходит {lp['score']} из {lp['total']} проверок"
         if lp.get("before") is not None:
             line += f" (было {lp['before']})"
         if lp.get("services"):

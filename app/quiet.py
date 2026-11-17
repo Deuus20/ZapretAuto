@@ -6,7 +6,7 @@ import psutil
 
 CALL_APPS = {"discord.exe", "discordptb.exe", "discordcanary.exe", "telegram.exe", "zoom.exe", "teams.exe",
              "ms-teams.exe", "skype.exe", "whatsapp.exe", "viber.exe"}
-# idle background UDP of these apps: mDNS, SSDP, NetBIOS, DHCP — not a call
+# idle background UDP of these apps: mDNS, SSDP, NetBIOS, DHCP, not a call
 _IDLE_PORTS = {53, 67, 68, 137, 138, 1900, 5353, 5355}
 def fullscreen() -> bool:
     """Windows itself says «don't disturb»: a full-screen game (D3D), a full-screen app or presentation mode."""
@@ -18,7 +18,7 @@ def fullscreen() -> bool:
         return False
     return state.value in (2, 3, 4)  # QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE
 def call_app(conns=None) -> str | None:
-    """Name of a messenger holding a media (UDP) socket — voice/video runs over UDP; None when there is none."""
+    """Name of a messenger holding a media (UDP) socket, voice/video runs over UDP; None when there is none."""
     try:
         conns = psutil.net_connections(kind="udp") if conns is None else conns
     except (psutil.Error, OSError):

@@ -8,7 +8,7 @@ class Worker(QObject):
     """Run fn(log) off the UI thread; progress via `line`, result via `done`, then `finished`.
 
     A plain Python thread, not a QThread: subprocess calls made from a QThread (a thread Python did not
-    create) leaked one OS handle each — the once-a-minute VPN refresh grew the app by ~60 handles/hour.
+    create) leaked one OS handle each, the once-a-minute VPN refresh grew the app by ~60 handles/hour.
     Signals emitted from this thread are delivered to the GUI thread via Qt's queued connections.
     """
     line = Signal(str)

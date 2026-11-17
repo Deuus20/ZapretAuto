@@ -2,7 +2,7 @@
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 
-# Material 3 dark scheme from a blue seed (primary tone 80, containers 30, surfaces 6–22), plus status roles
+# Material 3 dark scheme from a blue seed (primary tone 80, containers 30, surfaces 6-22), plus status roles
 C = {
     "surface": "#111318", "surface_low": "#191c20", "surface_cont": "#1d2024", "surface_high": "#272a2f",
     "surface_highest": "#32353a", "on_surface": "#e2e2e9", "on_surface_variant": "#c3c6cf",
@@ -14,7 +14,7 @@ C = {
     "error": "#ffb4ab", "error_container": "#601410", "on_error_container": "#ffdad6",
 }
 DARK = dict(C)
-# the same roles from the light scheme (primary tone 40, containers 90, surfaces 98–90)
+# the same roles from the light scheme (primary tone 40, containers 90, surfaces 98-90)
 LIGHT = {
     "surface": "#f9f9ff", "surface_low": "#f2f3fa", "surface_cont": "#ededf4", "surface_high": "#e7e8ee",
     "surface_highest": "#e2e2e9", "on_surface": "#191c20", "on_surface_variant": "#44474e",

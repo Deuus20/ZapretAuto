@@ -50,7 +50,7 @@ _IP_TOKEN = re.compile(r"(?<![\w.:])[0-9A-Fa-f:.]{3,}(?![\w:])")
 def _redact_public(text: str) -> str:
     """For a public GitHub issue: also hide every non-local IP (VPN servers, the user's own address).
 
-    Адрес часто стоит с портом (`1.2.3.4:443`) или в скобках: порт сохраняем, адрес прячем — иначе разбор
+    Адрес часто стоит с портом (`1.2.3.4:443`) или в скобках: порт сохраняем, адрес прячем, иначе разбор
     соединений в отчёте теряет смысл, а IP утекает."""
     import ipaddress
     def mask(m):

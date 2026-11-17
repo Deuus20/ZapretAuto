@@ -114,7 +114,7 @@ def test_smart_app_control_reported(monkeypatch):
     assert "Smart App Control" in diag.first_problem()            # also the cause shown when winws won't start
 
 def test_diagnostics_read_services_and_doh_in_two_calls(monkeypatch):
-    """Раньше прогон диагностики запускал 10 процессов PowerShell только на службы; теперь — один."""
+    """Раньше прогон диагностики запускал 10 процессов PowerShell только на службы; теперь, один."""
     from app import diag
     calls = []
     def fake_ps(name):

@@ -1,5 +1,5 @@
 """Workflow'ы должны быть валидным YAML: сломанный файл GitHub молча не загружает, и обязательный чек
-branch protection перестаёт выставляться (так уже случилось с tests.yml — `name:` с «: » внутри)."""
+branch protection перестаёт выставляться (так уже случилось с tests.yml, `name:` с «: » внутри)."""
 import re
 from pathlib import Path
 
@@ -46,4 +46,4 @@ def test_release_is_split_into_build_and_publish():
     d = _load(ROOT / ".github" / "workflows" / "release.yml")
     assert {"build", "publish"} <= set(d["jobs"])
     assert d["jobs"]["publish"].get("environment") == "release"
-    assert d["permissions"] == {"contents": "read"}  # запись — только у publish
+    assert d["permissions"] == {"contents": "read"}  # запись, только у publish

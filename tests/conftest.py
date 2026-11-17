@@ -45,7 +45,7 @@ def _fresh_diag_cache():
     netcache.reset()
 @pytest.fixture(autouse=True)
 def _isolated_data(tmp_path, monkeypatch):
-    """Ни один тест не пишет в рабочую копию: data/ и data/lists/ — временные.
+    """Ни один тест не пишет в рабочую копию: data/ и data/lists/, временные.
 
     Иначе прогон тестов менял настоящие settings.json (отметка обновления ipset) и list-auto.txt, а
     `git status` после тестов показывал runtime-мусор."""

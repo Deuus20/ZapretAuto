@@ -18,10 +18,10 @@ UninstallDisplayIcon={app}\ZapretAuto.exe
 SetupIconFile=assets\icon.ico
 WizardStyle=modern
 ; yes, not force: Restart Manager просит программы закрыться сами (force убивает их без сохранения состояния).
-; Приложение и winws всё равно досылаются taskkill'ом в PrepareToInstall — им файлы нужны на диске.
+; Приложение и winws всё равно досылаются taskkill'ом в PrepareToInstall, им файлы нужны на диске.
 CloseApplications=yes
 ; Подпись включается только когда есть сертификат: ISCC /DSignToolCmd="signtool.exe sign /fd sha256 ... $f".
-; Пока сертификата нет — SmartScreen предупреждает, см. docs/install.md.
+; Пока сертификата нет, SmartScreen предупреждает, см. docs/install.md.
 #ifdef SignToolCmd
 SignTool=zapretauto
 SignedUninstaller=yes

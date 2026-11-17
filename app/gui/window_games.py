@@ -51,7 +51,7 @@ class GamesMixin(WindowBase):
         self.fill_games()
         if self.runner.running and not self.busy:
             # winws re-reads the changed ipset-games.txt by itself; restart only when the game filter ports
-            # have to be switched on (first game) — restarts would drop live match connections
+            # have to be switched on (first game), restarts would drop live match connections
             if self._game_flags() != getattr(self, "_run_flags", None):
                 self._apply_game_flags()
             games = self.watcher.games() if self.watcher else {}
@@ -129,7 +129,7 @@ class GamesMixin(WindowBase):
             self.watcher.set_excluded(exe, on)  # ipset-exclude-games: winws re-reads it live
         if self.runner.running and not self.busy:
             self.start_runner()  # the capture filter changes only on restart
-        self.log(f"{exe}: " + ("вне обхода — его серверы обход не трогает" if on else "снова в обходе"))
+        self.log(f"{exe}: " + ("вне обхода, его серверы обход не трогает" if on else "снова в обходе"))
         self.fill_games()
 
     def reset_game(self):
@@ -151,7 +151,7 @@ class GamesMixin(WindowBase):
         self._ensure_watcher()
         self.log(f"обход не будет трогать серверы {exe}")
         QMessageBox.information(self, "ZapretAuto", f"Готово: обход перестанет трогать серверы {exe}.\n\n"
-                                "Перезапустите программу — её адреса соберутся сами за пару секунд, и она "
+                                "Перезапустите программу, её адреса соберутся сами за пару секунд, и она "
                                 "должна заработать. Отменить: «Списки» → «Программы, которые обход не трогает».")
 
     def _ensure_watcher(self):
@@ -194,7 +194,7 @@ class GamesMixin(WindowBase):
             return
         text = ("Отправить адреса серверов игр в общую базу?\n\n" + ", ".join(sorted(found)) + "\n\n"
                 "У других пользователей эти игры заработают с первого запуска. Отправляются только адреса "
-                "серверов игр — без вашего IP. Откроется страница GitHub (нужен аккаунт), там нажмите «Create».")
+                "серверов игр, без вашего IP. Откроется страница GitHub (нужен аккаунт), там нажмите «Create».")
         if QMessageBox.question(self, "Поделиться адресами игр", text) != QMessageBox.StandardButton.Yes:
             return
         import webbrowser

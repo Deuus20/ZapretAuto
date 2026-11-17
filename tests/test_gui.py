@@ -242,7 +242,7 @@ def test_gui_zapret_update_keeps_working_strategy(tmp_path, monkeypatch):
         monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
         monkeypatch.setattr(tester, "quick_check", lambda light=False: dict(res))
         w._update_done(True, True, True)
-        assert not picks and not w.busy                 # still works: no 2–4 min re-pick
+        assert not picks and not w.busy                 # still works: no 2-4 min re-pick
         res["YouTube"] = False
         w._update_done(True, True, True)
         assert picks == [1]                             # broken by the update: re-pick
@@ -275,7 +275,7 @@ def test_gui_zapret2_toggle(tmp_path, monkeypatch):
         assert not w.combo.isEnabled()                                       # list of winws strategies is moot
         w.show()
         w.autopick()
-        assert shown and "zapret2" in shown[-1] and not w.busy               # no pointless 2–4 min pick
+        assert shown and "zapret2" in shown[-1] and not w.busy               # no pointless 2-4 min pick
         w._health_fails = 1
         monkeypatch.setattr(tester, "quick_check", lambda light=False: {"Discord": False, "YouTube": True})
         w.runner.proc = type("P", (), {"poll": lambda self: None})()          # looks running

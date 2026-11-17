@@ -37,7 +37,7 @@ jobs:
           git add games-db.json
           changed=$(git diff --cached --name-only | tr '\n' ' ')
           # в коммит должен попасть ровно один файл: скрипт слияния не повод коммитить что-то ещё
-          # пустой diff — такой отчёт уже был: это не ошибка и не повод не закрывать issue
+          # пустой diff, такой отчёт уже был: это не ошибка и не повод не закрывать issue
           if [ -n "$changed" ] && [ "$changed" != "games-db.json " ]; then echo "unexpected staged files: $changed"; exit 1; fi
           git diff --cached --quiet || (git commit -m "games-db: report #${{ github.event.issue.number }}" && git pull --rebase && git push)
       - name: Close issue
