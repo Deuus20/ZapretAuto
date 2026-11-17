@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Continue'
 # access denied at cleanup, and a %TEMP% copy left by an elevated run can't be deleted by a normal user at all
 $bt = Join-Path $PSScriptRoot 'build\pytest'
 Remove-Item $bt -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force (Split-Path $bt) | Out-Null  # в чистом клоне build/ ещё нет
 & .venv\Scripts\python -m pytest -q -p no:cacheprovider --basetemp $bt tests
 if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
 & .venv\Scripts\pyinstaller --noconfirm --clean --windowed --uac-admin --icon assets\icon.ico --collect-all curl_cffi --name ZapretAuto `
