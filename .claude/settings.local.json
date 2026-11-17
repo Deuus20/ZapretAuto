@@ -1,0 +1,27 @@
+{
+ "permissions": {
+  "allow": [
+   "Bash",
+   "PowerShell",
+   "Read",
+   "Edit",
+   "Write",
+   "Glob",
+   "Grep",
+   "WebSearch",
+   "WebFetch",
+   "Agent",
+   "Skill",
+   "NotebookEdit",
+   "Monitor",
+   "ScheduleWakeup",
+   "CronCreate",
+   "TaskStop",
+   "SendMessage"
+  ]
+ },
+ "enabledPlugins": {
+  "feature-dev@claude-plugins-official": true,
+  "context7@claude-plugins-official": true
+ }
+}

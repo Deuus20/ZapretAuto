@@ -4,7 +4,6 @@
 /data/
 __pycache__/
 *.spec
-/.claude/settings.local.json
 # артефакты прогонов и инструментов: в коммит не должны попадать даже случайно
 /.coverage
 /coverage.xml

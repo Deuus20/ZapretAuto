@@ -71,5 +71,5 @@ WinDivert в режиме FLOW (только наблюдение, без изм
 
 ## Код
 
-Python 3.12, PySide6, psutil, PyInstaller, Inno Setup. Структура - в [CLAUDE.md](../CLAUDE.md),
+Python 3.12, PySide6, psutil, PyInstaller, Inno Setup. Структура - в [AGENTS.md](../AGENTS.md),
 тесты - `tests/`, сборка - `build.ps1`.
