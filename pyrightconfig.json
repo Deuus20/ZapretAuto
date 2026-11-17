@@ -2,7 +2,18 @@
   "venvPath": ".",
   "venv": ".venv",
   "pythonVersion": "3.12",
-  "include": ["app", "tools", "scripts", "tests"],
-  "exclude": ["vendor", "data", "dist", "build", ".venv"],
-  "typeCheckingMode": "off"
+  "include": [
+    "app",
+    "main.py",
+    "tools",
+    "scripts"
+  ],
+  "exclude": [
+    "vendor",
+    "data",
+    "dist",
+    "build",
+    ".venv"
+  ],
+  "typeCheckingMode": "basic"
 }

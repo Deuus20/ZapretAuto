@@ -7,24 +7,20 @@ Only the ASN and ISP name are shared, never the IP address.
 import json
 import re
 from urllib.parse import quote
+
 import requests
+
+from .netcache import get_json, get_retry
 from .updater import APP_REPO, app_raw_urls
+
 DB_FILE = "strategies-db.json"
 def _get_json(name: str):
-    """A JSON file from our repo: GitHub, else the Codeberg mirror. Raises if neither answers."""
-    err: Exception = ValueError("no source")
-    for url in app_raw_urls(name):
-        try:
-            r = requests.get(url, timeout=8)
-            r.raise_for_status()
-            return r.json()
-        except (requests.RequestException, ValueError) as e:
-            err = e
-    raise err
+    """A JSON file from our repo on GitHub. Raises if it can't be read. Повторные чтения идут из кэша ETag."""
+    return get_json(app_raw_urls(name)[0], timeout=8)
 def isp() -> tuple[str, str] | None:
     """(ASN like 'AS25513', ISP name) of the current connection."""
     try:
-        org = requests.get("https://ipinfo.io/json", timeout=8).json().get("org", "")
+        org = get_retry("https://ipinfo.io/json", tries=2, timeout=8).json().get("org", "")
     except (requests.RequestException, ValueError):
         return None
     m = re.match(r"(AS\d+)\s*(.*)", org)

@@ -13,17 +13,24 @@ on:
         type: boolean
         default: true
 
+# Каждый шаг — с минимальными правами: сборка только читает репозиторий, публикация пишет, и только после
+# подтверждения в environment `release`. Действия прибиты к коммитам: тег можно перевесить на чужой код.
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
       - name: Check tag matches app version
@@ -36,7 +43,10 @@ jobs:
         shell: pwsh
         run: |
           python -m venv .venv
-          .venv\Scripts\python -m pip install -q -r requirements.txt
+          # runtime — строго по хэшам из lock; инструменты сборки — из dev (они в exe не попадают)
+          .venv\Scripts\python -m pip install -q --upgrade pip
+          .venv\Scripts\python -m pip install -q --require-hashes -r requirements.lock
+          .venv\Scripts\python -m pip install -q -r requirements-dev.txt
           choco install innosetup -y --no-progress
       - name: Build (tests + exe + installer)
         shell: pwsh
@@ -47,28 +57,68 @@ jobs:
           $p = Start-Process dist\ZapretAuto\ZapretAuto.exe -ArgumentList '--selftest' -PassThru -Wait
           Get-Content dist\ZapretAuto\selftest.txt
           if ($p.ExitCode -ne 0) { throw "selftest failed" }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: ZapretAuto-Setup
+          if-no-files-found: error
           path: |
-            dist/ZapretAuto-Setup.exe*
-            dist/ZapretAuto-portable.zip*
+            dist/ZapretAuto-Setup.exe
+            dist/ZapretAuto-Setup.exe.sha256
+            dist/ZapretAuto-portable.zip
+            dist/ZapretAuto-portable.zip.sha256
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' || github.event.inputs.publish == 'true'
+    runs-on: windows-latest
+    environment: release  # подтверждение вручную: тег сам по себе релиз не публикует
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: ZapretAuto-Setup
+          path: dist
+      - name: Sign release manifest
+        shell: pwsh
+        env:
+          SIGNING_KEY: ${{ secrets.ZAPRETAUTO_SIGNING_KEY }}
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          if (-not $env:SIGNING_KEY) { throw "нет секрета ZAPRETAUTO_SIGNING_KEY: релиз без подписи не публикуем" }
+          $key = Join-Path $env:RUNNER_TEMP 'release.ed25519'
+          try {
+            [IO.File]::WriteAllText($key, $env:SIGNING_KEY.Trim() + "`n")
+            python tools\sign_release.py sign --key $key --tag $tag --dist dist
+            python tools\sign_release.py verify --tag $tag --dist dist
+          } finally { Remove-Item $key -Force -ErrorAction SilentlyContinue }
       - name: Publish release
-        if: github.event_name == 'push' || github.event.inputs.publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $files = @('dist\ZapretAuto-Setup.exe', 'dist\ZapretAuto-Setup.exe.sha256', 'dist\ZapretAuto-portable.zip',
+                     'dist\ZapretAuto-portable.zip.sha256', 'dist\manifest.json', 'dist\manifest.json.sig')
+          $missing = $files | Where-Object { -not (Test-Path $_) }
+          if ($missing) { throw "нет файлов релиза: $($missing -join ', ')" }
           $notes = "**Как установить:** скачайте ZapretAuto-Setup.exe ниже и запустите. Если программа уже стоит, она обновится сама. Без установки: ZapretAuto-portable.zip — распакуйте и запустите ZapretAuto.exe. Подробнее — в [инструкции](https://github.com/${{ github.repository }}/blob/main/docs/install.md)."
           # what changed: this version's section of CHANGELOG.md goes on top of the release page
           $md = Get-Content CHANGELOG.md -Raw -Encoding UTF8
           $v = [regex]::Escape($tag.TrimStart('v'))
           if ($md -match "(?ms)^## $v\b[^\n]*\n(.*?)(?=^## |\z)") { $notes = $Matches[1].Trim() + "`n`n" + $notes }
+          $notes += "`n`n**Проверка файла:** подпись манифеста Ed25519 — ключ вшит в ZapretAuto.exe, вручную: ``python tools/sign_release.py verify``."
           gh release view $tag 2>$null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag dist\ZapretAuto-Setup.exe dist\ZapretAuto-Setup.exe.sha256 dist\ZapretAuto-portable.zip dist\ZapretAuto-portable.zip.sha256 --clobber
+            gh release upload $tag $files --clobber
             gh release edit $tag --notes $notes
           } else {
-            gh release create $tag dist\ZapretAuto-Setup.exe dist\ZapretAuto-Setup.exe.sha256 dist\ZapretAuto-portable.zip dist\ZapretAuto-portable.zip.sha256 --title "ZapretAuto $($tag.TrimStart('v'))" --notes $notes
+            gh release create $tag $files --title "ZapretAuto $($tag.TrimStart('v'))" --notes $notes
           }

@@ -2,9 +2,10 @@ import ctypes
 import os
 import sys
 from pathlib import Path
+
 ROOT = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-os.chdir(ROOT)
-sys.path.insert(0, str(ROOT))
+# cwd и sys.path не трогаем: модуль, положенный рядом с exe (рядом с портативной копией в доступной на запись
+# папке), иначе перекрыл бы импорт; ROOT нужен только как путь к данным и ассетам.
 def selftest() -> int:
     """`ZapretAuto.exe --selftest`: no GUI, no admin; checks the frozen build can load its parts."""
     out = []
@@ -63,7 +64,7 @@ def main() -> int:
         return 0
     QLocalServer.removeServer("ZapretAuto")
     server = QLocalServer()
-    server.setSocketOptions(QLocalServer.UserAccessOption)  # only this user may poke the instance
+    server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)  # only this user may poke the instance
     if not server.listen("ZapretAuto"):  # the name is taken: another instance answered late
         sock.connectToServer("ZapretAuto")
         if sock.waitForConnected(2000):
@@ -73,11 +74,19 @@ def main() -> int:
     try:
         from app import updater
         updater.recover_vendor()  # finish/undo an interrupted zapret update
+        updater.recover_portable()  # and a portable app update that was cut off mid-copy
     except Exception:  # noqa: BLE001
         pass
-    from app import logs, settings
+    from app import logs, settings, vendorcheck
     logs.setup()
     settings.first_run()  # fresh install: games watched, autostart on, full settings shown
+    try:
+        bad = vendorcheck.ensure()  # bin/winws.exe и драйвер сверяются с манифестом: подмену видно в журнале
+    except Exception as e:  # noqa: BLE001 — занятый settings.json не должен мешать запуску
+        logs.log.warning("не удалось проверить целостность файлов обхода: %s", e)
+        bad = None
+    if bad:
+        logs.log.warning("файлы обхода не совпадают с MANIFEST.sha256: %s", ", ".join(bad[:5]))
     from app.gui.window import MainWindow
     w = MainWindow()
     server.newConnection.connect(lambda: (server.nextPendingConnection().disconnectFromServer(), w.show_window()))

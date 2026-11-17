@@ -7,13 +7,16 @@ import os
 import sys
 import time
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import psutil  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
+
 app = QApplication(sys.argv)
 from app import tester, vpn  # noqa: E402
 from app.gui.worker import Worker  # noqa: E402
+
 me = psutil.Process()
 workers = []
 def snap():

@@ -8,8 +8,11 @@ a false positive: every file inside scans clean).
 """
 import hashlib
 from pathlib import Path
+
 import requests
+
 from . import paths, strategies
+
 COMMIT = "6eb463a6758fb48cd101bc55dfd057e6e9d98af1"
 BASE = f"https://raw.githubusercontent.com/bol-van/zapret-win-bundle/{COMMIT}/zapret-winws/"
 FILES = {

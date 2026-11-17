@@ -1,6 +1,7 @@
 """Look of the app: Material 3 dark tokens, stylesheet, icon font and the drawn app icon."""
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+
 # Material 3 dark scheme from a blue seed (primary tone 80, containers 30, surfaces 6–22), plus status roles
 C = {
     "surface": "#111318", "surface_low": "#191c20", "surface_cont": "#1d2024", "surface_high": "#272a2f",
@@ -62,9 +63,9 @@ def app_icon(color: str = "#3b82f6") -> QIcon:
     icon = QIcon()
     for size in (16, 20, 24, 32, 48, 64, 128, 256):
         pm = QPixmap(size, size)
-        pm.fill(Qt.transparent)
+        pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
-        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w = float(size)
         path = QPainterPath()
         path.moveTo(w * .5, w * .04)
@@ -72,12 +73,12 @@ def app_icon(color: str = "#3b82f6") -> QIcon:
         path.cubicTo(w * .9, w * .62, w * .72, w * .84, w * .5, w * .97)
         path.cubicTo(w * .28, w * .84, w * .1, w * .62, w * .1, w * .18)
         path.closeSubpath()
-        p.setPen(Qt.NoPen)
+        p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(color))
         p.drawPath(path)
-        pen = QPen(QColor("#ffffff"), max(1.5, w * .085), Qt.SolidLine, Qt.RoundCap)
+        pen = QPen(QColor("#ffffff"), max(1.5, w * .085), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
+        p.setBrush(Qt.BrushStyle.NoBrush)
         r, cx, cy = w * .22, w * .5, w * .52  # float geometry: int() rounding shifted it left at 16-32 px
         p.drawArc(QRectF(cx - r, cy - r, 2 * r, 2 * r), 125 * 16, 290 * 16)
         p.drawLine(QPointF(cx, cy - r * 1.18), QPointF(cx, cy - r * .05))

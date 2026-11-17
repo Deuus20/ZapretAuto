@@ -1,9 +1,34 @@
 """Custom widgets of the Material 3 look: switch, navigation rail, pages, power button, setting rows."""
+from typing import Any, TypeVar
+
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget,
-                               QVBoxLayout, QWidget)
-from .style import C, ICON_FONT, glyph
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QButtonGroup,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .style import ICON_FONT, C, glyph
+
+T = TypeVar("T")
+
+
+def q(obj: T, **props: Any) -> T:
+    """Создать виджет и сразу выставить свойства: `q(QLabel(), objectName="h2", wordWrap=True)`.
+
+    PySide6 принимает их и в конструкторе, но в заглушках типов таких параметров нет, поэтому явные сеттеры
+    дают и понятный код, и чистый pyright: свойство `objectName` → `setObjectName` и т. д."""
+    for name, value in props.items():
+        getattr(obj, "set" + name[0].upper() + name[1:])(value)
+    return obj
+
+
 def _alpha(color: str, a: float) -> QColor:
     c = QColor(color)
     c.setAlphaF(a)
@@ -13,17 +38,17 @@ class Switch(QAbstractButton):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCheckable(True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setAttribute(Qt.WA_Hover, True)  # repaint on enter/leave: the hover state layer is drawn by hand
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # repaint on enter/leave: the hover state layer is drawn by hand
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._pos = 0.0  # 0 = off, 1 = on (animated)
-        self._anim = QVariantAnimation(self, duration=150, easingCurve=QEasingCurve.OutCubic)
+        self._anim = q(QVariantAnimation(self), duration=150, easingCurve=QEasingCurve(QEasingCurve.Type.OutCubic))
         self._anim.valueChanged.connect(self._set_pos)
         self.toggled.connect(self._animate)
     _kbd = False
     def focusInEvent(self, e) -> None:  # noqa: N802
-        self._kbd = e.reason() in (Qt.TabFocusReason, Qt.BacktabFocusReason)
+        self._kbd = e.reason() in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
         super().focusInEvent(e)
     def sizeHint(self) -> QSize:
         return QSize(60, 40)
@@ -47,33 +72,35 @@ class Switch(QAbstractButton):
         super().showEvent(e)
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         en = self.isEnabled()
         t = self._pos
         track = QRectF(4, 4, 52, 32)
         on_track, off_track = QColor(C["primary"]), QColor(C["surface_highest"])
-        mix = QColor.fromRgbF(*(off_track.getRgbF()[i] * (1 - t) + on_track.getRgbF()[i] * t for i in range(3)))
+        mix = QColor.fromRgbF(off_track.redF() * (1 - t) + on_track.redF() * t,
+                              off_track.greenF() * (1 - t) + on_track.greenF() * t,
+                              off_track.blueF() * (1 - t) + on_track.blueF() * t)
         if not en:
             mix = _alpha(C["on_surface"], .12)
-        p.setPen(QPen(QColor(C["outline"]) if en else _alpha(C["on_surface"], .12), 2) if t < .5 else Qt.NoPen)
+        p.setPen(QPen(QColor(C["outline"]) if en else _alpha(C["on_surface"], .12), 2) if t < .5 else Qt.PenStyle.NoPen)
         p.setBrush(mix)
         p.drawRoundedRect(track.adjusted(1, 1, -1, -1) if t < .5 else track, 16, 16)
         d = 16 + 8 * t + (4 if self.isDown() else 0)
         cx, cy = 4 + 16 + 20 * t, 20.0
         kbd = self.hasFocus() and self._kbd
         if (self.underMouse() or kbd) and en:  # state layer; focus shows only when it came from the keyboard
-            p.setPen(Qt.NoPen)
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_alpha(C["primary"] if t > .5 else C["on_surface"], .12 if kbd else .08))
             p.drawEllipse(QPointF(cx, cy), 20, 20)
-        p.setPen(Qt.NoPen)
+        p.setPen(Qt.PenStyle.NoPen)
         handle = QColor(C["on_primary"]) if t > .5 else QColor(C["outline"])
         if not en:
             handle = _alpha(C["on_surface"], .38)
         p.setBrush(handle)
         p.drawEllipse(QPointF(cx, cy), d / 2, d / 2)
         if t > .5:  # check mark inside the handle: the state is readable without color
-            p.setPen(QPen(QColor(C["on_primary_container"] if en else C["surface"]), 2, Qt.SolidLine,
-                          Qt.RoundCap, Qt.RoundJoin))
+            p.setPen(QPen(QColor(C["on_primary_container"] if en else C["surface"]), 2, Qt.PenStyle.SolidLine,
+                          Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
             path = QPainterPath(QPointF(cx - 5, cy))
             path.lineTo(cx - 1.5, cy + 3.5)
             path.lineTo(cx + 5, cy - 3.5)
@@ -87,18 +114,18 @@ class SettingRow(QWidget):
     def __init__(self, title: str, text: str, switch: Switch, parent=None):
         super().__init__(parent)
         self.setObjectName("row")
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(text)
         self.switch = switch
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 0, 4, 0)
         lay.setSpacing(12)
-        self.title = QLabel(title, objectName="rowTitle")
+        self.title = q(QLabel(title), objectName="rowTitle")
         lay.addWidget(self.title, 1)
-        lay.addWidget(switch, 0, Qt.AlignVCenter)
+        lay.addWidget(switch, 0, Qt.AlignmentFlag.AlignVCenter)
     def mouseReleaseEvent(self, e) -> None:  # noqa: N802
-        if e.button() == Qt.LeftButton and self.switch.isEnabled() and self.rect().contains(e.position().toPoint()):
+        if e.button() == Qt.MouseButton.LeftButton and self.switch.isEnabled() and self.rect().contains(e.position().toPoint()):
             self.switch.toggle()
         super().mouseReleaseEvent(e)
     def changeEvent(self, e) -> None:  # noqa: N802
@@ -109,16 +136,16 @@ class InputRow(QWidget):
     def __init__(self, title: str, text: str, edit, parent=None):
         super().__init__(parent)
         self.setObjectName("row")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setToolTip(text)
         self.edit = edit
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 4, 8, 4)
         lay.setSpacing(12)
-        lay.addWidget(QLabel(title, objectName="rowTitle"), 1)
+        lay.addWidget(q(QLabel(title), objectName="rowTitle"), 1)
         edit.setToolTip(text)
         edit.setFixedWidth(190)
-        lay.addWidget(edit, 0, Qt.AlignVCenter)
+        lay.addWidget(edit, 0, Qt.AlignmentFlag.AlignVCenter)
 class RailButton(QAbstractButton):
     """Navigation rail destination: icon in a pill-shaped active indicator, label below."""
     def __init__(self, icon: str, text: str, parent=None):
@@ -126,31 +153,31 @@ class RailButton(QAbstractButton):
         self.setCheckable(True)
         self.setText(text)
         self._icon = icon
-        self.setCursor(Qt.PointingHandCursor)
-        self.setAttribute(Qt.WA_Hover, True)
-        self.setFocusPolicy(Qt.NoFocus)  # Ctrl+1..6 switch pages; a focus pill on start looked like a 2nd selection
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Ctrl+1..6 switch pages; a focus pill on start looked like a 2nd selection
         self.setFixedSize(68, 54)
         self.setToolTip(text)
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         on = self.isChecked()
         pill = QRectF((self.width() - 48) / 2, 4, 48, 28)
         if on or self.underMouse():
-            p.setPen(Qt.NoPen)
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(C["secondary_container"]) if on else _alpha(C["on_surface"], .08))
             p.drawRoundedRect(pill, 14, 14)
         f = QFont(ICON_FONT)
         f.setPixelSize(16)
         p.setFont(f)
         p.setPen(QColor(C["on_secondary_container"] if on else C["on_surface_variant"]))
-        p.drawText(pill, Qt.AlignCenter, glyph(self._icon))
+        p.drawText(pill, Qt.AlignmentFlag.AlignCenter, glyph(self._icon))
         f = QFont(self.font())
         f.setPixelSize(11)
-        f.setWeight(QFont.DemiBold if on else QFont.Medium)
+        f.setWeight(QFont.Weight.DemiBold if on else QFont.Weight.Medium)
         p.setFont(f)
         p.setPen(QColor(C["on_surface"] if on else C["on_surface_variant"]))
-        p.drawText(QRectF(0, 34, self.width(), 16), Qt.AlignHCenter | Qt.AlignTop, self.text())
+        p.drawText(QRectF(0, 34, self.width(), 16), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self.text())
         p.end()
 class Rail(QWidget):
     """Vertical navigation rail; emits the index of the chosen destination."""
@@ -158,7 +185,7 @@ class Rail(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("rail")
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(76)
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(4, 10, 4, 10)
@@ -171,7 +198,7 @@ class Rail(QWidget):
     def add(self, icon: str, text: str) -> RailButton:
         b = RailButton(icon, text)
         self._group.addButton(b, len(self.buttons))
-        self._lay.insertWidget(self._lay.count() - 1, b, 0, Qt.AlignHCenter)
+        self._lay.insertWidget(self._lay.count() - 1, b, 0, Qt.AlignmentFlag.AlignHCenter)
         self.buttons.append(b)
         if len(self.buttons) == 1:
             b.setChecked(True)
@@ -199,15 +226,15 @@ class PowerButton(QAbstractButton):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.state = "off"
-        self.setCursor(Qt.PointingHandCursor)
-        self.setAttribute(Qt.WA_Hover, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setFixedSize(S, S)
         self._spin = 0.0
-        self._anim = QVariantAnimation(self, startValue=0.0, endValue=360.0, duration=1400, loopCount=-1)
+        self._anim = q(QVariantAnimation(self, startValue=0.0, endValue=360.0, duration=1400), loopCount=-1)
         self._anim.valueChanged.connect(self._rot)
     _kbd = False
     def focusInEvent(self, e) -> None:  # noqa: N802
-        self._kbd = e.reason() in (Qt.TabFocusReason, Qt.BacktabFocusReason)
+        self._kbd = e.reason() in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
         super().focusInEvent(e)
     def _rot(self, v) -> None:
         self._spin = float(v)
@@ -223,13 +250,13 @@ class PowerButton(QAbstractButton):
         self.update()
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         ring = {"on": C["good"], "busy": C["warn"]}.get(self.state, C["outline_variant"])
         fill = {"on": C["good_container"], "busy": C["warn_container"]}.get(self.state, C["surface_high"])
         fg = {"on": C["good"], "busy": C["warn"]}.get(self.state, C["on_surface_variant"])
         r = QRectF(4, 4, S - 8, S - 8)
         if self.underMouse() and self.isEnabled():
-            p.setPen(Qt.NoPen)
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_alpha(fg, .10))
             p.drawEllipse(QRectF(0, 0, S, S))
         # busy: a dim ring, so the bright moving arc on it is visible (same color before: no motion was seen)
@@ -237,16 +264,16 @@ class PowerButton(QAbstractButton):
         p.setBrush(QColor(fill))
         p.drawEllipse(r)
         if self.state == "busy":  # a moving arc: work in progress
-            p.setPen(QPen(QColor(C["warn"]), 3, Qt.SolidLine, Qt.RoundCap))
-            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(C["warn"]), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawArc(r, int(-self._spin * 16), 90 * 16)
         if self.hasFocus() and self._kbd:  # ring only for keyboard focus, not on start / after a click
             p.setPen(QPen(QColor(C["primary"]), 2))
-            p.setBrush(Qt.NoBrush)
+            p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(QRectF(1, 1, S - 2, S - 2))
-        pen = QPen(QColor(fg), 4.5, Qt.SolidLine, Qt.RoundCap)
+        pen = QPen(QColor(fg), 4.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
+        p.setBrush(Qt.BrushStyle.NoBrush)
         cx, cy, rr = S / 2, S / 2 + 2, S * .17
         p.drawArc(QRectF(cx - rr, cy - rr, 2 * rr, 2 * rr), 125 * 16, 290 * 16)
         p.drawLine(QPointF(cx, cy - rr - 5), QPointF(cx, cy - 4))
@@ -256,17 +283,17 @@ class StatusChip(QWidget):
     def __init__(self, name: str, ok: bool | None, note: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("chip")
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)  # never squeezed into a clipped label
-        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)  # never squeezed into a clipped label
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setProperty("ok", "none" if ok is None else ("yes" if ok else "no"))
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 4, 12, 4)
         lay.setSpacing(8)
-        self.dot = QLabel(objectName="dot")
+        self.dot = q(QLabel(), objectName="dot")
         self.dot.setFixedSize(8, 8)
         self.dot.setProperty("ok", self.property("ok"))
         note = note or ("" if ok is None or ok else "нет")  # short: the chips share one row
-        lab = QLabel(name + (f": {note}" if note else ""), objectName="chipText")
+        lab = q(QLabel(name + (f": {note}" if note else "")), objectName="chipText")
         lab.setProperty("ok", self.property("ok"))
         lay.addWidget(self.dot)
         lay.addWidget(lab)

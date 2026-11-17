@@ -17,8 +17,9 @@ jobs:
     if: startsWith(github.event.issue.title, '[games]')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      # Токен в git-конфиге нужен: шаг Commit сам делает git push (здесь же и права на запись).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
       - name: Merge report
@@ -34,8 +35,13 @@ jobs:
           git config user.name "games-db bot"
           git config user.email "actions@users.noreply.github.com"
           git add games-db.json
+          changed=$(git diff --cached --name-only | tr '\n' ' ')
+          # в коммит должен попасть ровно один файл: скрипт слияния не повод коммитить что-то ещё
+          # пустой diff — такой отчёт уже был: это не ошибка и не повод не закрывать issue
+          if [ -n "$changed" ] && [ "$changed" != "games-db.json " ]; then echo "unexpected staged files: $changed"; exit 1; fi
           git diff --cached --quiet || (git commit -m "games-db: report #${{ github.event.issue.number }}" && git pull --rebase && git push)
       - name: Close issue
+        if: always()  # даже если слияние упало, issue надо закрыть с объяснением
         env:
           GH_TOKEN: ${{ github.token }}
           OK: ${{ steps.merge.outputs.ok }}

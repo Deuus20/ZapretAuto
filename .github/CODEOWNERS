@@ -1,0 +1,12 @@
+# Кто ревьюит изменения. Всё, что решает, какой файл попадёт в обновление и как он проверяется, — за владельцем:
+# чужой аккаунт или бот не должны менять выпуск, ключ подписи и процесс сборки.
+* @Deuus20
+
+/.github/ @Deuus20
+/app/signing.py @Deuus20
+/app/ed25519.py @Deuus20
+/app/updater.py @Deuus20
+/app/diag.py @Deuus20
+/tools/sign_release.py @Deuus20
+/build.ps1 @Deuus20
+/installer.iss @Deuus20

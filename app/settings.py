@@ -4,12 +4,15 @@ import json
 import os
 import threading
 import time
+
 from . import paths
+
 _lock = threading.RLock()
 _cache: tuple[float, dict] | None = None
 # a fresh install (no settings.json yet) starts with these: games are watched and their traffic goes through
 # the bypass, the app comes up with Windows, full settings are shown. main.py calls first_run() at start.
-FIRST_RUN = {"game_watch": True, "game_tcp": True, "game_udp": True, "autostart": True, "show_advanced": True}
+FIRST_RUN = {"game_watch": True, "game_capture": True, "game_tcp": True, "game_udp": True, "autostart": True,
+             "show_advanced": True}
 def _file():
     return paths.DATA / "settings.json"
 def load_settings(strict: bool = False) -> dict:
