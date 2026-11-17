@@ -124,8 +124,11 @@ def parse_bat(path: Path) -> Strategy:
     return Strategy(name, wf_tcp, wf_udp, profiles)
 _CACHE: tuple[tuple, list[Strategy]] | None = None
 def _stamp() -> tuple:
-    """Версия содержимого vendor: имена и mtime general*.bat. Дешевле разбора и меняется после обновления."""
-    return (str(paths.VENDOR),) + tuple(sorted((p.name, p.stat().st_mtime_ns) for p in paths.VENDOR.glob("general*.bat")))
+    """Версия содержимого vendor: имена, mtime и размер general*.bat. Дешевле разбора и меняется после обновления.
+
+    Размер нужен потому, что два обновления в одну системную «тик-секунду» могут дать одинаковый mtime."""
+    return (str(paths.VENDOR),) + tuple(sorted((p.name, p.stat().st_mtime_ns, p.stat().st_size)
+                                               for p in paths.VENDOR.glob("general*.bat")))
 def load_all(log=None) -> list[Strategy]:
     """All parseable strategies; a broken .bat (upstream format change) is skipped, not fatal.
 
