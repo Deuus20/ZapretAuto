@@ -128,6 +128,10 @@ powershell -File build.ps1                   # тесты, exe и установ
 Устройство кода описано в [AGENTS.md](AGENTS.md). Данные пользователя хранятся в `data\` рядом с exe,
 либо в `%PROGRAMDATA%\ZapretAuto\data`, если папка программы недоступна для записи.
 
+## Участие
+
+Ошибки и идеи: [issues](https://github.com/Deuus20/ZapretAuto/issues). Как собрать проект и что проверить перед PR: [CONTRIBUTING.md](CONTRIBUTING.md). Правила общения: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Доступность и известные ограничения: [ACCESSIBILITY.md](ACCESSIBILITY.md).
+
 ## Лицензии
 
 Код ZapretAuto распространяется по MIT, текст в [LICENSE](LICENSE). В состав входят сторонние компоненты: zapret и стратегии Flowseal (MIT), WinDivert (LGPLv3), Qt и PySide6 (LGPLv3), Cygwin (LGPLv3+ с исключением), Python (PSF-2.0), PyInstaller (GPLv2+ с исключением). Полные тексты, copyright и ссылки на исходники: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) и папка `LICENSES`.
