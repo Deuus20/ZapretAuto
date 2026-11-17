@@ -202,9 +202,13 @@ class ActionsMixin(WindowBase):
         self._run(work, done)
 
     def _health(self):
-        """Background check of key services; two failed checks in a row -> re-pick automatically."""
+        """Background check of key services; two failed checks in a row -> re-pick automatically.
+        Once an hour a short YouTube sample is added: the site may open while video is throttled."""
         if self._health_running or self.busy or not self.runner.running:
             return
+        speed = time.time() - getattr(self, "_last_speed_check", 0) > 3600
+        if speed:
+            self._last_speed_check = time.time()
         self._health_running = True
         def done(res):
             self._health_running = False
@@ -248,7 +252,7 @@ class ActionsMixin(WindowBase):
                 self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. Подбираю стратегию заново…")
                 self._repair = True
                 self.autopick()
-        self._run(lambda log: tester.quick_check(light=True), done)  # no 1 MB speed test every 10 min
+        self._run(lambda log: tester.quick_check(light=True, speed=speed), done)  # no 1 MB test every 10 min
 
     def _network_changed(self):
         """Another ISP (ASN): switch to the strategy picked there before, without a pick. An unknown ISP may be

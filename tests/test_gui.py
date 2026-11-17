@@ -277,7 +277,7 @@ def test_gui_zapret2_toggle(tmp_path, monkeypatch):
         w.autopick()
         assert shown and "zapret2" in shown[-1] and not w.busy               # no pointless 2-4 min pick
         w._health_fails = 1
-        monkeypatch.setattr(tester, "quick_check", lambda light=False: {"Discord": False, "YouTube": True})
+        monkeypatch.setattr(tester, "quick_check", lambda light=False, speed=False: {"Discord": False, "YouTube": True})
         w.runner.proc = type("P", (), {"poll": lambda self: None})()          # looks running
         w._health()
         assert not w.busy and w._health_fails == 0
@@ -320,6 +320,23 @@ def test_gui_known_games_show_after_restart(tmp_path, monkeypatch):
         assert not w.btn_reset.isEnabled()                   # nothing selected yet
         w.table.selectRow(0)
         assert w.btn_reset.isEnabled() and w.btn_ignore.isEnabled()
+    finally:
+        w.stop_watcher()
+        _close(app, w)
+
+def test_gui_games_table_updates_in_place(tmp_path, monkeypatch):
+    """The table used to be rebuilt every 2 s: selection and scroll jumped, the page flickered."""
+    monkeypatch.setattr(gamewatch.GameWatcher, "start", lambda self: None)
+    app, w = _gui(tmp_path, monkeypatch, game_watch=True, games_schema=2,
+                  games={"g.exe": {"path": "x", "ips": ["9.9.9.9"]}})
+    try:
+        w.start_watcher()
+        item = w.table.item(0, 0)
+        w.fill_games()
+        assert w.table.item(0, 0) is item
+        w.watcher._games["g.exe"]["ping_ms"] = 42
+        w.fill_games()
+        assert w.table.item(0, 2).text() == "42"
     finally:
         w.stop_watcher()
         _close(app, w)

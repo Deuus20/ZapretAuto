@@ -244,16 +244,19 @@ def _in_ipset_all(host: str) -> bool | None:
 BLOCK_PAGE = re.compile(r"warning\.rt\.ru|blocked|zapret-info|rkn\.gov|eais", re.I)
 SPEED_MIN = 250 * 1024    # B/s below which YouTube counts as throttled
 SPEED_BYTES = 1536 * 1024
+SPEED_BYTES_LIGHT = 320 * 1024  # hourly background sample: enough to spot throttling, ~8 MB/day
 def probe_speed(t: Target) -> float | None:
     """Download the ~1 MB YouTube front page completely: catches DPI that freezes a session after the
     first kilobytes. Seconds taken, None if it stalls or is slower than SPEED_MIN."""
+    light = t.url.endswith("?light")
+    limit, need = (SPEED_BYTES_LIGHT, 160 * 1024) if light else (SPEED_BYTES, 400 * 1024)
     t0 = time.perf_counter()
     try:
-        _, _, got = fetch("https://www.youtube.com/", SPEED_BYTES, 10)
+        _, _, got = fetch("https://www.youtube.com/", limit, 10)
     except Exception:  # noqa: BLE001
         return None
     dt = time.perf_counter() - t0
-    return dt if got >= 400 * 1024 and got / dt >= SPEED_MIN else None
+    return dt if got >= need and got / dt >= SPEED_MIN else None
 _CDN_NODE: str | None = None  # this network's YouTube video cache, e.g. "comstar-bka2" (asked once)
 def probe_video_cdn() -> float | None:
     """The server videos actually stream from (rrN---<node>.googlevideo.com, often a cache at the ISP): ISPs
@@ -337,10 +340,12 @@ def test_strategy(runner: Runner, s: strategies.Strategy, targets, warmup: float
 # service -> probes; a service counts as working when most of its probes pass (single probes through DPI are noisy)
 QUICK = {"Discord": ("DiscordMain", "DiscordGateway", "DiscordCDN"),
          "YouTube": ("YouTubeWeb", "YouTubeImage", "YouTubeVideoRedirect", "YouTubeVideo"),
-         "Скорость YouTube": ("YouTubeSpeed",), "Голос Discord": ("STUN_Google19302",), "Telegram": ("TelegramWeb",)}
-def quick_check(light: bool = False) -> dict[str, bool]:
+         "Скорость YouTube": ("YouTubeSpeed", "YouTubeSpeedLight"), "Голос Discord": ("STUN_Google19302",),
+         "Telegram": ("TelegramWeb",)}
+def quick_check(light: bool = False, speed: bool = False) -> dict[str, bool]:
     """Check key services through the currently running bypass (does not touch winws).
-    light=True skips the ~1 MB YouTube speed test (periodic background checks: ~144 MB/day otherwise)."""
+    light=True skips the ~1 MB YouTube speed test (periodic background checks: ~144 MB/day otherwise).
+    speed=True adds a short 320 KB sample instead: an hourly check that catches throttling."""
     global BIND
     from . import vpn as vpnmod
     if egress_ip() is None:
@@ -350,8 +355,10 @@ def quick_check(light: bool = False) -> dict[str, bool]:
         return {}  # full tunnel with a kill switch: the bypass isn't on the path, failures would be false alarms
     keys = {k for ks in QUICK.values() for k in ks}
     ts = [t for t in load_targets() if t.key in keys and not (light and t.is_speed)]
+    if light and speed:
+        ts.append(Target("YouTubeSpeedLight", "speed://youtube?light", "tcp:443:list-google"))
     res = probe_all(ts)
-    retry = [t for t in ts if res.get(t.key) is None]
+    retry = [t for t in ts if res.get(t.key) is None and not t.is_speed]  # speed probes are slow and costly
     if retry:  # single probes through DPI are noisy: confirm failures once
         time.sleep(3)
         res.update({k: v for k, v in probe_all(retry).items() if v is not None})

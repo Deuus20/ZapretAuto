@@ -33,6 +33,22 @@ def test_quick_check_majority(tmp_path, monkeypatch):
     r = tester.quick_check(light=True)
     assert r == {"Discord": True, "YouTube": False, "Голос Discord": True}
 
+def test_quick_check_speed_sample_is_hourly(monkeypatch):
+    """The periodic check skips the 1 MB test; once an hour it adds a short sample instead."""
+    monkeypatch.setattr(tester, "vpn_active", lambda: None)
+    monkeypatch.setattr(tester, "egress_ip", lambda: "1.2.3.4")
+    monkeypatch.setattr(tester, "load_targets", lambda: [tester.Target("YouTubeSpeed", "speed://youtube")])
+    seen = []
+
+    def probe_all(ts):
+        seen.extend(t.key for t in ts)
+        return {t.key: 0.1 for t in ts}
+    monkeypatch.setattr(tester, "probe_all", probe_all)
+    assert tester.quick_check(light=True) == {}
+    assert "YouTubeSpeedLight" not in seen
+    r = tester.quick_check(light=True, speed=True)
+    assert "YouTubeSpeedLight" in seen and r["Скорость YouTube"] is True
+
 def test_auto_pick_keeps_current_unless_clearly_better(tmp_path, monkeypatch):
     tester = _fake_pick_env(monkeypatch, tmp_path, baseline_ok=3)
     settings.save_settings(strategy={"base": "ALT11", "picks": {}})

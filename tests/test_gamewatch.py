@@ -34,6 +34,32 @@ def test_launchers_and_web_ports_are_not_game_traffic():
     assert gamewatch.web_client(r"C:\Steam\steamapps\common\Wardogs\WardogsLauncher-Shipping.exe", {})
     assert not gamewatch.web_client(r"C:\Program Files\Google\Chrome\Application\chrome.exe", {})
 
+def test_dns_resolvers_never_learned():
+    """1.1.1.1 and 8.8.8.8 are resolvers, not game servers: desyncing them breaks DNS for the whole PC."""
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        g = {"ips": set(), "seen": {}}
+        assert not w._add_ip(g, "1.1.1.1", time.time())
+        assert not w._add_ip(g, "8.8.8.8", time.time())
+        assert w._add_ip(g, "5.6.7.8", time.time())
+        assert g["ips"] == {"5.6.7.8"}
+    finally:
+        w.stop()
+
+def test_render_drops_stale_dns_entries(tmp_path, monkeypatch):
+    """Lists saved by older versions kept 1.1.1.1: they must leave on the next flush."""
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
+    try:
+        w._games["g.exe"] = {"path": "x", "ips": {"1.1.1.1", "5.6.7.8"}, "seen": {}}
+        w._capture = True
+        text = w._render()
+        assert "1.1.1.1" not in text and "5.6.7.8" in text
+    finally:
+        w.stop()
+
 def test_gamewatch_v1_ips_reset_once(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
@@ -79,13 +105,13 @@ def test_gamewatch_capture_off_keeps_servers_out_of_bypass(tmp_path, monkeypatch
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
     settings._cache = None
     settings.save_settings(game_capture=False, games_schema=3,
-                           games={"g.exe": {"path": "x", "ips": ["9.9.9.9"]}})
+                           games={"g.exe": {"path": "x", "ips": ["5.6.7.8"]}})
     w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
     try:
-        assert "9.9.9.9" not in w._render()
+        assert "5.6.7.8" not in w._render()
         w._flush()
         excl = (tmp_path / "lists" / "ipset-exclude-games.txt").read_text(encoding="utf-8").split()
-        assert "9.9.9.9" in excl  # ipset-all ranges must not desync it either
+        assert "5.6.7.8" in excl  # ipset-all ranges must not desync it either
         assert w.games()["g.exe"]["excluded"]
     finally:
         w.stop()
@@ -95,18 +121,18 @@ def test_game_excluded_by_hand_leaves_only_that_game_out(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
     settings._cache = None
     settings.save_settings(games_schema=3, games_exclude=["a.exe"],
-                           games={"a.exe": {"path": "x", "ips": ["9.9.9.9"]},
-                                  "b.exe": {"path": "y", "ips": ["8.8.8.8"]}})
+                           games={"a.exe": {"path": "x", "ips": ["5.6.7.8"]},
+                                  "b.exe": {"path": "y", "ips": ["6.7.8.9"]}})
     w = gamewatch.GameWatcher(lambda: None, log=lambda m: None)
     try:
         text, excl = w._render(), None
-        assert "9.9.9.9" not in text and "8.8.8.8" in text
+        assert "5.6.7.8" not in text and "6.7.8.9" in text
         w._flush()
         excl = (tmp_path / "lists" / "ipset-exclude-games.txt").read_text(encoding="utf-8").split()
-        assert "9.9.9.9" in excl and "8.8.8.8" not in excl
+        assert "5.6.7.8" in excl and "6.7.8.9" not in excl
         assert w.games()["a.exe"]["excluded"] and not w.games()["b.exe"]["excluded"]
         w.set_excluded("a.exe", False)  # back into the bypass: the list is rewritten at once
-        assert "9.9.9.9" in w._render()
+        assert "5.6.7.8" in w._render()
     finally:
         w.stop()
 

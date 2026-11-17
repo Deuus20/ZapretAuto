@@ -518,23 +518,29 @@ class PagesMixin(WindowBase):
         if not self.busy:
             self.progress.setRange(0, 0)
         title = self.busy_text if self.busy else ("Обход включён" if run else "Обход выключен")
-        self.status.setText(title)
+        if self.status.text() != title:
+            self.status.setText(title)
+        desc = self.describe()  # once per tick: it builds strings and reads the saved strategy
+        sub = ""
         if self.error and not self.busy:
-            self.substatus.setText(self.error)
+            sub = self.error
         elif not self.busy:
-            self.substatus.setText(f"Стратегия: {self.describe()}" if run
-                                   else "Нажмите кнопку, чтобы включить. Стратегия: " + self.describe())
+            sub = f"Стратегия: {desc}" if run else "Нажмите кнопку, чтобы включить. Стратегия: " + desc
+        if sub and self.substatus.text() != sub:
+            self.substatus.setText(sub)
         err = "yes" if self.error and not self.busy else "no"
         if self.substatus.property("error") != err:
             self.substatus.setProperty("error", err)
             self.substatus.style().unpolish(self.substatus)
             self.substatus.style().polish(self.substatus)
         last = getattr(self, "_last_check", None)
-        tip = f"ZapretAuto, {title}\n{self.describe()}"
+        tip = f"ZapretAuto, {title}\n{desc}"
         if last:
             ok = "всё работает" if last[1] else "есть сбои"
             tip += f"\nпроверка {time.strftime('%H:%M', time.localtime(last[0]))}: {ok}"
-        self.tray.setToolTip(tip[:127])  # Windows truncates tray tooltips at 127 chars
+        if getattr(self, "_tray_tip", None) != tip:
+            self._tray_tip = tip
+            self.tray.setToolTip(tip[:127])  # Windows truncates tray tooltips at 127 chars
         self.btn_toggle.setAccessibleName(title)
         for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site):
             w.setEnabled(not self.busy)
@@ -545,7 +551,9 @@ class PagesMixin(WindowBase):
         self.btn_auto.setEnabled(not self.busy)
         c = self.settings.get("strategy")
         manual = c and not c.get("picks") and c != self._auto_choice()
-        self.combo.setCurrentIndex(max(0, self.combo.findText(c["base"])) if manual and c else 0)
+        idx = max(0, self.combo.findText(c["base"])) if manual and c else 0
+        if self.combo.currentIndex() != idx:
+            self.combo.setCurrentIndex(idx)
 
     def fill_games(self):
         games = self.watcher.games() if self.watcher else {}
@@ -560,53 +568,84 @@ class PagesMixin(WindowBase):
         self.table.setVisible(bool(rows))
         self.table.blockSignals(True)  # a check state set while filling must not call back
         try:
-            self.table.setRowCount(len(rows))
-            for i, (exe, g) in enumerate(rows):
-                ping = g.get("ping_ms")
-                out = exe in excl or not capture
-                state = "вне обхода" if out else ("играете" if g.get("active") else "")
-                for j, t in enumerate([gamewatch.display_name(exe, g.get("path")), str(len(g.get("ips", ()))),
-                                       ", " if ping is None else f"{ping:.0f}", state]):
-                    it = QTableWidgetItem(t)
-                    if j == 0:
-                        it.setData(Qt.ItemDataRole.UserRole, exe)  # the exe is the key; the name is for people
-                        it.setToolTip(exe)
-                    self.table.setItem(i, j, it)
-                box = QTableWidgetItem()
-                box.setToolTip("Перехват игр выключен в настройках" if not capture else
-                               "Снимите галочку, серверы этой игры останутся вне обхода, игра останется в списке")
-                box.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
-                if not capture:
-                    box.setFlags(Qt.ItemFlag.NoItemFlags)
-                box.setCheckState(Qt.CheckState.Unchecked if out else Qt.CheckState.Checked)
-                self.table.setItem(i, 4, box)
+            self._sync_games_table(rows, excl, capture)
         finally:
             self.table.blockSignals(False)
         self._fill_home_games(rows)
 
+    def _sync_games_table(self, rows: list, excl: set[str], capture: bool) -> None:
+        """Update rows in place: a full rebuild every 2 s reset the selection and flickered."""
+        keys = [exe for exe, _ in rows]
+        rebuild = getattr(self, "_games_keys", None) != keys
+        if rebuild:
+            cur = self.table.currentRow()
+            item = self.table.item(cur, 0) if cur >= 0 else None
+            cur_exe = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            self._games_keys = keys
+            self.table.setRowCount(len(rows))
+            for i, (exe, _g) in enumerate(rows):
+                name = QTableWidgetItem()
+                name.setData(Qt.ItemDataRole.UserRole, exe)
+                name.setToolTip(exe)
+                self.table.setItem(i, 0, name)
+                for j in (1, 2, 3):
+                    self.table.setItem(i, j, QTableWidgetItem())
+                self.table.setItem(i, 4, QTableWidgetItem())
+            if cur_exe in keys:
+                self.table.setCurrentCell(keys.index(cur_exe), 0)
+        for i, (exe, g) in enumerate(rows):
+            ping = g.get("ping_ms")
+            out = exe in excl or not capture
+            state = "вне обхода" if out else ("играете" if g.get("active") else "")
+            values = (gamewatch.display_name(exe, g.get("path")), str(len(g.get("ips", ()))),
+                      ", " if ping is None else f"{ping:.0f}", state)
+            for j, text in enumerate(values):
+                it = self.table.item(i, j)
+                if it is None:
+                    it = QTableWidgetItem()
+                    self.table.setItem(i, j, it)
+                if it.text() != text:
+                    it.setText(text)
+            box = self.table.item(i, 4)
+            want = Qt.CheckState.Unchecked if out else Qt.CheckState.Checked
+            if box.checkState() != want:
+                box.setCheckState(want)
+        if rebuild or getattr(self, "_games_capture", None) != capture:
+            self._games_capture = capture
+            tip = ("Перехват игр выключен в настройках" if not capture else
+                   "Снимите галочку, серверы этой игры останутся вне обхода, игра останется в списке")
+            flags = (Qt.ItemFlag.NoItemFlags if not capture else
+                     (Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable))
+            for i in range(len(rows)):
+                box = self.table.item(i, 4)
+                if box is not None:
+                    box.setToolTip(tip)
+                    box.setFlags(flags)
+
     def _fill_home_games(self, rows: list) -> None:
         """Home card: running games first, then the ones with most servers; three at most."""
         if not self.settings.get("game_watch"):
-            self.lbl_games.setText("Слежение за играми выключено, включите его в «Настройках».")
-            return
-        if not rows:
-            self.lbl_games.setText("Пока игр не найдено. Запустите игру, она появится здесь сама.")
-            return
-        top = sorted(rows, key=lambda r: (not r[1].get("active"), -len(r[1].get("ips", ()))))[:3]
-        lines = []
-        for exe, g in top:
-            name = gamewatch.display_name(exe, g.get("path"))
-            ping = g.get("ping_ms")
-            if g.get("excluded"):
-                state = "вне обхода"
-            elif g.get("active"):
-                state = (f"<span style='color:{style.C["good"]}'>играете</span>"
-                         + (f", {ping:.0f} мс" if ping else ""))
-            else:
-                state = f"{len(g.get('ips', ()))} адресов в обходе"
-            lines.append(f"<span style='color:{style.C["on_surface"]}'>{html.escape(name)}</span>, {state}")
-        more = len(rows) - len(top)
-        self.lbl_games.setText("<br>".join(lines) + (f"<br>и ещё {more}" if more > 0 else ""))
+            text = "Слежение за играми выключено, включите его в «Настройках»."
+        elif not rows:
+            text = "Пока игр не найдено. Запустите игру, она появится здесь сама."
+        else:
+            top = sorted(rows, key=lambda r: (not r[1].get("active"), -len(r[1].get("ips", ()))))[:3]
+            lines = []
+            for exe, g in top:
+                name = gamewatch.display_name(exe, g.get("path"))
+                ping = g.get("ping_ms")
+                if g.get("excluded"):
+                    state = "вне обхода"
+                elif g.get("active"):
+                    state = (f"<span style='color:{style.C["good"]}'>играете</span>"
+                             + (f", {ping:.0f} мс" if ping else ""))
+                else:
+                    state = f"{len(g.get('ips', ()))} адресов в обходе"
+                lines.append(f"<span style='color:{style.C["on_surface"]}'>{html.escape(name)}</span>, {state}")
+            more = len(rows) - len(top)
+            text = "<br>".join(lines) + (f"<br>и ещё {more}" if more > 0 else "")
+        if self.lbl_games.text() != text:
+            self.lbl_games.setText(text)
 
     def fill_isp(self):
         """«Провайдер: X · в общей базе N отчётов», and whether most of them use the same combination."""

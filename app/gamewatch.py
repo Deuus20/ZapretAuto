@@ -84,6 +84,11 @@ CDN_NETS = ("103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "104.16.0.0/1
             "151.101.0.0/16", "199.232.0.0/16")
 _SDR = [ipaddress.ip_network(n) for n in VALVE_SDR_NETS]
 _CDN = [ipaddress.ip_network(n) for n in CDN_NETS]
+# DNS and DoH resolvers are not game servers: a game's lookup goes there, and desyncing 1.1.1.1 or 8.8.8.8
+# breaks name resolution for every program on the PC. They used to be learned from TCP 443 flows.
+DNS_NETS = ("1.1.1.1/32", "1.0.0.1/32", "8.8.8.8/32", "8.8.4.4/32", "9.9.9.9/32", "149.112.112.112/32",
+            "77.88.8.8/32", "77.88.8.1/32", "94.140.14.14/32", "94.140.15.15/32", "76.76.2.0/24")
+_DNS = [ipaddress.ip_network(n) for n in DNS_NETS]
 PID_TTL = 30.0           # s; Windows reuses PIDs, so cached exe names expire
 SYSTEM_DIRS = ("\\windows\\", "\\microsoft\\edge\\", "\\google\\chrome\\", "\\windowsapps\\microsoft.",
                "\\windowsapps\\microsoftcorporationii.", "\\windowsapps\\spotifyab.",
@@ -177,6 +182,9 @@ def valve_sdr(ip: str) -> bool:
     return _in(ip, _SDR)
 def cdn(ip: str) -> bool:
     return _in(ip, _CDN)
+def dns_resolver(ip: str) -> bool:
+    """True for public DNS/DoH resolvers: they must never reach the game ipset."""
+    return _in(ip, _DNS)
 def _sort_key(x: str) -> tuple[int, ...]:
     """Numeric order of "1.2.3.4" and "1.2.3.0/24" (string order would put .10 before .9)."""
     return tuple(int(o) for o in re.split(r"[./]", x)[:4])
@@ -326,7 +334,7 @@ class GameWatcher(threading.Thread):
     def _add_ip(g: dict, ip: str, now: float) -> bool:
         """Remember a game server (caller holds the lock); True if the ipset must change. A full list drops the
         server unseen the longest instead of refusing the new one."""
-        if cdn(ip):
+        if cdn(ip) or dns_resolver(ip):
             return False
         if valve_sdr(ip):
             new = not g.get("sdr")
@@ -625,7 +633,7 @@ class GameWatcher(threading.Thread):
             extra: set[str] = set()
             for exe, g in self._games.items():
                 if not self._capture or exe in self._excluded:
-                    extra |= set(g["ips"])
+                    extra |= {ip for ip in g["ips"] if not dns_resolver(ip)}
         return "\n".join(sorted(set(nets) | extra, key=_sort_key) or [PLACEHOLDER]) + "\n"
     @staticmethod
     def _write(name: str, text: str) -> None:
@@ -644,7 +652,7 @@ class GameWatcher(threading.Thread):
     def _render(self) -> str:
         with self._lock:
             live = [g for exe, g in self._games.items() if self._capture and exe not in self._excluded]
-            ips = set().union(*[g["ips"] for g in live]) if live else set()
+            ips = {ip for g in live for ip in g["ips"] if not dns_resolver(ip)} if live else set()
             sdr = any(g.get("sdr") for g in live)
         lines = sorted(_group(ips) | (set(VALVE_SDR_NETS) if sdr else set()), key=_sort_key)
         man = paths.DATA / "games_manual.txt"
