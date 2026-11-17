@@ -19,6 +19,7 @@ Windows GUI wrapper over Flowseal/zapret-discord-youtube (winws.exe + WinDivert)
 ## Layout
 - `vendor/zapret/`: unmodified upstream release (bin/, lists/, general*.bat). Overwritten by the updater; never edit it.
 - `app/`: our code. `data/`: user state (user lists, chosen strategy, game ipsets, settings.json).
+- `LICENSE`, `THIRD-PARTY-NOTICES.md`, `LICENSES/`: лицензии. `build.ps1` кладет их в `dist`, `tests/test_licenses.py` следит за наличием, установщик показывает `LICENSES/INSTALLER-NOTICE.txt`.
 - Upstream strategy = one `winws.exe` command line in `general*.bat`; profiles separated by `--new`. Vars: `%BIN%`, `%LISTS%`, `%GameFilterTCP%`, `%GameFilterUDP%`.
 
 ## Modules
