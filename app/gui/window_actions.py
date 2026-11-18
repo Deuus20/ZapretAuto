@@ -441,9 +441,13 @@ class ActionsMixin(WindowBase):
             self._crashes = [t for t in self._crashes if now - t < 600] + [now]
             if len(self._crashes) <= 3:
                 from app import runner as runner_mod
-                why = runner_mod.explain(runner_mod.last_output())
-                self.log(f"winws завершился сам, перезапуск ({len(self._crashes)}/3)" + (f": {why}" if why else ""))
-                self.start_runner()
+                out = runner_mod.last_output()
+                if runner_mod.windivert_service_error(out):  # драйвер не стартует: починка важнее перезапуска
+                    self._repair_windivert()
+                else:
+                    why = runner_mod.explain(out)
+                    self.log(f"winws завершился сам, перезапуск ({len(self._crashes)}/3)" + (f": {why}" if why else ""))
+                    self.start_runner()
             else:
                 self._expect_running = False
                 self.error = "Обход постоянно падает. Проверьте антивирус и раздел «Диагностика»."
@@ -916,11 +920,47 @@ class ActionsMixin(WindowBase):
         out = runner_mod.last_output()
         if out:
             self.log("вывод обхода:\n" + out)  # winws' own words go to the log/report
+        if runner_mod.windivert_service_error(out):  # служба драйвера: чиним и повторяем запуск
+            self._repair_windivert()
+            return
         cause = runner_mod.explain(out)
         if cause:  # winws said why: no need to guess from diagnostics
             done(cause)
             return
         self._run(lambda log: diag.first_problem(), done)
+
+    def _repair_windivert(self):
+        """WinDivert не смог открыть драйвер: починить службу и один раз повторить запуск."""
+        now = time.time()
+        if now - self._wd_repaired_at < 600:  # не долбим каждые 2 с: тут поможет только перезагрузка
+            self._windivert_failed("Служба WinDivert не запускается. Перезагрузите компьютер: Windows завершит её "
+                                   "удаление при загрузке.")
+            return
+        self._wd_repaired_at = now
+        self._expect_running = False  # ждём починку, а не новый перезапуск на каждом тике
+        self.log("служба WinDivert не запускается, чиню её сама")
+        self._run(lambda log: diag.repair_windivert(), self._windivert_repaired)
+
+    def _windivert_repaired(self, res):
+        if not res:  # рабочий поток упал: без ответа состояние службы неизвестно
+            self._windivert_failed("не удалось проверить службу WinDivert, подробности в журнале")
+            return
+        retry, text = res
+        self.log("WinDivert: " + text.replace("\n", "; "))
+        if retry and self.start_runner():
+            self._crashes = []
+            self.error = ""
+            self.notify("Обход починен: служба WinDivert запущена")
+            self.refresh()
+            return
+        self._windivert_failed(text)
+
+    def _windivert_failed(self, text):
+        self._expect_running = False
+        self.error = "Обход не работает. " + text
+        self.log("причина: " + text)
+        self.notify(self.error)
+        self.refresh()
 
     def _offer_autostart(self):
         """After the first successful setup: most people want the bypass to come up with Windows."""

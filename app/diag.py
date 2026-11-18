@@ -3,6 +3,8 @@ import ctypes
 import re
 import subprocess
 import time
+from pathlib import Path
+from typing import NamedTuple
 
 import psutil
 
@@ -85,7 +87,7 @@ def first_problem() -> str | None:
     """Short human-readable cause for a bypass that won't start, or None."""
     for r in run_checks():
         if r["level"] == "err" or (r["level"] == "warn" and r["label"] in ("Конфликтующие службы", "Служба zapret",
-                                                                            "Остаточный WinDivert")):
+                                                                            "WinDivert")):
             return f"{r['label']}: {r['detail']}"
     return None
 ANYCAST_DOMAINS = ("discord.com", "rutracker.org")  # Cloudflare anycast: same IPs from any resolver
@@ -186,17 +188,26 @@ def run_checks(fresh: bool = False) -> list[dict]:
         res.append(_item("Служба zapret", "ok", zs or "нет"))
     ag = "adguardsvc.exe" in procs
     res.append(_item("AdGuard", "warn" if ag else "ok", "AdguardSvc.exe запущен, может мешать" if ag else "нет"))
-    wd = _svc_status("WinDivert")
+    wst = windivert_state()
+    others = [n for n in ("winws.exe", "winws2.exe") if n in procs]
     ours = _own_windivert()  # game flow capture keeps the driver loaded without winws: that is normal
-    stale = (wd == "Running" and "winws.exe" not in procs and "winws2.exe" not in procs and not ours)
-    if stale:
-        detail = "служба WinDivert работает без winws.exe"
-    elif wd == "Running" and ours:
-        detail = "используется слежением за играми, так и должно быть"
+    if not wst.installed:
+        res.append(_item("WinDivert", "ok", "служба не установлена, WinDivert поставит её сам при запуске обхода"))
+    elif wst.running and not others and not ours:
+        res.append(_item("WinDivert", "warn", "драйвер работает без winws.exe", "remove_windivert"))
+    elif wst.running:
+        res.append(_item("WinDivert", "ok", "драйвер работает"))
+    elif wst.pending_delete:
+        res.append(_item("WinDivert", "err", "служба помечена на удаление: Windows завершит его только после "
+                                             "перезагрузки, до этого обход не запустится"))
+    elif not wst.path_ok:
+        res.append(_item("WinDivert", "err",
+                         f"драйвер не найден: {wst.path or 'путь не указан'}; «Исправить» уберёт службу, "
+                         "WinDivert поставит её заново", "windivert_repair"))
+    elif wst.start == "отключена":
+        res.append(_item("WinDivert", "err", "служба отключена, обход из-за неё не запустится", "windivert_repair"))
     else:
-        detail = wd or "нет"
-    res.append(_item("Остаточный WinDivert", "warn" if stale else "ok", detail,
-                     "remove_windivert" if stale else None))
+        res.append(_item("WinDivert", "ok", f"служба готова к запуску ({wst.start})"))
     rc, out = _ps("doh")
     fields = dict(part.split("=", 1) for part in out.strip().split(";") if "=" in part)
     try:
@@ -497,6 +508,109 @@ def _remove_windivert() -> str:
     if any("1072" in ln for ln in lines):
         lines.append("Нужна перезагрузка: пока служба помечена на удаление, WinDivert не запустится.")
     return "\n".join(lines)
+
+
+class WindivertState(NamedTuple):
+    """Служба драйвера WinDivert в том виде, в каком её видит Windows до запуска обхода."""
+    installed: bool
+    running: bool
+    start: str  # тип запуска по-русски: вручную, отключена, авто
+    path: str
+    path_ok: bool
+    pending_delete: bool = False  # DeleteFlag: Windows уберёт службу только при перезагрузке
+
+
+def _windivert_config() -> tuple[int, str, bool] | None:
+    """Тип запуска, путь к драйверу и DeleteFlag из реестра: sc печатает названия полей по локали."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Services\WinDivert") as k:
+            start = int(winreg.QueryValueEx(k, "Start")[0])
+            path = str(winreg.QueryValueEx(k, "ImagePath")[0])
+            try:
+                flag = int(winreg.QueryValueEx(k, "DeleteFlag")[0])
+            except OSError:  # значения нет: служба не помечена на удаление
+                flag = 0
+    except (OSError, ValueError):
+        return None
+    return start, path, flag != 0
+
+
+def _windivert_running() -> bool:
+    """Загружен ли драйвер. `sc query`: слово RUNNING в выводе не переводится на другие языки."""
+    rc, out = _run(["sc", "query", "WinDivert"])
+    return rc == 0 and re.search(r"\bRUNNING\b", out) is not None
+
+
+def windivert_state() -> WindivertState:
+    """Состояние службы WinDivert. В норме WinDivert ставит её сама и помечает на удаление, пока драйвер
+    загружен: «отключена и помечена на удаление» у работающего драйвера это норма, а не поломка."""
+    cfg = _windivert_config()
+    if cfg is None:  # службы нет: WinDivert поставит её сама при первом открытии драйвера
+        return WindivertState(False, False, "", "", False)
+    start_num, path, pending = cfg
+    path = re.sub(r"^\\\?\?\\", "", path.strip())
+    running = _windivert_running()
+    start = {2: "авто", 3: "вручную", 4: "отключена"}.get(start_num, f"код {start_num}")
+    return WindivertState(True, running, start, path, bool(path) and Path(path).is_file(), pending)
+
+
+def _windivert_holders() -> list[str]:
+    """Кто держит драйвер: чужой обход или наше слежение за играми."""
+    busy = [n for n in ("winws.exe", "winws2.exe") if n in _procs()]
+    if _own_windivert():
+        busy.append("ZapretAuto (слежение за играми)")
+    return busy
+
+
+def _windivert_wait_delete() -> tuple[bool, str]:
+    """Служба помечена на удаление: Windows иногда доделывает это за секунду, иногда только при загрузке."""
+    rc, out = _run(["sc", "delete", "WinDivert"])
+    deleted = "Служба WinDivert удалена, WinDivert поставит её заново при запуске обхода."
+    if rc == 0:
+        return True, deleted
+    time.sleep(1.5)  # удаление идёт в фоне: без паузы проверка увидит ту же службу
+    if _windivert_config() is None:
+        return True, deleted
+    return False, ("Служба WinDivert помечена на удаление: Windows завершит его только после перезагрузки. "
+                   "Перезагрузите компьютер.")
+
+
+def repair_windivert() -> tuple[bool, str]:
+    """Починить службу WinDivert без перезагрузки, если это возможно.
+
+    Возвращает (можно сразу запускать обход, что сделано). WinDivert ставит службу сама и, пока драйвер
+    загружен, помечает её на удаление. Если драйвер выгрузился, а служба осталась, StartService возвращает
+    1058 и обход не стартует до перезагрузки: отключённую службу включаем, а службу со старым путём к
+    драйверу удаляем, чтобы WinDivert поставила новую."""
+    st = windivert_state()
+    if not st.installed:
+        return True, "Служба WinDivert не установлена, WinDivert поставит её сам при запуске обхода."
+    if st.running:
+        return True, "Драйвер WinDivert уже загружен, службу трогать не нужно."
+    busy = _windivert_holders()
+    if busy:
+        return False, ("Драйвер WinDivert держит " + ", ".join(busy) + ": закройте обход и игру, потом повторите.")
+    if st.pending_delete:
+        return _windivert_wait_delete()
+    lines: list[str] = []
+    if st.start == "отключена":
+        rc, out = _run(["sc", "config", "WinDivert", "start=", "demand"])
+        lines.append(_svc_msg("Тип запуска службы WinDivert: вручную", rc, out))
+    rc, out = _run(["sc", "start", "WinDivert"])
+    if rc == 0:
+        return True, "\n".join(lines + ["Служба WinDivert запущена."])
+    lines.append(_svc_msg("Запуск службы WinDivert", rc, out))
+    if not st.path_ok:  # драйвера по старому пути нет: служба пересоздастся с текущим
+        retry, tail = _windivert_wait_delete()
+        return retry, "\n".join(lines + [tail])
+    return False, "\n".join(lines)
+
+
+def _windivert_repair() -> str:
+    return repair_windivert()[1]
+
+
 def _reinstall_vendor() -> str:
     """Скачать zapret заново: манифест целостности потом перезапишется сам."""
     from . import updater
@@ -509,7 +623,7 @@ def apply_fix(fix_id: str) -> str:
     forget()  # состояние изменится: следующий прогон проверок должен быть новым
     funcs = {"disable_quic": _disable_quic, "browser_doh": _browser_doh, "discord_cache": _clear_discord_cache,
              "hosts_update": _hosts_update, "hosts_remove": _hosts_remove, "remove_windivert": _remove_windivert,
-             "reinstall_vendor": _reinstall_vendor, "dns_repair": _dns_repair}
+             "windivert_repair": _windivert_repair, "reinstall_vendor": _reinstall_vendor, "dns_repair": _dns_repair}
     if fix_id in funcs:
         try:
             return funcs[fix_id]()

@@ -5,7 +5,7 @@ import re
 import time
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
@@ -22,6 +21,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +37,7 @@ from app.gui.shared import (
     SettingRow,
     StatusChip,
     Switch,
+    TextLine,
     app_icon,
     gamewatch,
     init_fonts,
@@ -175,9 +176,23 @@ class PagesMixin(WindowBase):
         col.addStretch()
         # имя стратегии и текст ошибки приходят из файлов: HTML в них не разметка, а данные
         self.status = q(QLabel(), objectName="title", textFormat=Qt.TextFormat.PlainText)
-        self.substatus = q(QLabel(), objectName="sub", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
+        self.substatus = q(TextLine(), objectName="sub", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
         col.addWidget(self.status)
-        col.addWidget(self.substatus)
+        srow = QHBoxLayout()
+        srow.setSpacing(6)
+        srow.setContentsMargins(0, 0, 0, 0)
+        srow.addWidget(self.substatus, 0, Qt.AlignmentFlag.AlignBottom)
+        # «?» рядом с комбинацией: подсказка при наведении и по нажатию, без отдельного окна
+        self.btn_desc_help = QToolButton()
+        self.btn_desc_help.setText("?")
+        self.btn_desc_help.setAutoRaise(True)
+        self.btn_desc_help.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_desc_help.setFixedSize(20, 20)
+        self.btn_desc_help.setAccessibleName("Стратегии в комбинации")
+        self.btn_desc_help.clicked.connect(self.show_strategy_help)
+        srow.addWidget(self.btn_desc_help, 0, Qt.AlignmentFlag.AlignBottom)
+        srow.addStretch(1)
+        col.addLayout(srow)
         self.chips = QHBoxLayout()
         self.chips.setSpacing(6)
         self.chips.setContentsMargins(0, 0, 0, 0)
@@ -220,19 +235,7 @@ class PagesMixin(WindowBase):
         cl = QVBoxLayout(card)
         cl.setContentsMargins(14, 12, 14, 14)
         cl.setSpacing(8)
-        hrow = QHBoxLayout()
-        hrow.setSpacing(6)
-        hrow.addWidget(q(QLabel("Стратегия"), objectName="h2"))
-        self.btn_strategy_help = QToolButton()
-        self.btn_strategy_help.setText("?")
-        self.btn_strategy_help.setAutoRaise(True)
-        self.btn_strategy_help.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_strategy_help.setFixedSize(20, 20)
-        self.btn_strategy_help.setToolTip("Показать, из каких стратегий собрана комбинация")
-        self.btn_strategy_help.clicked.connect(self.show_strategy_help)
-        hrow.addWidget(self.btn_strategy_help)
-        hrow.addStretch()
-        cl.addLayout(hrow)
+        cl.addWidget(q(QLabel("Стратегия"), objectName="h2"))
         self.combo = QComboBox()
         self.combo.setToolTip("«Авто», результат подбора. Можно выбрать стратегию вручную.")
         self.combo.addItem(AUTO)
@@ -628,8 +631,10 @@ class PagesMixin(WindowBase):
             + "</table>")
 
     def show_strategy_help(self):
-        """«?» у стратегии: полные имена и группы целей, без сокращений."""
-        QMessageBox.information(self, "Стратегия", self.describe_full())
+        """«?» у стратегии: та же подсказка, что при наведении, но по нажатию и без окна."""
+        pos = self.btn_desc_help.mapToGlobal(QPoint(0, self.btn_desc_help.height() + 2))
+        QToolTip.hideText()
+        QToolTip.showText(pos, self.describe_full(), self.btn_desc_help)
 
     def describe(self) -> str:
         """Коротко: «комбинация ALT8+FTAA+ALT11». Полные имена и группы - в describe_full()."""
@@ -646,6 +651,8 @@ class PagesMixin(WindowBase):
 
     def describe_full(self) -> str:
         """Полные имена и группы для подсказки: «комбинация ALT8 + FAKE TLS AUTO ALT (Google)»."""
+        if self._zapret2_on():  # у zapret2 своих стратегий нет: та же строка, что и в статусе
+            return self.describe()
         c = self.settings.get("strategy") or {}
         if not c.get("picks"):
             return self.describe()
@@ -674,12 +681,17 @@ class PagesMixin(WindowBase):
         if getattr(self, "_desc_tip", None) != full:
             self._desc_tip = full
             self.substatus.setToolTip(full)
-            self.btn_strategy_help.setToolTip(full)
+            self.btn_desc_help.setToolTip(full)
+        # «?» нужен, только когда подсказка добавляет что-то к строке статуса
+        want_help = not self.busy and not self.error and full != desc
+        if self.btn_desc_help.isHidden() == want_help:
+            self.btn_desc_help.setVisible(want_help)
         sub = ""
         if self.error and not self.busy:
             sub = self.error
         elif not self.busy:
-            sub = f"Стратегия: {desc}" if run else "Нажмите кнопку, чтобы включить. Стратегия: " + desc
+            # две строки в выключенном состоянии: «?» встаёт в конце строки со стратегией, а не у края окна
+            sub = f"Стратегия: {desc}" if run else "Нажмите кнопку, чтобы включить.\nСтратегия: " + desc
         if sub and self.substatus.text() != sub:
             self.substatus.setText(sub)
         err = "yes" if self.error and not self.busy else "no"

@@ -57,6 +57,7 @@ class WindowBase(QWidget):
     _upd: Any
     _update_deferred: Any
     _vpn_was: Any
+    _wd_repaired_at: Any
     _workers: Any
     _zapret2_on: Any
     act_toggle: Any
@@ -77,7 +78,7 @@ class WindowBase(QWidget):
     btn_diag: Any
     btn_dns: Any
     btn_dns_provider: Any
-    btn_strategy_help: Any
+    btn_desc_help: Any
     btn_ipset: Any
     btn_report: Any
     btn_send: Any

@@ -37,6 +37,105 @@ def test_diag_windivert_delete_pending_is_explained(monkeypatch):
     out = diag.apply_fix("remove_windivert")
     assert "код 1072" in out and "перезагруз" in out.lower() and "1060" not in out
 
+def test_diag_windivert_service_state_from_registry(monkeypatch):
+    """Тип запуска и путь берём из реестра: sc печатает названия полей по локали и разбирать его нельзя."""
+    from app import diag
+    monkeypatch.setattr(diag, "_windivert_config",
+                        lambda: (4, r"\??\C:\Program Files\ZapretAuto\bin\WinDivert64.sys", False))
+    monkeypatch.setattr(diag, "_windivert_running", lambda: True)
+    st = diag.windivert_state()
+    assert st.installed and st.running and st.start == "отключена" and not st.pending_delete
+    assert st.path == r"C:\Program Files\ZapretAuto\bin\WinDivert64.sys" and st.path_ok is False
+    monkeypatch.setattr(diag, "_windivert_config", lambda: None)  # службы нет
+    assert diag.windivert_state() == diag.WindivertState(False, False, "", "", False)
+
+def test_diag_enables_disabled_windivert_service(monkeypatch):
+    """Отключённую службу включаем сами: тип запуска «вручную» и запуск, удалять не нужно."""
+    from app import diag
+    monkeypatch.setattr(diag, "_procs", lambda: set())
+    monkeypatch.setattr(diag, "_own_windivert", lambda: False)
+    monkeypatch.setattr(diag, "windivert_state",
+                        lambda: diag.WindivertState(True, False, "отключена", r"C:\x\WinDivert64.sys", True))
+    calls = []
+    def run(args, timeout=20):
+        calls.append(list(args))
+        return 0, ""
+    monkeypatch.setattr(diag, "_run", run)
+    retry, text = diag.repair_windivert()
+    assert retry and "запущена" in text
+    assert calls == [["sc", "config", "WinDivert", "start=", "demand"], ["sc", "start", "WinDivert"]]
+
+def test_diag_windivert_repair_asks_for_reboot(monkeypatch):
+    """Служба помечена на удаление: пробуем добить, но Windows чаще заканчивает только при загрузке."""
+    from app import diag
+    monkeypatch.setattr(diag, "_procs", lambda: set())
+    monkeypatch.setattr(diag, "_own_windivert", lambda: False)
+    monkeypatch.setattr(diag, "_windivert_config", lambda: (4, r"\??\C:\x\WinDivert64.sys", True))
+    monkeypatch.setattr(diag, "_windivert_running", lambda: False)
+    monkeypatch.setattr(diag, "_run", lambda args, timeout=20: (1072, "служба помечена на удаление"))
+    monkeypatch.setattr(diag.time, "sleep", lambda s: None)
+    retry, text = diag.repair_windivert()
+    assert not retry and "перезагруз" in text.lower()
+
+def test_diag_windivert_delete_finishes_after_a_pause(monkeypatch):
+    """Удаление идёт в фоне: если служба исчезла через секунду, обход можно запускать, перезагрузка не нужна."""
+    from app import diag
+    monkeypatch.setattr(diag, "_procs", lambda: set())
+    monkeypatch.setattr(diag, "_own_windivert", lambda: False)
+    cfg = {"v": (4, r"\??\C:\x\WinDivert64.sys", True)}
+    monkeypatch.setattr(diag, "_windivert_config", lambda: cfg["v"])
+    monkeypatch.setattr(diag, "_windivert_running", lambda: False)
+    def run(args, timeout=20):
+        cfg["v"] = None  # Windows доделала удаление, пока мы ждали
+        return 1072, "помечена на удаление"
+    monkeypatch.setattr(diag, "_run", run)
+    monkeypatch.setattr(diag.time, "sleep", lambda s: None)
+    retry, text = diag.repair_windivert()
+    assert retry and "удалена" in text
+
+def test_diag_removes_windivert_service_with_old_driver_path(monkeypatch):
+    """Драйвера по пути службы нет: удаляем службу, WinDivert поставит новую с текущим путём."""
+    from app import diag
+    monkeypatch.setattr(diag, "_procs", lambda: set())
+    monkeypatch.setattr(diag, "_own_windivert", lambda: False)
+    monkeypatch.setattr(diag, "windivert_state",
+                        lambda: diag.WindivertState(True, False, "вручную", r"C:\old\WinDivert64.sys", False))
+    calls = []
+    def run(args, timeout=20):
+        calls.append(list(args))
+        return (2, "не удается найти файл") if args[1] == "start" else (0, "")
+    monkeypatch.setattr(diag, "_run", run)
+    retry, text = diag.repair_windivert()
+    assert retry and "удалена" in text and ["sc", "delete", "WinDivert"] in calls
+
+def test_diag_repair_waits_for_the_running_bypass(monkeypatch):
+    """Драйвер держит winws: удаление только пометит службу на удаление и сломает запуск до перезагрузки."""
+    from app import diag
+    monkeypatch.setattr(diag, "_procs", lambda: {"winws.exe"})
+    monkeypatch.setattr(diag, "_own_windivert", lambda: False)
+    monkeypatch.setattr(diag, "windivert_state",
+                        lambda: diag.WindivertState(True, False, "вручную", r"C:\x\WinDivert64.sys", True))
+    monkeypatch.setattr(diag, "_run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("sc must not run")))
+    retry, text = diag.repair_windivert()
+    assert not retry and "winws.exe" in text
+
+def test_diagnostics_show_broken_windivert_service(monkeypatch):
+    from app import diag
+    monkeypatch.setattr(diag, "_procs", lambda: set())
+    monkeypatch.setattr(diag, "_ps", lambda name: (0, "doh=1;auto=2;dns="))
+    monkeypatch.setattr(diag, "missing_files", lambda: [])
+    monkeypatch.setattr(diag, "flowseal_hosts", lambda: [])
+    monkeypatch.setattr(diag, "dns_poisoned", lambda: [])
+    monkeypatch.setattr(diag, "_discord_caches", lambda: [])
+    monkeypatch.setattr(diag, "_quic_disabled", lambda: True)
+    monkeypatch.setattr(diag, "_svc_status", lambda n: "Running" if n == "BFE" else None)
+    monkeypatch.setattr(diag, "windivert_state",
+                        lambda: diag.WindivertState(True, False, "отключена", r"C:\x\WinDivert64.sys", True))
+    rows = {r["label"]: r for r in diag.run_checks(fresh=True)}
+    assert rows["WinDivert"]["level"] == "err"
+    assert rows["WinDivert"]["fix"] == "windivert_repair"
+    assert "WinDivert" in diag.first_problem()
+
 def test_dns_poison_detection(monkeypatch):
     import socket
 
@@ -109,6 +208,7 @@ def test_smart_app_control_reported(monkeypatch):
     monkeypatch.setattr(diag, "_ps", lambda cmd: (0, "0"))            # no real PowerShell / services: fast
     monkeypatch.setattr(diag, "_run", lambda c, timeout=20: (0, ""))
     monkeypatch.setattr(diag, "_svc_status", lambda n: "Running" if n == "BFE" else None)
+    monkeypatch.setattr(diag, "windivert_state", lambda: diag.WindivertState(False, False, "", "", False))
     rows = {r["label"]: r for r in diag.run_checks()}
     assert rows["Smart App Control"]["level"] == "err"
     assert "Smart App Control" in diag.first_problem()            # also the cause shown when winws won't start
@@ -146,6 +246,7 @@ def test_diagnostics_cache_expires_after_fix(monkeypatch):
     monkeypatch.setattr(diag, "dns_poisoned", lambda: [])
     monkeypatch.setattr(diag, "_discord_caches", lambda: [])
     monkeypatch.setattr(diag, "_quic_disabled", lambda: True)
+    monkeypatch.setattr(diag, "windivert_state", lambda: diag.WindivertState(False, False, "", "", False))
     first = diag.run_checks()
     assert diag.run_checks() is first and len(calls) == 1
     diag.forget()  # после «Исправить» состояние надо проверить заново

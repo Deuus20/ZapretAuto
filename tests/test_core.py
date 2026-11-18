@@ -14,10 +14,43 @@ def test_winws_errors_explained(tmp_path, monkeypatch):
     assert "другой обход" in runner.explain("A copy of winws is already running with the same filter")
     assert "list-general.txt" in runner.explain("cannot access hostlist file 'C:/x/list-general.txt'")
     assert runner.explain("windivert initialized. capture is started.") is None
+    # 1058: служба драйвера осталась отключённой или помеченной на удаление (репорт из issue #17)
+    service = ("windivert: error opening filter: The service cannot be started, either because it is disabled or "
+               "because it has no enabled devices associated with it.")
+    assert "перезагруз" in runner.explain(service)
+    assert runner.windivert_service_error(service) and not runner.windivert_service_error("windivert initialized")
     monkeypatch.setattr(paths, "DATA", tmp_path)
     (tmp_path / "logs").mkdir()
     (tmp_path / "logs" / "winws.log").write_bytes(b"\n".join(b"line %d" % i for i in range(50)))
     assert runner.last_output(3) == "line 47\nline 48\nline 49"
+
+def test_report_shows_the_real_winws_command_line(monkeypatch):
+    """В отчёте нужна настоящая команда winws: шаблон стратегии не показывает игровые флаги."""
+    from app import logs, runner, tester
+    live = ["winws.exe", "--wf-udp=443,1024-65535"]
+    monkeypatch.setattr(runner, "running_argv", lambda: live)
+    assert logs.report_argv() == live
+    monkeypatch.setattr(runner, "running_argv", lambda: None)
+    class S:
+        name = "EXP"
+        def argv(self):
+            return ["winws.exe", "--wf-udp=443,12"]
+    monkeypatch.setattr(tester, "chosen_strategy", lambda: S())
+    assert logs.report_argv() == ["winws.exe", "--wf-udp=443,12"]
+
+def test_running_argv_reads_the_running_bypass(monkeypatch):
+    from app import runner
+    class P:
+        def __init__(self, name, cmd):
+            self.info = {"name": name}
+            self.cmd = cmd
+        def cmdline(self):
+            return self.cmd
+    monkeypatch.setattr(runner.psutil, "process_iter",
+                        lambda attrs: [P("chrome.exe", ["chrome"]), P("winws.exe", ["winws.exe", "--wf-udp=443"])])
+    assert runner.running_argv() == ["winws.exe", "--wf-udp=443"]
+    monkeypatch.setattr(runner.psutil, "process_iter", lambda attrs: [])
+    assert runner.running_argv() is None
 
 def test_quiet_detects_calls_not_idle_messengers(monkeypatch):
     from types import SimpleNamespace as NS

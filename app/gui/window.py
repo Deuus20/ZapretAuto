@@ -49,6 +49,7 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
         self._health_running = False
         self._last_tick = time.time()
         self._crashes: list[float] = []
+        self._wd_repaired_at = 0.0  # последняя автопочинка службы WinDivert
         self._repick_pending = False
         self._net = None
         self._new_net = False  # сеть сменилась: можно подбирать без паузы

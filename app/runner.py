@@ -3,6 +3,7 @@ import contextlib
 import ctypes
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -208,9 +209,26 @@ def last_output(lines: int = 20) -> str:
     except OSError:
         return ""
     return "\n".join(text.splitlines()[-lines:])
+def running_argv() -> list[str] | None:
+    """Командная строка запущенного winws, как её видит Windows: в отчёте нужна настоящая, с игровыми
+    флагами, а не шаблон стратегии (по шаблону не видно, включён ли обход игр)."""
+    for p in psutil.process_iter(["name"]):
+        if (p.info["name"] or "").lower() not in EXES:
+            continue
+        try:
+            cmd = p.cmdline()
+        except (psutil.Error, OSError):
+            continue
+        if cmd:
+            return list(cmd)
+    return None
+SERVICE_ERRORS = ("service cannot be started", "она отключена", "не имеет связанных")
+def windivert_service_error(output: str) -> bool:
+    """winws не смог открыть драйвер: служба WinDivert отключена или помечена на удаление (Windows, код 1058)."""
+    low = output.lower()
+    return any(s in low for s in SERVICE_ERRORS) or re.search(r"error opening filter:\s*1058\b", low) is not None
 def explain(output: str) -> str | None:
     """A human cause from winws' own words, or None."""
-    import re
     low = output.lower()
     if "already running with the same filter" in low:
         return "уже запущен другой обход zapret (служба или .bat), закройте его или «Диагностика» → «Исправить»"
@@ -219,6 +237,9 @@ def explain(output: str) -> str | None:
         why = m.group(1).strip()
         code = re.search(r"\b(\d{1,5})\b", why)
         c = int(code.group(1)) if code else None
+        if windivert_service_error(why) or c == 1058:
+            return ("служба драйвера WinDivert отключена или помечена на удаление, Windows не даёт её запустить; "
+                    "программа попробует починить службу сама, иначе поможет только перезагрузка")
         if c == 577 or "hash" in why.lower() or "signature" in why.lower():
             return ("Windows не загрузила драйвер WinDivert (подпись не принята). Чаще всего мешает антивирус или "
                     "«Изоляция ядра → Целостность памяти»")
@@ -226,7 +247,7 @@ def explain(output: str) -> str | None:
             return "нет прав администратора для драйвера WinDivert, запустите ZapretAuto от администратора"
         if c == 2 or "not find" in why.lower() or "не удается найти" in why.lower():
             return "нет файла драйвера WinDivert, скорее всего, его удалил антивирус; добавьте папку в исключения"
-        if c in (1058, 1275) or "blocked" in why.lower() or "заблокирован" in why.lower():
+        if c == 1275 or "blocked" in why.lower() or "заблокирован" in why.lower():
             return "драйвер WinDivert заблокирован системой или антивирусом"
         return f"драйвер WinDivert не запустился: {why[:120]}"
     m = re.search(r"cannot access (?:hostlist|ipset) file '([^']+)'", output)

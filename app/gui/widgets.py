@@ -29,6 +29,19 @@ def q(obj: T, **props: Any) -> T:
     return obj
 
 
+class TextLine(QLabel):
+    """Подпись, которая просит ровно свою ширину: соседний виджет встаёт за текстом, а не у края строки.
+
+    Обычный QLabel с wordWrap просит произвольно узкую ширину: строка статуса ломалась на три строки.
+    Длинный текст всё равно переносится: у QLabel остаётся heightForWidth."""
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        # самая длинная строка (текст может быть заранее разбит на строки) + 2: ровно по метрикам Qt
+        # считает перенос иначе и ломает строку пополам
+        widest = max((self.fontMetrics().horizontalAdvance(line) for line in self.text().splitlines()), default=0)
+        return QSize(widest + 2, hint.height())
+
+
 def _alpha(color: str, a: float) -> QColor:
     c = QColor(color)
     c.setAlphaF(a)

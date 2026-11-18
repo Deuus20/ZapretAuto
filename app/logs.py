@@ -97,6 +97,15 @@ def issue_url(what: str = "", diag_results: list | None = None) -> str:
         if len(url) <= ISSUE_URL_MAX or n == 0:
             return url
         n = max(0, n - 10)
+def report_argv() -> list[str] | None:
+    """Команда запуска winws для отчёта: у работающего обхода настоящая (с игровыми флагами), у
+    выключенного, шаблон выбранной стратегии."""
+    from . import runner, tester
+    live = runner.running_argv()
+    if live:
+        return live
+    s = tester.chosen_strategy()
+    return s.argv() if s else None
 def make_report(dest: Path, diag_results: list | None = None) -> Path:
     """Zip logs, diagnostics, settings and test results (user name redacted) for a bug report."""
     from . import __version__, strategies, tester, updater
@@ -111,9 +120,9 @@ def make_report(dest: Path, diag_results: list | None = None) -> Path:
         info = {"app": __version__, "zapret": updater.current_version(), "windows": platform.version(),
                 "time": time.strftime("%Y-%m-%d %H:%M:%S"), "vpn": tester.vpn_active(),
                 "egress": tester.egress_adapter()}
-        s = tester.chosen_strategy()
-        if s:
-            info["winws_argv"] = s.argv()
+        argv = report_argv()
+        if argv:
+            info["winws_argv"] = argv
         info["strategies"] = [x.name for x in strategies.load_all()]
         from . import stats
         info["stability"] = [d for d in stats.daily(14) if d["checks"] or d["crashes"] or d["repicks"]]

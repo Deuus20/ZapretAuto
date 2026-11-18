@@ -325,6 +325,50 @@ def test_gui_describe_names_the_strategy_mix(tmp_path, monkeypatch):
     finally:
         _close(app, w)
 
+def test_gui_one_question_mark_for_the_mix(tmp_path, monkeypatch):
+    """«?» стоит у комбинации в строке статуса и делает то же, что наведение: ни окна, ни второго «?»."""
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        from PySide6.QtWidgets import QToolTip
+        w.settings["strategy"] = {"base": "ALT8", "picks": {"tcp:443:list-google": "ALT11"}}
+        w.refresh()
+        full = "комбинация ALT8 + ALT11 (Google)"
+        assert w.describe_full() == full
+        assert not w.btn_desc_help.isHidden() and w.btn_desc_help.toolTip() == full
+        assert not hasattr(w, "btn_strategy_help")  # старый «?» из карточки убран
+        shown = []
+        monkeypatch.setattr(QToolTip, "showText", lambda *a, **k: shown.append(a[1]))
+        w.show_strategy_help()
+        assert shown == [full]  # по нажатию та же подсказка, а не окно
+        w.settings["strategy"] = {"base": "ALT8", "picks": {}}
+        w.refresh()
+        assert w.btn_desc_help.isHidden()  # у одиночной стратегии подсказке нечего добавить
+    finally:
+        _close(app, w)
+
+def test_gui_repairs_windivert_service_then_gives_the_reboot_advice(tmp_path, monkeypatch):
+    """winws не открыл драйвер (1058): программа чинит службу и повторяет запуск, второй раз за 10 минут не чинит."""
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        from app import diag
+        from app import runner as runner_mod
+        monkeypatch.setattr(runner_mod, "last_output",
+                            lambda lines=20: "windivert: error opening filter: The service cannot be started, "
+                                             "either because it is disabled")
+        calls = []
+        monkeypatch.setattr(diag, "repair_windivert",
+                            lambda: calls.append(1) or (True, "Служба WinDivert запущена."))
+        started = []
+        monkeypatch.setattr(w, "start_runner", lambda: started.append(1) or True)
+        monkeypatch.setattr(w.tray, "showMessage", lambda *a: None)
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        w._explain_failure()
+        assert calls and started and w.error == ""
+        w._explain_failure()  # сразу второй раз: починка не помогает, советуем перезагрузку
+        assert len(calls) == 1 and "ерезагруз" in w.error and not w._expect_running
+    finally:
+        _close(app, w)
+
 def test_gui_games_merged_and_empty_hidden(tmp_path, monkeypatch):
     """Одна игра = лаунчер и клиент: одна строка; игры без серверов не показываем, пинг без данных - «—»."""
     app, w = _gui(tmp_path, monkeypatch, game_watch=True)

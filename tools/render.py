@@ -109,6 +109,7 @@ w.on_diag_done([
      "fix": "dns_repair"},
     {"label": "Белые списки", "level": "ok", "detail": "фильтра по списку нет: заблокированные сайты открываются "
      "и без обхода"},
+    {"label": "WinDivert", "level": "ok", "detail": "драйвер работает"},
     {"label": "QUIC в браузерах", "level": "warn", "detail": "QUIC до YouTube не проходит, «Исправить» отключит QUIC",
      "fix": "disable_quic"},
     {"label": "Кэш Discord", "level": "ok", "detail": "если Discord висит на загрузке, «Исправить» очистит кэш",
