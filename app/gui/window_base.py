@@ -14,6 +14,7 @@ class WindowBase(QWidget):
     _app_updating: Any
     _auto_check: Any
     _auto_choice: Any
+    _auto_enable_game_filter: Any
     _build: Any
     _cancel: Any
     _cancellable: Any

@@ -628,10 +628,12 @@ class GameWatcher(threading.Thread):
             web = sorted(self._web_nets)
         save_settings(games=data, games_web=web)
     def _render_web(self) -> str:
-        """ipset-exclude-games.txt: what the ipset profiles must not touch. Login/web nets of games are off by
-        default (games_web_bypass=false turns them on): the «16 KB» whitelist block stalls those very servers
-        (Wardogs' Epic login on Cloudflare) unless they are desynced. Servers of a game the user put out of the
-        bypass (or of every game when capture is off) go here too, so the ipset-all ranges leave them alone."""
+        """ipset-exclude-games.txt: what the ipset profiles must not touch. Login/web nets of games are
+        desynced by default (games_web_bypass): without it the «16 KB» block stalls the very servers that
+        Wardogs' Epic login uses. ``games_web_bypass=false`` keeps them out of the bypass for the networks where
+        the desync only breaks the game's own images (issue #17, Le Mans Ultimate). Servers of a game the user
+        put out of the bypass (or of every game when capture is off) go here too, so the ipset-all ranges leave
+        them alone."""
         with self._lock:
             nets = [] if load_settings().get("games_web_bypass", True) else list(self._web_nets)
             extra: set[str] = set()
@@ -688,6 +690,10 @@ class GameWatcher(threading.Thread):
         except Exception as e:
             self.log(f"gamewatch: on_change error: {e}")
         self._schedule_rollback()
+    def refresh_lists(self) -> None:
+        """Пересчитать списки сразу, не дожидаясь тика: настройка «Обход сайтов игр» меняет
+        ipset-exclude-games.txt, а winws перечитывает его сам."""
+        self._flush()
     def _resolve_known(self) -> None:
         nets = set()
         for host in KNOWN_WEB_HOSTS:

@@ -701,11 +701,15 @@ class ActionsMixin(WindowBase):
         elif key == "game_capture":
             if self.watcher:
                 self.watcher.set_capture(v)
+            if v:
+                self._auto_enable_game_filter()  # a found game switches the game filter on once
             if self.runner.running and not self.busy:
                 self.start_runner()  # the game ports leave/enter the capture filter only on restart
             self.fill_games()
         elif key in ("game_tcp", "game_udp", "auto_hostlist") and self.runner.running and not self.busy:
             self.start_runner()
+        elif key == "games_web_bypass" and self.watcher:
+            self.watcher.refresh_lists()  # ipset-exclude-games.txt: winws re-reads it live
 
     def _zapret2_on(self) -> bool:
         """zapret2 mode is what runs (or would run): enabled and its files are in place."""

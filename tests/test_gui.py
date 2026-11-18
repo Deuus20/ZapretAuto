@@ -703,6 +703,40 @@ def test_gui_game_exclusion_checkbox(tmp_path, monkeypatch):
     finally:
         _close(app, w)
 
+def test_gui_switched_off_game_filter_stays_off(tmp_path, monkeypatch):
+    """Явно выключенный обход UDP для игр не включается обратно, когда игра найдена (issue #17)."""
+    app, w = _gui(tmp_path, monkeypatch, game_watch=True)
+    try:
+        monkeypatch.setattr(w.tray, "showMessage", lambda *a: None)
+        w.save(game_capture=True, game_tcp=True, game_udp=False)
+        class _W:
+            def games(self):
+                return {"game.exe": {"path": "x", "ips": {"9.9.9.9"}, "active": True, "ping_ms": 50.0}}
+        w.watcher = _W()
+        assert w._game_flags() == (True, False)
+        w.on_games_changed()
+        assert w._game_flags() == (True, False)  # человек выключил, обратно не включаем
+        w.save(game_tcp=False, game_udp=False)
+        assert w._game_flags() == (False, False)
+    finally:
+        _close(app, w)
+
+def test_gui_found_game_turns_the_filter_on_at_start(tmp_path, monkeypatch):
+    """Игра уже идёт, галочки не трогали: игровой фильтр включается сразу, иначе вход в игру висит (2.5.1)."""
+    app, w = _gui(tmp_path, monkeypatch, game_watch=True)
+    try:
+        monkeypatch.setattr(w.tray, "showMessage", lambda *a: None)
+        class _W:
+            def games(self):
+                return {"game.exe": {"path": "x", "ips": {"9.9.9.9"}, "active": True, "ping_ms": None}}
+        w.watcher = _W()
+        assert "game_tcp" not in w.settings and "game_udp" not in w.settings
+        assert w._game_flags() == (True, True)
+        w.on_games_changed()  # запомнили: дальше решают галочки
+        assert w.settings.get("game_udp") is True and w._game_flags() == (True, True)
+    finally:
+        _close(app, w)
+
 def test_gui_game_capture_off_disables_the_game_filter(tmp_path, monkeypatch):
     """Global switch off: no game ports in the filter, every game shown as «вне обхода», boxes disabled."""
     app, w = _gui(tmp_path, monkeypatch, game_capture=False, game_watch=True)

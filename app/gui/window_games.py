@@ -31,8 +31,28 @@ class GamesMixin(WindowBase):
     def _game_flags(self) -> tuple[bool, bool]:
         if not self.settings.get("game_capture", True):
             return (False, False)  # games are left alone: no game ports in the capture filter
+        # пока человек не трогал галочки, найденная игра включает фильтр сразу (как до 2.5.1); явное
+        # «выключено» остаётся выключенным (issue #17)
         wanted = self._game_udp_wanted()
-        return (self.settings.get("game_tcp", False) or wanted, self.settings.get("game_udp", False) or wanted)
+        tcp = self.settings["game_tcp"] if "game_tcp" in self.settings else wanted
+        udp = self.settings["game_udp"] if "game_udp" in self.settings else wanted
+        return bool(tcp), bool(udp)
+
+    def _auto_enable_game_filter(self):
+        """Первая найденная игра сама включает игровой фильтр и запоминает это: выключенное человеком
+        остаётся выключенным, а не включается обратно на каждом запуске игры."""
+        if not self.settings.get("game_capture", True) or not self._game_udp_wanted():
+            return
+        keys = [k for k in ("game_tcp", "game_udp") if k not in self.settings]
+        if not keys:
+            return
+        self.save(**{k: True for k in keys})
+        for k in keys:
+            cb = self.cb.get(k)
+            if cb is not None:
+                cb.blockSignals(True)
+                cb.setChecked(True)
+                cb.blockSignals(False)
 
     def _apply_game_flags(self):
         """Restart winws to switch the game filter on, but not while a game is logging in."""
@@ -48,6 +68,7 @@ class GamesMixin(WindowBase):
         self.start_runner()
 
     def on_games_changed(self):
+        self._auto_enable_game_filter()
         self.fill_games()
         if self.runner.running and not self.busy:
             # winws re-reads the changed ipset-games.txt by itself; restart only when the game filter ports

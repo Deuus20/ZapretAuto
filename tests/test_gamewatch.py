@@ -86,8 +86,9 @@ def test_gamewatch_ignores_web_ports_and_grace(tmp_path, monkeypatch):
         assert w._web_nets == {"9.9.9.0/24"} | gamewatch.KNOWN_WEB_NETS  # its /24 is kept out of ipset-all profiles
         w._flush()
         excl = tmp_path / "lists" / "ipset-exclude-games.txt"
-        assert excl.read_text().split() == [paths.USER_LISTS["ipset-exclude-games.txt"].strip()]  # off by default
-        settings.save_settings(games_web_bypass=False)
+        # по умолчанию сайты игр тоже десинхронизируются: без этого вход в Wardogs зависал на блокировке
+        assert excl.read_text().split() == [paths.USER_LISTS["ipset-exclude-games.txt"].strip()]
+        settings.save_settings(games_web_bypass=False)  # не трогать сайты игр: так чинят картинки (issue #17)
         w._pending_since, w._last_web = None, None
         w._flush()
         assert "9.9.9.0/24" in excl.read_text().split()
