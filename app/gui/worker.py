@@ -40,4 +40,3 @@ class Bridge(QObject):
     games_changed = Signal()
     update_checked = Signal(object, bool)
     app_checked = Signal(object, bool)
-    diag_done = Signal(object)

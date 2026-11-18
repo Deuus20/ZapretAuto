@@ -210,9 +210,10 @@ def run_checks(fresh: bool = False) -> list[dict]:
         else:
             n = max(n, 0)
     if n < 0:
-        res.append(_item("Secure DNS (DoH)", "warn", "не удалось определить"))
+        res.append(_item("Secure DNS (DoH)", "warn", "не удалось определить", "dns_repair"))
     elif n == 0:
-        res.append(_item("Secure DNS (DoH)", "warn", "не включён, провайдер может подменять DNS"))
+        res.append(_item("Secure DNS (DoH)", "warn", "не включён, провайдер может подменять DNS. "
+                         "«Исправить» включит DoH в браузерах и поставит рабочий DNS", "dns_repair"))
     else:
         res.append(_item("Secure DNS (DoH)", "ok", "включён"))
     bad = dns_poisoned()

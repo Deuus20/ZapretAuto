@@ -19,7 +19,6 @@ class WindowBase(QWidget):
     _cancellable: Any
     _crashes: Any
     _deferred_since: Any
-    _diag_w: Any
     _expect_running: Any
     _game_flags: Any
     _game_running: Any
@@ -57,7 +56,6 @@ class WindowBase(QWidget):
     _upd: Any
     _update_deferred: Any
     _vpn_was: Any
-    _wl_running: Any
     _workers: Any
     _zapret2_on: Any
     act_toggle: Any
@@ -86,7 +84,6 @@ class WindowBase(QWidget):
     btn_site: Any
     btn_toggle: Any
     btn_update: Any
-    btn_white: Any
     busy: Any
     busy_text: Any
     cancel_busy: Any
@@ -94,7 +91,6 @@ class WindowBase(QWidget):
     check_access: Any
     check_site: Any
     check_update: Any
-    check_whitelist: Any
     chips: Any
     combo: Any
     describe: Any
@@ -130,6 +126,7 @@ class WindowBase(QWidget):
     logbox: Any
     menu_games: Any
     menu_strat: Any
+    notify: Any
     on_app_checked: Any
     on_check: Any
     on_combo: Any

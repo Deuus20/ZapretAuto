@@ -61,7 +61,7 @@ class GamesMixin(WindowBase):
                 self.save(games_notified=sorted(known | set(new)))
                 names = ", ".join(n.rsplit(".", 1)[0] for n in new)
                 msg = f"Найдена игра: {names}. Обход для её серверов включён."
-                self.tray.showMessage("ZapretAuto", msg)
+                self.notify(msg)
             else:
                 if time.time() - getattr(self, "_games_logged", 0) < 60:
                     return  # the list is written within a second of each new server: one line a minute is enough

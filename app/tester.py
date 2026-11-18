@@ -396,11 +396,15 @@ def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False, ign
     if not ignore_dns:  # на подменённом DNS проверки врут: подбор выбрал бы случайную стратегию
         try:
             from .diag import dns_poisoned
-            forged = dns_poisoned() or []
+            verdict = dns_poisoned()
         except Exception:  # noqa: BLE001 (диагностика не должна ломать подбор)
-            forged = []
+            verdict = None
+        if verdict is None:
+            log("DNS: проверить подмену не удалось (DoH недоступен), подбор может быть неточным")
+        elif not verdict:
+            log("DNS: подмены нет, подбор идёт с текущими настройками")
         # только то, что подбор и проверяет: подмена rutracker.org стратегию не портит
-        bad = [d for d in forged if d in ("discord.com", "www.youtube.com", "youtube.com")]
+        bad = [d for d in (verdict or []) if d in ("discord.com", "www.youtube.com", "youtube.com")]
         if bad:
             _blocked = "dns"
             log("Подбор отменён: провайдер подменяет DNS (" + ", ".join(bad) + "). Сначала почините DNS, иначе "

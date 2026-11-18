@@ -67,7 +67,7 @@ class UpdatesMixin(WindowBase):
             def done(ok):
                 self._app_updating = False
                 if ok is True:  # installer replaces files and restarts the app
-                    self.tray.showMessage("ZapretAuto", f"Устанавливаю версию {tag}, программа перезапустится…")
+                    self.notify(f"Устанавливаю версию {tag}, программа перезапустится…")
                     QTimer.singleShot(1500, self.quit)
                 else:
                     self.log("самообновление не выполнено")

@@ -4,7 +4,7 @@ import time
 import pytest
 from helpers import _close, _gui
 
-from app import dns, gamewatch, lists, paths, settings, sharedb, tester, updater, whitelist, zapret2
+from app import diag, dns, gamewatch, lists, paths, settings, sharedb, tester, updater, whitelist, zapret2
 
 
 def test_gui_smoke(tmp_path, monkeypatch):
@@ -239,7 +239,7 @@ def test_gui_zapret_update_keeps_working_strategy(tmp_path, monkeypatch):
         picks, res = [], {"Discord": True, "YouTube": True}
         monkeypatch.setattr(w, "start_runner", lambda: True)
         monkeypatch.setattr(w, "autopick", lambda *a: picks.append(1))
-        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
         monkeypatch.setattr(tester, "quick_check", lambda light=False: dict(res))
         w._update_done(True, True, True)
         assert not picks and not w.busy                 # still works: no 2-4 min re-pick
@@ -287,25 +287,23 @@ def test_gui_zapret2_toggle(tmp_path, monkeypatch):
     finally:
         _close(app, w)
 
-def test_gui_whitelist_check(tmp_path, monkeypatch):
-    """Кнопка «Проверить белые списки»: обход на время проверки выключается и возвращается."""
-    from PySide6.QtWidgets import QMessageBox
+def test_gui_diag_finds_whitelist(tmp_path, monkeypatch):
+    """Белые списки диагностика находит сама: отдельной кнопки больше нет."""
     app, w = _gui(tmp_path, monkeypatch)
     try:
-        shown = []
-        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a[2])))
-        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
-        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
+        monkeypatch.setattr(diag, "run_checks", lambda: [{"label": "Служба zapret", "level": "ok",
+                                                          "detail": "работает", "fix": None}])
         monkeypatch.setattr(whitelist, "check", lambda: {"verdict": "whitelist"})
-        monkeypatch.setattr(tester, "vpn_active", lambda: None)
-        state = {"on": True}
+        state = {"on": False}
         monkeypatch.setattr(type(w.runner), "running", property(lambda self: state["on"]))
         monkeypatch.setattr(w.runner, "stop", lambda: state.update(on=False))
         monkeypatch.setattr(w, "start_runner", lambda: state.update(on=True))
-        w.check_whitelist()
-        assert shown and "белые списки" in shown[0] and state["on"] is True
-        assert settings.load_settings().get("white_checked")
-        assert w.btn_white.isEnabled() and w.btn_white.text() == "Проверить белые списки"
+        w.run_diag()
+        labels = [r["label"] for r in w._last_diag]
+        assert "Белые списки" in labels
+        row = next(r for r in w._last_diag if r["label"] == "Белые списки")
+        assert row["level"] == "err" and "белые списки" in row["detail"].lower()
     finally:
         _close(app, w)
 
@@ -335,7 +333,7 @@ def test_gui_dns_card(tmp_path, monkeypatch):
         shown, warned = [], []
         monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
         monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: warned.append(a[2])))
-        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
         monkeypatch.setattr(dns, "best", lambda log=print: {"name": "Cloudflare", "status": "ok",
                                                             "ips": ("1.1.1.1", "1.0.0.1")})
         monkeypatch.setattr(dns, "apply", lambda ips: (True, ", ".join(ips) + " на адаптере Ethernet"))
@@ -361,7 +359,7 @@ def test_gui_no_pick_says_whitelist(tmp_path, monkeypatch):
         shown, started = [], []
         monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a[2])))
         monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(lambda m: None)))
         monkeypatch.setattr(whitelist, "check", lambda: {"verdict": "whitelist"})
         monkeypatch.setattr(tester, "vpn_active", lambda: None)
         monkeypatch.setattr(w, "start_runner", lambda: started.append(1) or True)

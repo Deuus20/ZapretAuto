@@ -37,7 +37,6 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
         self.bridge.games_changed.connect(self.on_games_changed)
         self.bridge.update_checked.connect(self.on_update_checked)
         self.bridge.app_checked.connect(self.on_app_checked)
-        self.bridge.diag_done.connect(self.on_diag_done)
         self.settings = tester.load_settings()
         self._build()
         self._tray()
@@ -79,6 +78,9 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
          "Программа сама перезапустит его, чтобы он заработал через обход.", True, "main"),
         ("autostart", "Запускать вместе с Windows",
          "ZapretAuto тихо стартует в трее при входе в Windows.", False, "main"),
+        ("notifications", "Уведомления",
+         "Всплывающие сообщения в трее: проверки, починка обхода, ошибки. Если выключить, всё останется только "
+         "в журнале.", True, "main"),
         ("auto_hostlist", "Находить заблокированные сайты",
          "Обход сам замечает сайты, которые не открываются из-за DPI, и включает для них обход. "
          "Найденное, в разделе «Списки» → list-auto.txt.", True, "adv"),
@@ -157,7 +159,7 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
         self.hide()
         if not self._hint_shown:
             self._hint_shown = True
-            self.tray.showMessage("ZapretAuto", "Программа свёрнута в трей и продолжает работать. "
+            self.notify("Программа свёрнута в трей и продолжает работать. "
                                   "Выход, правый клик по значку → «Выход».")
     def save(self, **kw):
         tester.save_settings(**kw)

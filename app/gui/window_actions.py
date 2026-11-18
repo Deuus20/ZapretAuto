@@ -43,14 +43,31 @@ if TYPE_CHECKING:
     pass
 
 class ActionsMixin(WindowBase):
+    def notify(self, text: str):
+        """Уведомление в трее; отключается галочкой «Уведомления»."""
+        if self.settings.get("notifications", True):
+            self.tray.showMessage("ZapretAuto", text)
+
     def run_diag(self):
+        """Проверки плюс белые списки: их видно только без обхода, поэтому на время проверки он выключается."""
+        if self.busy:
+            return
         self.btn_diag.setEnabled(False)
         self.btn_diag.setText("Проверка...")
-        self._diag_w = Worker(lambda log: diag.run_checks())
-        self._workers.append(self._diag_w)
-        self._diag_w.finished.connect(lambda w=self._diag_w: self._reap(w))
-        self._diag_w.done.connect(self.bridge.diag_done.emit)
-        self._diag_w.start()
+        was = self.runner.running
+        if was:
+            self._expect_running = False
+            self.runner.stop()
+        def work(log):
+            rows = diag.run_checks()
+            log("проверяю белые списки…")
+            return rows + [whitelist.diag_item(whitelist.check())], was
+        def done(res):
+            rows, restart = res or ([], False)
+            if restart:
+                self.start_runner()
+            self.on_diag_done(rows)
+        self._run(work, done)
 
     def on_diag_done(self, res):
         self.btn_diag.setEnabled(True)
@@ -185,7 +202,7 @@ class ActionsMixin(WindowBase):
         stats.record("stop")
         self._resume_at = time.time() + minutes * 60
         self.log(f"обход выключен на {minutes} мин")
-        self.tray.showMessage("ZapretAuto", f"Обход выключен на {minutes} минут, потом включится сам.")
+        self.notify(f"Обход выключен на {minutes} минут, потом включится сам.")
         self.refresh()
 
     def cancel_busy(self):
@@ -255,7 +272,7 @@ class ActionsMixin(WindowBase):
                 if self._game_running():
                     if not self._repick_pending:
                         self._repick_pending = True
-                        self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. "
+                        self.notify(f"Перестало работать: {bad}. "
                                               "Починю после игры, чтобы не прерывать матч.")
                     return
                 if (time.time() - self.settings.get("last_auto_repick", 0) < 6 * 3600
@@ -265,7 +282,7 @@ class ActionsMixin(WindowBase):
                 self.save(last_auto_repick=time.time())
                 self._new_net = False
                 stats.record("repick", reason=bad)
-                self.tray.showMessage("ZapretAuto", f"Перестало работать: {bad}. Подбираю стратегию заново…")
+                self.notify(f"Перестало работать: {bad}. Подбираю стратегию заново…")
                 self._repair = True
                 self.autopick()
         self._run(lambda log: tester.quick_check(light=True, speed=speed), done)  # no 1 MB test every 10 min
@@ -300,7 +317,7 @@ class ActionsMixin(WindowBase):
         self.cb["zapret2"].setChecked(False)
         self.cb["zapret2"].blockSignals(False)
         self.log(f"zapret2 не справился ({bad}), возвращаюсь к обычному обходу")
-        self.tray.showMessage("ZapretAuto", "zapret2 не справился, вернул обычный обход.")
+        self.notify("zapret2 не справился, вернул обычный обход.")
         self.start_runner()
         self.refresh()
 
@@ -377,7 +394,7 @@ class ActionsMixin(WindowBase):
             self._resume_at = 0
             if not self.runner.running and not self.busy:
                 self.start_runner()
-                self.tray.showMessage("ZapretAuto", "Обход снова включён.")
+                self.notify("Обход снова включён.")
         if (updater and self.settings.get("auto_update", True) and not self.busy
                 and now >= getattr(self, "_next_update_check", now + 1) and not self._game_running()
                 and not self._update_deferred(now)):
@@ -415,7 +432,7 @@ class ActionsMixin(WindowBase):
                 self._expect_running = False
                 self.error = "Обход постоянно падает. Проверьте антивирус и раздел «Диагностика»."
                 self.log("winws падает слишком часто, автоперезапуск остановлен")
-                self.tray.showMessage("ZapretAuto", self.error)
+                self.notify(self.error)
                 self._explain_failure()
         if self._repick_pending and not self.busy and not self._game_running():
             self._repick_pending = False
@@ -484,41 +501,8 @@ class ActionsMixin(WindowBase):
             self.substatus.setText("Всё работает" if all(res.values()) else
                                    "Если что-то ✗, нажмите «Подобрать лучшую стратегию»")
             if notify:  # asked from the tray menu: answer there too
-                self.tray.showMessage("ZapretAuto", txt)
+                self.notify(txt)
         self._run(lambda log: tester.quick_check(), done)
-
-    def check_whitelist(self):
-        """Диагностика: не пропускает ли провайдер только разрешённые сайты. На время проверки обход выключается."""
-        if self.busy or getattr(self, "_wl_running", False):
-            return
-        if tester.vpn_active():
-            QMessageBox.information(self, "Проверка", "Включён VPN: он сам решает, что открывается. "
-                                    "Выключите VPN и повторите проверку.")
-            return
-        self._wl_running = True
-        was = self.runner.running
-        if was:
-            self.runner.stop()
-        self.btn_white.setEnabled(False)
-        self.btn_white.setText("Проверяю...")
-        def done(rep):
-            self._wl_running = False
-            self.btn_white.setEnabled(True)
-            self.btn_white.setText("Проверить белые списки")
-            self.save(white_checked=time.time())
-            v = (rep or {}).get("verdict")
-            self.log(f"проверка белых списков: {v}")
-            if was:
-                self.start_runner()
-            if v == "whitelist":
-                QMessageBox.warning(self, "Белые списки", whitelist.TEXT)
-            elif v == "ok":
-                QMessageBox.information(self, "Проверка", "Фильтра по белому списку не видно: заблокированные сайты "
-                                        "открываются и без обхода. Значит, дело в стратегии или в самом сайте.")
-            else:
-                QMessageBox.information(self, "Проверка", "Ничего не открылось без обхода: похоже на выключенный "
-                                        "кабель или VPN. Проверку понять нельзя.")
-        self._run(lambda log: whitelist.check(), done)
 
     def _dns_servers(self, mode: str) -> list[str]:
         """Адреса для режима карточки DNS; пустой список значит «нечего ставить»."""
@@ -847,7 +831,7 @@ class ActionsMixin(WindowBase):
             if self.isVisible():
                 self._dns_blocked_help()
             else:  # never pop a dialog from an automatic repair behind the user's back
-                self.tray.showMessage("ZapretAuto", "Подбор отменён: провайдер подменяет DNS. "
+                self.notify("Подбор отменён: провайдер подменяет DNS. "
                                                     "Почините DNS в «Дополнительно», иначе стратегия случайна.")
             self.refresh()
             return
@@ -855,7 +839,7 @@ class ActionsMixin(WindowBase):
             self.error = "Подбор не удался, подробности в разделе «Журнал»."
         if getattr(self, "_repair", False):  # this pick was an automatic repair: tell how it ended
             self._repair = False
-            self.tray.showMessage("ZapretAuto", f"Обход починен: {self.describe()}" if res else
+            self.notify(f"Обход починен: {self.describe()}" if res else
                                   "Починить автоматически не удалось, откройте окно программы")
         if res:
             self.start_runner()
@@ -880,7 +864,7 @@ class ActionsMixin(WindowBase):
             self.save(white_checked=time.time())
             if (rep or {}).get("verdict") == "whitelist":
                 self.log(whitelist.TEXT)
-                self.tray.showMessage("ZapretAuto", whitelist.TEXT)
+                self.notify(whitelist.TEXT)
                 if self.isVisible():
                     QMessageBox.warning(self, "Белые списки", whitelist.TEXT)
                 if self.settings.get("strategy"):
@@ -910,7 +894,7 @@ class ActionsMixin(WindowBase):
             if cause:
                 self.error = "Обход не работает. " + cause
                 self.log("причина: " + cause)
-                self.tray.showMessage("ZapretAuto", self.error)
+                self.notify(self.error)
                 self.refresh()
         from app import runner as runner_mod
         out = runner_mod.last_output()

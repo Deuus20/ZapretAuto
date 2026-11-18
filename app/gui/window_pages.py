@@ -459,11 +459,6 @@ class PagesMixin(WindowBase):
                                  "проблемы и конец журнала. Имя пользователя и IP-адреса скрыты. Нужен аккаунт GitHub.")
         self.btn_send.clicked.connect(lambda: self.send_report())
         drow.addWidget(self.btn_send)
-        self.btn_white = q(QPushButton("Проверить белые списки"), objectName="tonal")
-        self.btn_white.setToolTip("Проверить, не пропускает ли провайдер только разрешённые сайты. Обход на "
-                                  "10-20 секунд выключается: без него видно, что блокирует провайдер, а что нет.")
-        self.btn_white.clicked.connect(self.check_whitelist)
-        drow.addWidget(self.btn_white)
         drow.addStretch()
         lay.addLayout(drow)
         self.diag_table = QTableWidget(0, 3)
@@ -806,4 +801,4 @@ class PagesMixin(WindowBase):
             if bad:
                 line += ". Не открывается: " + ", ".join(bad)
         self.log(line)
-        self.tray.showMessage("ZapretAuto", line)
+        self.notify(line)

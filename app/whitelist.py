@@ -25,6 +25,21 @@ def verdict(allowed_ok: int, allowed_total: int, blocked_ok: int) -> str:
     return "whitelist" if allowed_ok * 2 >= allowed_total else "unknown"
 
 
+def diag_item(rep: dict) -> dict:
+    """Строка для «Диагностики»: белые списки находятся сами, без отдельной кнопки."""
+    v = (rep or {}).get("verdict")
+    if v == "whitelist":
+        return {"label": "Белые списки", "level": "err", "detail": TEXT, "fix": None}
+    if v == "ok":
+        return {"label": "Белые списки", "level": "ok", "fix": None,
+                "detail": "фильтра по списку нет: заблокированные сайты открываются и без обхода"}
+    if v == "offline":
+        return {"label": "Белые списки", "level": "warn", "fix": None,
+                "detail": "проверить нельзя: без обхода не открывается ничего (кабель выключен или VPN)"}
+    return {"label": "Белые списки", "level": "warn", "fix": None,
+            "detail": "не удалось понять: часть сайтов не ответила, проверьте ещё раз"}
+
+
 def check() -> dict:
     """Опросить обе группы как есть: вызывать при остановленном обходе и без VPN."""
     tester.BIND = None  # прямой путь: с адресом VPN проверка показала бы его, а не провайдера
