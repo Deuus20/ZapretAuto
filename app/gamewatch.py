@@ -273,6 +273,7 @@ class GameWatcher(threading.Thread):
             ips = {ip for ip in ips if not valve_sdr(ip) and not cdn(ip)}  # SDR: whole nets; CDN: never
             seen = g.get("seen") or {}
             self._games[exe] = {"path": g.get("path", ""), "ips": ips, "sdr": sdr, "active": False, "ping_ms": None,
+                                "manual": bool(g.get("manual")),
                                 "seen": {ip: float(seen.get(ip, now)) for ip in ips}}  # older lists: from now
         self._expire(now)
         self._last_expire = self._last_seen_save = now
@@ -295,6 +296,7 @@ class GameWatcher(threading.Thread):
         with self._lock:
             return {k: {"path": v["path"], "ips": set(v["ips"]), "active": v["active"],
                         "ping_ms": v["ping_ms"], "started": v.get("started", 0),
+                        "manual": bool(v.get("manual")),
                         "excluded": k in self._excluded or not self._capture}
                     for k, v in self._games.items()}
     def web_nets(self) -> list[str]:
@@ -309,6 +311,7 @@ class GameWatcher(threading.Thread):
         with self._lock:
             g = self._games.setdefault(exe, {"path": path, "ips": set(), "active": False, "ping_ms": None})
             g["path"] = path
+            g["manual"] = True  # добавлена вручную: показывать, даже пока серверов нет
         self._persist_settings()
         return exe
     def set_capture(self, on: bool) -> None:
@@ -620,7 +623,8 @@ class GameWatcher(threading.Thread):
         with self._lock:
             data = {k: {"path": v["path"], "ips": sorted(v["ips"]),
                         "seen": {ip: int(v.get("seen", {}).get(ip, 0)) for ip in v["ips"]},
-                        **({"sdr": True} if v.get("sdr") else {})} for k, v in self._games.items()}
+                        **({"sdr": True} if v.get("sdr") else {}),
+                        **({"manual": True} if v.get("manual") else {})} for k, v in self._games.items()}
             web = sorted(self._web_nets)
         save_settings(games=data, games_web=web)
     def _render_web(self) -> str:

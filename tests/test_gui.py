@@ -325,6 +325,43 @@ def test_gui_describe_names_the_strategy_mix(tmp_path, monkeypatch):
     finally:
         _close(app, w)
 
+def test_gui_games_merged_and_empty_hidden(tmp_path, monkeypatch):
+    """Одна игра = лаунчер и клиент: одна строка; игры без серверов не показываем, пинг без данных - «—»."""
+    app, w = _gui(tmp_path, monkeypatch, game_watch=True)
+    try:
+        base = r"D:\Steam\steamapps\common\Wardogs"
+        class _W:
+            def games(self):
+                return {
+                    base + r"\launcher.exe": {"path": base + r"\launcher.exe", "ips": set(), "active": False,
+                                              "ping_ms": None},
+                    base + r"\client-win64-shipping.exe": {"path": base + r"\client-win64-shipping.exe",
+                                                           "ips": {"9.9.9.9", "8.8.8.8"}, "active": True,
+                                                           "ping_ms": None},
+                    r"D:\Games\other.exe": {"path": r"D:\Games\other.exe", "ips": set(), "active": False,
+                                            "ping_ms": None},
+                }
+        w.watcher = _W()
+        w.fill_games()
+        assert w.table.rowCount() == 1
+        assert w.table.item(0, 0).text() == "Wardogs" and w.table.item(0, 1).text() == "2"
+        assert w.table.item(0, 2).text() == "—" and w.table.item(0, 3).text() == "играете"
+    finally:
+        _close(app, w)
+
+def test_gui_notifications_can_be_disabled(tmp_path, monkeypatch):
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        calls = []
+        monkeypatch.setattr(w.tray, "showMessage", lambda *a: calls.append(a))
+        w.notify("тест")
+        assert calls
+        w.save(notifications=False)
+        w.notify("ещё одно")
+        assert len(calls) == 1  # выключены: только журнал
+    finally:
+        _close(app, w)
+
 def test_gui_dns_card(tmp_path, monkeypatch):
     """Карточка DNS: авто-подбор, свой адрес, проверка ввода. netsh и сеть подменены."""
     from PySide6.QtWidgets import QMessageBox
@@ -400,9 +437,6 @@ def test_gui_known_games_show_after_restart(tmp_path, monkeypatch):
         w.start_watcher()
         from PySide6.QtCore import Qt
         assert w.table.rowCount() == 1 and w.table.item(0, 0).data(Qt.UserRole) == "deadlock.exe" and "Deadlock" in w.lbl_games.text() and not w.table.isHidden()
-        assert not w.btn_reset.isEnabled()                   # nothing selected yet
-        w.table.selectRow(0)
-        assert w.btn_reset.isEnabled() and w.btn_ignore.isEnabled()
     finally:
         w.stop_watcher()
         _close(app, w)

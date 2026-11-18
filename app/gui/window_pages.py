@@ -1,5 +1,6 @@
 """Страницы окна: главная, игры, списки, диагностика, журнал, настройки."""
 import html
+import os
 import re
 import time
 from typing import TYPE_CHECKING
@@ -13,16 +14,19 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from app import paths
 from app.gui.shared import (
     AUTO,
     COLORS,
@@ -63,8 +67,8 @@ GROUP_NAMES = {
 
 # Режимы DNS: «provider» и «auto» - особые, остальные совпадают с именами в app.dns.RESOLVERS
 DNS_MODES = (
-    ("От провайдера (как сейчас)", "provider"),
-    ("Авто (подобрать лучший)", "auto"),
+    ("От провайдера", "provider"),
+    ("Авто (лучший)", "auto"),
     ("Cloudflare", "Cloudflare"),
     ("Google", "Google"),
     ("Quad9", "Quad9"),
@@ -212,10 +216,23 @@ class PagesMixin(WindowBase):
         grid = QHBoxLayout()
         grid.setSpacing(10)
         card = q(QFrame(), objectName="card")
+        card.setMinimumHeight(170)
         cl = QVBoxLayout(card)
         cl.setContentsMargins(14, 12, 14, 14)
         cl.setSpacing(8)
-        cl.addWidget(q(QLabel("Стратегия"), objectName="h2"))
+        hrow = QHBoxLayout()
+        hrow.setSpacing(6)
+        hrow.addWidget(q(QLabel("Стратегия"), objectName="h2"))
+        self.btn_strategy_help = QToolButton()
+        self.btn_strategy_help.setText("?")
+        self.btn_strategy_help.setAutoRaise(True)
+        self.btn_strategy_help.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_strategy_help.setFixedSize(20, 20)
+        self.btn_strategy_help.setToolTip("Показать, из каких стратегий собрана комбинация")
+        self.btn_strategy_help.clicked.connect(self.show_strategy_help)
+        hrow.addWidget(self.btn_strategy_help)
+        hrow.addStretch()
+        cl.addLayout(hrow)
         self.combo = QComboBox()
         self.combo.setToolTip("«Авто», результат подбора. Можно выбрать стратегию вручную.")
         self.combo.addItem(AUTO)
@@ -238,6 +255,7 @@ class PagesMixin(WindowBase):
         cl.addStretch()
         grid.addWidget(card, 1)
         games = q(QFrame(), objectName="card")
+        games.setMinimumHeight(170)
         gl = QVBoxLayout(games)
         gl.setContentsMargins(14, 12, 14, 14)
         gl.setSpacing(6)
@@ -272,17 +290,24 @@ class PagesMixin(WindowBase):
                                   "обход. Серверы входа и лаунчеров обход не трогает. Галочка «Обход», для серверов "
                                   "этой игры; снятая галочка оставляет игру в списке, но вне обхода.")
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Игра", "Адресов", "Пинг, мс", "Сейчас", "Обход"])
+        self.table.setHorizontalHeaderLabels(["Игра", "Серверов", "Пинг", "Статус", "Обход"])
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for i in (1, 2, 3, 4):
-            hh.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        hh.resizeSection(2, 80)
+        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        hh.resizeSection(3, 110)
+        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        hh.resizeSection(4, 64)
         hh.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setShowGrid(False)
         self.table.verticalHeader().hide()
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_games_menu)
         self.games_empty = q(QLabel(), objectName="empty", alignment=Qt.AlignmentFlag.AlignCenter, wordWrap=True)
         lay.addWidget(self.games_empty, 1)
         lay.addWidget(self.table, 1)
@@ -291,23 +316,12 @@ class PagesMixin(WindowBase):
         b2 = q(QPushButton("Добавить игру…"), objectName="tonal")
         b2.setToolTip("Выбрать exe игры вручную, если она не нашлась сама")
         b2.clicked.connect(self.add_game)
-        b1 = self.btn_ignore = QPushButton("Не игра")
-        b1.setToolTip("Больше не считать выбранную программу игрой и убрать её адреса из обхода")
-        b1.clicked.connect(self.ignore_game)
-        b3 = self.btn_reset = QPushButton("Сбросить адреса")
-        b3.setToolTip("Убрать собранные адреса выбранной игры (если после добавления ей стало хуже)")
-        b3.clicked.connect(self.reset_game)
         b4 = q(QPushButton("Поделиться адресами…"), objectName="text")
         b4.setToolTip("Отправить найденные серверы игр в общую базу: у других игра заработает с первого запуска. "
                       "Отправляются только адреса серверов, без вашего IP. Нужен аккаунт GitHub.")
         b4.clicked.connect(self.share_games)
-        for b in (b2, b1, b3):
-            r.addWidget(b)
-        for b in (b1, b3):  # act on the selected game: off until one is selected
-            b.setEnabled(False)
-        self.table.itemSelectionChanged.connect(
-            lambda: [b.setEnabled(bool(self.table.selectedItems())) for b in (b1, b3)])
         self.table.itemChanged.connect(self._on_game_check)  # «Обход»: a checkbox per game
+        r.addWidget(b2)
         r.addStretch()
         r.addWidget(b4)
         lay.addLayout(r)
@@ -373,7 +387,7 @@ class PagesMixin(WindowBase):
         self.dns_combo.setCurrentIndex(max(idx, 0))
         self.dns_combo.currentIndexChanged.connect(lambda _i: self.dns_mode_changed())
         dl.addWidget(InputRow("DNS", "Резолвер для всей системы. «От провайдера» вернёт автоматические настройки.",
-                              self.dns_combo))
+                              self.dns_combo, width=240))
         self.dns_edit = q(QLineEdit(s.get("dns_custom") or "", placeholderText="1.1.1.1, 1.0.0.1"))
         self.dns_edit.setToolTip("Свои серверы через запятую, только IPv4")
         self.dns_custom_row = InputRow("Свой DNS", "Адреса через запятую, например 1.1.1.1, 1.0.0.1", self.dns_edit)
@@ -381,12 +395,22 @@ class PagesMixin(WindowBase):
         dl.addWidget(self.dns_custom_row)
         self.lbl_dns = q(QLabel(), objectName="muted", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
         dl.addWidget(self.lbl_dns)
+        sw = Switch()
+        sw.setChecked(bool(s.get("pick_ignore_dns", False)))
+        sw.setAccessibleName("Подбирать при подмене DNS")
+        sw.setToolTip("Подбор идёт, даже если провайдер подменяет DNS. Результат может быть случайным: лучше "
+                      "сначала починить DNS")
+        sw.toggled.connect(lambda v: self.on_check("pick_ignore_dns", v))
+        self.cb["pick_ignore_dns"] = sw
+        dl.addWidget(SettingRow("Подбирать при подмене DNS",
+                                "Подбор идёт, даже если провайдер подменяет DNS. Результат может быть случайным: "
+                                "лучше сначала починить DNS", sw))
         drow = QHBoxLayout()
         drow.setSpacing(8)
-        self.btn_dns = q(QPushButton("Проверить и применить"), objectName="tonal")
+        self.btn_dns = q(QPushButton("Проверить и применить"), objectName="primary")
         self.btn_dns.setToolTip("Проверить резолверы и поставить выбранный")
         self.btn_dns.clicked.connect(self.dns_apply)
-        self.btn_dns_provider = QPushButton("Вернуть как у провайдера")
+        self.btn_dns_provider = q(QPushButton("Вернуть как у провайдера"), objectName="tonal")
         self.btn_dns_provider.setToolTip("Вернуть автоматические настройки DNS (DHCP)")
         self.btn_dns_provider.clicked.connect(self.dns_restore)
         drow.addWidget(self.btn_dns)
@@ -504,18 +528,30 @@ class PagesMixin(WindowBase):
         self.list_combo.addItem("Программы, которые обход не трогает (exe)", "apps_exclude")  # a setting, not a file
         self.list_combo.currentIndexChanged.connect(self.load_list)
         lay.addWidget(self.list_combo)
+        hint = q(QLabel(), objectName="muted", wordWrap=True)
+        hint.setText("По одному домену или адресу в строке, строки с # - комментарии.")
+        lay.addWidget(hint)
+        self.lbl_list_count = q(QLabel(), objectName="muted")
+        lay.addWidget(self.lbl_list_count)
         self.list_edit = q(QPlainTextEdit(), objectName="editor")
+        self.list_edit.setMaximumHeight(260)  # не растягивать пустое поле на пол-экрана
         lay.addWidget(self.list_edit, 1)
         r = QHBoxLayout()
         r.setSpacing(8)
         b = q(QPushButton("Сохранить"), objectName="primary")
+        b.setMinimumWidth(140)
         b.clicked.connect(self.save_list)
         self.btn_ipset = QPushButton("Обновить IP-список с GitHub")
+        self.btn_ipset.setMinimumWidth(220)
         self.btn_ipset.setToolTip("Скачать свежий список IP-диапазонов (Cloudflare и др.) для обхода")
         self.btn_ipset.clicked.connect(self.update_ipset)
+        b_open = q(QPushButton("Открыть папку списков"), objectName="text")
+        b_open.setToolTip("Открыть папку с файлами списков в проводнике")
+        b_open.clicked.connect(lambda: os.startfile(str(paths.LISTS)))
         r.addWidget(b)
         r.addWidget(self.btn_ipset)
         r.addStretch()
+        r.addWidget(b_open)
         lay.addLayout(r)
         return page
 
@@ -581,15 +617,19 @@ class PagesMixin(WindowBase):
                 ("Неожиданных остановок обхода", str(s["crashes"])),
                 ("Обновлений IP-списка", str(s["ipset"]))]
         if s["switches"]:
-            rows.append(("Смены стратегии", ", ".join(f"{time.strftime('%d.%m %H:%M', time.localtime(t))}, {n}"
-                                                      for t, n in s["switches"][-3:])))
+            for t, n in s["switches"][-3:]:  # одна строка на смену: длинная строка рвалась на три
+                rows.append(("Смена стратегии", f"{time.strftime('%d.%m %H:%M', time.localtime(t))} · {n}"))
         muted = style.C["on_surface_variant"]
         self.lbl_stats.setText(
             f"<div style='font-weight:600; margin-bottom:6px'>За последние {s['days']} дней</div>"
             "<table cellspacing='0' cellpadding='3'>"
             + "".join(f"<tr><td style='color:{muted}; padding-right:18px'>{html.escape(str(k))}</td>"
-                      f"<td>{html.escape(str(v))}</td></tr>" for k, v in rows)
+                      f"<td style='text-align:right'>{html.escape(str(v))}</td></tr>" for k, v in rows)
             + "</table>")
+
+    def show_strategy_help(self):
+        """«?» у стратегии: полные имена и группы целей, без сокращений."""
+        QMessageBox.information(self, "Стратегия", self.describe_full())
 
     def describe(self) -> str:
         """Коротко: «комбинация ALT8+FTAA+ALT11». Полные имена и группы - в describe_full()."""
@@ -634,6 +674,7 @@ class PagesMixin(WindowBase):
         if getattr(self, "_desc_tip", None) != full:
             self._desc_tip = full
             self.substatus.setToolTip(full)
+            self.btn_strategy_help.setToolTip(full)
         sub = ""
         if self.error and not self.busy:
             sub = self.error
@@ -670,10 +711,26 @@ class PagesMixin(WindowBase):
 
     def fill_games(self):
         games = self.watcher.games() if self.watcher else {}
-        ign = set(self.settings.get("games_ignore", []))
+        ign = {x.lower() for x in self.settings.get("games_ignore", [])}
         excl = {x.lower() for x in self.settings.get("games_exclude", [])}
         capture = bool(self.settings.get("game_capture", True))
-        rows = [(k, v) for k, v in games.items() if k not in ign]
+        groups: dict[str, dict] = {}
+        for exe, g in games.items():
+            if exe in ign:
+                continue
+            name = gamewatch.display_name(exe, g.get("path"))
+            row = groups.setdefault(name, {"name": name, "exes": [], "ips": 0, "ping": None, "active": False,
+                                           "manual": False})
+            row["exes"].append(exe)
+            row["ips"] += len(g.get("ips") or ())
+            row["manual"] = row["manual"] or bool(g.get("manual"))
+            ping = g.get("ping_ms")
+            if ping is not None and (row["ping"] is None or ping < row["ping"]):
+                row["ping"] = ping
+            row["active"] = row["active"] or bool(g.get("active"))
+        rows = [r for r in groups.values() if r["ips"] or r["active"] or r["manual"]]
+        for r in rows:  # вне обхода, только если исключены все процессы этой игры
+            r["out"] = not capture or all(e in excl for e in r["exes"])
         self.games_empty.setVisible(not rows)
         self.games_empty.setText(
             "Пока игр не найдено. Запустите игру, она появится здесь сама." if self.settings.get("game_watch") else
@@ -681,37 +738,35 @@ class PagesMixin(WindowBase):
         self.table.setVisible(bool(rows))
         self.table.blockSignals(True)  # a check state set while filling must not call back
         try:
-            self._sync_games_table(rows, excl, capture)
+            self._sync_games_table(rows, capture)
         finally:
             self.table.blockSignals(False)
         self._fill_home_games(rows)
 
-    def _sync_games_table(self, rows: list, excl: set[str], capture: bool) -> None:
+    def _sync_games_table(self, rows: list[dict], capture: bool) -> None:
         """Update rows in place: a full rebuild every 2 s reset the selection and flickered."""
-        keys = [exe for exe, _ in rows]
+        keys = [r["name"] for r in rows]
         rebuild = getattr(self, "_games_keys", None) != keys
         if rebuild:
             cur = self.table.currentRow()
             item = self.table.item(cur, 0) if cur >= 0 else None
-            cur_exe = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            cur_name = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             self._games_keys = keys
             self.table.setRowCount(len(rows))
-            for i, (exe, _g) in enumerate(rows):
+            for i, r in enumerate(rows):
                 name = QTableWidgetItem()
-                name.setData(Qt.ItemDataRole.UserRole, exe)
-                name.setToolTip(exe)
+                name.setData(Qt.ItemDataRole.UserRole, r["exes"][0])
+                name.setData(Qt.ItemDataRole.UserRole + 1, tuple(r["exes"]))
+                name.setToolTip("\n".join(r["exes"]))
                 self.table.setItem(i, 0, name)
                 for j in (1, 2, 3):
                     self.table.setItem(i, j, QTableWidgetItem())
                 self.table.setItem(i, 4, QTableWidgetItem())
-            if cur_exe in keys:
-                self.table.setCurrentCell(keys.index(cur_exe), 0)
-        for i, (exe, g) in enumerate(rows):
-            ping = g.get("ping_ms")
-            out = exe in excl or not capture
-            state = "вне обхода" if out else ("играете" if g.get("active") else "")
-            values = (gamewatch.display_name(exe, g.get("path")), str(len(g.get("ips", ()))),
-                      ", " if ping is None else f"{ping:.0f}", state)
+            if cur_name in keys:
+                self.table.setCurrentCell(keys.index(cur_name), 0)
+        for i, r in enumerate(rows):
+            status = "вне обхода" if r["out"] else ("играете" if r["active"] else "—")
+            values = (r["name"], str(r["ips"]), "—" if r["ping"] is None else f"{r['ping']:.0f}", status)
             for j, text in enumerate(values):
                 it = self.table.item(i, j)
                 if it is None:
@@ -719,8 +774,9 @@ class PagesMixin(WindowBase):
                     self.table.setItem(i, j, it)
                 if it.text() != text:
                     it.setText(text)
+            self.table.item(i, 1).setData(Qt.ItemDataRole.EditRole, r["ips"])  # сортировка по числу
             box = self.table.item(i, 4)
-            want = Qt.CheckState.Unchecked if out else Qt.CheckState.Checked
+            want = Qt.CheckState.Unchecked if r["out"] else Qt.CheckState.Checked
             if box.checkState() != want:
                 box.setCheckState(want)
         if rebuild or getattr(self, "_games_capture", None) != capture:
@@ -735,26 +791,24 @@ class PagesMixin(WindowBase):
                     box.setToolTip(tip)
                     box.setFlags(flags)
 
-    def _fill_home_games(self, rows: list) -> None:
+    def _fill_home_games(self, rows: list[dict]) -> None:
         """Home card: running games first, then the ones with most servers; three at most."""
         if not self.settings.get("game_watch"):
             text = "Слежение за играми выключено, включите его в «Настройках»."
         elif not rows:
             text = "Пока игр не найдено. Запустите игру, она появится здесь сама."
         else:
-            top = sorted(rows, key=lambda r: (not r[1].get("active"), -len(r[1].get("ips", ()))))[:3]
+            top = sorted(rows, key=lambda r: (not r["active"], -r["ips"]))[:3]
             lines = []
-            for exe, g in top:
-                name = gamewatch.display_name(exe, g.get("path"))
-                ping = g.get("ping_ms")
-                if g.get("excluded"):
+            for r in top:
+                if r["out"]:
                     state = "вне обхода"
-                elif g.get("active"):
+                elif r["active"]:
                     state = (f"<span style='color:{style.C["good"]}'>играете</span>"
-                             + (f", {ping:.0f} мс" if ping else ""))
+                             + (f", {r['ping']:.0f} мс" if r["ping"] is not None else ""))
                 else:
-                    state = f"{len(g.get('ips', ()))} адресов в обходе"
-                lines.append(f"<span style='color:{style.C["on_surface"]}'>{html.escape(name)}</span>, {state}")
+                    state = f"{r['ips']} адресов в обходе"
+                lines.append(f"<span style='color:{style.C["on_surface"]}'>{html.escape(r['name'])}</span>, {state}")
             more = len(rows) - len(top)
             text = "<br>".join(lines) + (f"<br>и ещё {more}" if more > 0 else "")
         if self.lbl_games.text() != text:

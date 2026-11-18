@@ -19,6 +19,7 @@ class WindowBase(QWidget):
     _cancellable: Any
     _crashes: Any
     _deferred_since: Any
+    _diag_rows: Any
     _expect_running: Any
     _game_flags: Any
     _game_running: Any
@@ -76,10 +77,9 @@ class WindowBase(QWidget):
     btn_diag: Any
     btn_dns: Any
     btn_dns_provider: Any
-    btn_ignore: Any
+    btn_strategy_help: Any
     btn_ipset: Any
     btn_report: Any
-    btn_reset: Any
     btn_send: Any
     btn_site: Any
     btn_toggle: Any
@@ -115,6 +115,7 @@ class WindowBase(QWidget):
     isVisible: Any
     lbl_games: Any
     lbl_isp: Any
+    lbl_list_count: Any
     lbl_recent: Any
     lbl_stats: Any
     lbl_upd: Any
@@ -161,6 +162,9 @@ class WindowBase(QWidget):
     share_games: Any
     show: Any
     show_window: Any
+    _selected_exes: Any
+    show_games_menu: Any
+    show_strategy_help: Any
     start_runner: Any
     start_watcher: Any
     status: Any

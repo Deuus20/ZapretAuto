@@ -104,8 +104,11 @@ w.runner.proc = None
 w.on_diag_done([
     {"label": "Base Filtering Engine", "level": "ok", "detail": "Running"},
     {"label": "Файлы обхода", "level": "ok", "detail": "winws.exe, WinDivert на месте"},
-    {"label": "Подмена DNS", "level": "err", "detail": "провайдер подменяет адреса: youtube.com, обход не поможет "
-     "без защищённого DNS. «Исправить» включит его в Chrome, Edge и Яндекс.Браузере", "fix": "browser_doh"},
+    {"label": "DNS и DoH", "level": "err", "detail": "Secure DNS (DoH) не включён; провайдер подменяет адреса: "
+     "youtube.com. «Исправить» подберёт рабочий DNS для этой сети, включит DoH в браузерах и запишет адреса в hosts",
+     "fix": "dns_repair"},
+    {"label": "Белые списки", "level": "ok", "detail": "фильтра по списку нет: заблокированные сайты открываются "
+     "и без обхода"},
     {"label": "QUIC в браузерах", "level": "warn", "detail": "QUIC до YouTube не проходит, «Исправить» отключит QUIC",
      "fix": "disable_quic"},
     {"label": "Кэш Discord", "level": "ok", "detail": "если Discord висит на загрузке, «Исправить» очистит кэш",

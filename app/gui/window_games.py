@@ -3,7 +3,7 @@ import time
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QFileDialog, QMenu, QMessageBox
 
 from app.gui.shared import gamewatch
 
@@ -69,19 +69,45 @@ class GamesMixin(WindowBase):
             self._games_logged = time.time()
             self.log(msg)
 
-    def _selected_game(self) -> str | None:
+    def _selected_exes(self) -> list[str]:
+        """Все процессы выбранной строки: одну игру могут вести лаунчер и клиент с разными exe."""
         r = self.table.currentRow()
         item = self.table.item(r, 0) if r >= 0 else None
         if item is None:
-            QMessageBox.information(self, "ZapretAuto", "Сначала выберите игру в списке.")
-            return None
-        return item.data(Qt.ItemDataRole.UserRole)
+            return []
+        exes = item.data(Qt.ItemDataRole.UserRole + 1)
+        if exes:
+            return list(exes)
+        one = item.data(Qt.ItemDataRole.UserRole)
+        return [one] if one else []
+
+    def show_games_menu(self, pos):
+        """Правая кнопка по строке: «Обход», «Сбросить адреса», «Не игра»."""
+        row = self.table.indexAt(pos).row()
+        if row < 0:
+            return
+        self.table.selectRow(row)
+        exes = self._selected_exes()
+        if not exes:
+            return
+        excl = {x.lower() for x in self.settings.get("games_exclude", [])}
+        menu = QMenu(self)
+        act = menu.addAction("Обход для этой игры")
+        act.setCheckable(True)
+        act.setChecked(not all(e in excl for e in exes))
+        act.triggered.connect(lambda on: self._set_excluded_many(exes, on))
+        menu.addSeparator()
+        menu.addAction("Сбросить адреса", self.reset_game)
+        menu.addAction("Не игра", self.ignore_game)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def ignore_game(self):
-        exe = self._selected_game()
-        if not exe:
+        exes = self._selected_exes()
+        if not exes:
+            QMessageBox.information(self, "ZapretAuto", "Сначала выберите игру в списке.")
             return
-        self.set_game_ignored(exe, True)
+        for exe in exes:
+            self.set_game_ignored(exe, True)
 
     def set_game_ignored(self, exe: str, on: bool):
         ign = set(self.settings.get("games_ignore", []))
@@ -103,16 +129,29 @@ class GamesMixin(WindowBase):
         self.log(f"{exe}: обход для игры " + ("выключен" if on else "снова включён"))
         self.fill_games()
 
+    def _set_excluded_many(self, exes: list[str], in_bypass: bool):
+        """Переключить «Обход» сразу для всех процессов строки: один fill_games и один перезапуск в конце."""
+        for i, exe in enumerate(exes):
+            last = i == len(exes) - 1
+            self.set_game_excluded(exe, not in_bypass, refresh=last, restart=last)
+
+    def _row_exes(self, row: int) -> list[str]:
+        item = self.table.item(row, 0)
+        if item is None:
+            return []
+        exes = item.data(Qt.ItemDataRole.UserRole + 1)
+        if exes:
+            return list(exes)
+        one = item.data(Qt.ItemDataRole.UserRole)
+        return [one] if one else []
+
     def _on_game_check(self, item):
         """«Обход» column: a checked box keeps the game's servers in the bypass."""
         if item.column() != 4:
             return
-        name = self.table.item(item.row(), 0)
-        exe = name.data(Qt.ItemDataRole.UserRole) if name else None
-        if exe:
-            self.set_game_excluded(exe, item.checkState() != Qt.CheckState.Checked)
+        self._set_excluded_many(self._row_exes(item.row()), item.checkState() == Qt.CheckState.Checked)
 
-    def set_game_excluded(self, exe: str, on: bool):
+    def set_game_excluded(self, exe: str, on: bool, refresh: bool = True, restart: bool = True):
         """Keep one game out of the bypass without removing it from the list (the «Обход» checkbox)."""
         if not self.settings.get("game_capture", True) and on:
             return  # the global switch is off: nothing to bring back per game
@@ -127,17 +166,19 @@ class GamesMixin(WindowBase):
         self.save(games_exclude=sorted(excl | {exe} if on else excl - {exe}), nocapture=nocap)
         if self.watcher:
             self.watcher.set_excluded(exe, on)  # ipset-exclude-games: winws re-reads it live
-        if self.runner.running and not self.busy:
+        if restart and self.runner.running and not self.busy:
             self.start_runner()  # the capture filter changes only on restart
         self.log(f"{exe}: " + ("вне обхода, его серверы обход не трогает" if on else "снова в обходе"))
-        self.fill_games()
+        if refresh:
+            self.fill_games()
 
     def reset_game(self):
-        exe = self._selected_game()
-        if not exe or not self.watcher:
+        exes = self._selected_exes()
+        if not exes or not self.watcher:
             return
-        self.watcher.reset_game(exe)
-        self.log(f"IP игры сброшены: {exe}")
+        for exe in exes:
+            self.watcher.reset_game(exe)
+            self.log(f"IP игры сброшены: {exe}")
         self.fill_games()
 
     def exclude_app(self):
@@ -168,10 +209,17 @@ class GamesMixin(WindowBase):
             name = exe.rsplit("\\", 1)[-1].lower()
             ignored = name in {x.lower() for x in self.settings.get("games_ignore", [])}
             if self.watcher and name in self.watcher.games() and not ignored:
-                rows = [(it.data(Qt.ItemDataRole.UserRole) if it is not None else None)
-                        for it in (self.table.item(i, 0) for i in range(self.table.rowCount()))]
-                if name in rows:
-                    self.table.selectRow(rows.index(name))
+                found = None
+                for i in range(self.table.rowCount()):
+                    it = self.table.item(i, 0)
+                    if it is None:
+                        continue
+                    exes = it.data(Qt.ItemDataRole.UserRole + 1) or [it.data(Qt.ItemDataRole.UserRole)]
+                    if name in exes:
+                        found = i
+                        break
+                if found is not None:
+                    self.table.selectRow(found)
                 QMessageBox.information(self, "ZapretAuto", f"{name} уже есть в списке игр.")
                 return
             self.save(games_force=sorted(set(self.settings.get("games_force", [])) | {exe}),

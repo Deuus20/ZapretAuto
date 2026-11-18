@@ -127,13 +127,12 @@ def test_diagnostics_read_services_and_doh_in_two_calls(monkeypatch):
     monkeypatch.setattr(diag, "missing_files", lambda: [])
     monkeypatch.setattr(diag, "flowseal_hosts", lambda: [])
     monkeypatch.setattr(diag, "dns_poisoned", lambda: [])
-    monkeypatch.setattr(diag, "_browser_doh_on", lambda: True)
     monkeypatch.setattr(diag, "_discord_caches", lambda: [])
     monkeypatch.setattr(diag, "_quic_disabled", lambda: True)
     rows = {r["label"]: r for r in diag.run_checks()}
     assert calls.count("services") == 1 and sorted(set(calls)) == ["doh", "services", "timestamps"]
     assert rows["Base Filtering Engine"]["level"] == "ok" and rows["Служба zapret"]["level"] == "ok"
-    assert rows["Secure DNS (DoH)"]["level"] == "ok"
+    assert rows["DNS и DoH"]["level"] == "ok"
     with pytest.raises(ValueError):  # чужое имя службы в сценарий PowerShell не подставляем
         diag._svc_status("BFE'; rm -rf /; '")
 
@@ -145,7 +144,6 @@ def test_diagnostics_cache_expires_after_fix(monkeypatch):
     monkeypatch.setattr(diag, "missing_files", lambda: [])
     monkeypatch.setattr(diag, "flowseal_hosts", lambda: [])
     monkeypatch.setattr(diag, "dns_poisoned", lambda: [])
-    monkeypatch.setattr(diag, "_browser_doh_on", lambda: True)
     monkeypatch.setattr(diag, "_discord_caches", lambda: [])
     monkeypatch.setattr(diag, "_quic_disabled", lambda: True)
     first = diag.run_checks()

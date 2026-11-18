@@ -210,24 +210,23 @@ def run_checks(fresh: bool = False) -> list[dict]:
         else:
             n = max(n, 0)
     if n < 0:
-        res.append(_item("Secure DNS (DoH)", "warn", "не удалось определить", "dns_repair"))
+        doh_state = "DoH: не удалось определить"
     elif n == 0:
-        res.append(_item("Secure DNS (DoH)", "warn", "не включён, провайдер может подменять DNS. "
-                         "«Исправить» включит DoH в браузерах и поставит рабочий DNS", "dns_repair"))
+        doh_state = "Secure DNS (DoH) не включён"
     else:
-        res.append(_item("Secure DNS (DoH)", "ok", "включён"))
+        doh_state = "Secure DNS (DoH) включён"
     bad = dns_poisoned()
-    if bad is None:
-        res.append(_item("Подмена DNS", "ok", "не удалось проверить (нет доступа к 1.1.1.1)"))
-    elif bad:
-        doh_on = _browser_doh_on()
-        res.append(_item("Подмена DNS", "err", "провайдер подменяет адреса: " + ", ".join(bad) +
-                         (", защищённый DNS в браузерах уже включён, но программам вне браузера нужен рабочий "
-                          "системный DNS. " if doh_on else ", обход не поможет без защищённого DNS. ") +
-                         "«Исправить» подберёт рабочий DNS для этой сети, включит DoH в браузерах и запишет "
-                         "адреса в hosts", "dns_repair"))
+    if bad:
+        detail = (doh_state + "; провайдер подменяет адреса: " + ", ".join(bad) + ". «Исправить» подберёт рабочий "
+                  "DNS для этой сети, включит DoH в браузерах и запишет адреса в hosts")
+        level = "err"
+    elif bad is None:
+        detail = doh_state + "; проверить подмену не удалось (нет доступа к DoH)"
+        level = "warn"
     else:
-        res.append(_item("Подмена DNS", "ok", "ответы DNS совпадают с DNS-over-HTTPS"))
+        detail = doh_state + "; ответы DNS совпадают с DNS-over-HTTPS"
+        level = "warn" if n <= 0 else "ok"
+    res.append(_item("DNS и DoH", level, detail, "dns_repair" if level != "ok" else None))
     try:
         from .tester import vpn_active
         v = vpn_active()
@@ -442,13 +441,6 @@ def _clear_discord_cache() -> str:
             left.append(d.name)
     return ("кэш Discord очищен, запустите Discord заново" if not left else
             "часть кэша не удалилась (" + ", ".join(left) + "), закройте Discord и нажмите ещё раз")
-def _browser_doh_on() -> bool:
-    import winreg
-    try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, QUIC_POLICIES[0]) as k:
-            return winreg.QueryValueEx(k, "DnsOverHttpsMode")[0] == "secure"
-    except OSError:
-        return False
 def _browser_doh() -> str:
     """Secure DNS in Chromium browsers via policy, with the first DoH provider this network can reach."""
     import winreg

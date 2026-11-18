@@ -74,7 +74,6 @@ def test_diagnostics_reports_tampered_files(tmp_path, monkeypatch):
     monkeypatch.setattr(diag, "missing_files", lambda: [])
     monkeypatch.setattr(diag, "flowseal_hosts", lambda: [])
     monkeypatch.setattr(diag, "dns_poisoned", lambda: [])
-    monkeypatch.setattr(diag, "_browser_doh_on", lambda: True)
     monkeypatch.setattr(diag, "_discord_caches", lambda: [])
     monkeypatch.setattr(diag, "_quic_disabled", lambda: True)
     rows = {r["label"]: r for r in diag.run_checks()}

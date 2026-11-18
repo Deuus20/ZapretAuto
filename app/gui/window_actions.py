@@ -49,25 +49,29 @@ class ActionsMixin(WindowBase):
             self.tray.showMessage("ZapretAuto", text)
 
     def run_diag(self):
-        """Проверки плюс белые списки: их видно только без обхода, поэтому на время проверки он выключается."""
+        """Сначала обычные проверки, потом белые списки: их видно только без обхода, его выключаем на 5-10 с."""
         if self.busy:
             return
         self.btn_diag.setEnabled(False)
         self.btn_diag.setText("Проверка...")
-        was = self.runner.running
-        if was:
-            self._expect_running = False
-            self.runner.stop()
-        def work(log):
-            rows = diag.run_checks()
-            log("проверяю белые списки…")
-            return rows + [whitelist.diag_item(whitelist.check())], was
-        def done(res):
-            rows, restart = res or ([], False)
-            if restart:
-                self.start_runner()
-            self.on_diag_done(rows)
-        self._run(work, done)
+        def first(rows):
+            self._diag_rows = rows or []
+            was = self.runner.running
+            if was:
+                self._expect_running = False
+                self.runner.stop()
+            def second(rep):
+                if was:
+                    self.start_runner()
+                self.on_diag_done(list(self._diag_rows) + [whitelist.diag_item(rep)])
+            def check(log):
+                try:
+                    return whitelist.check()
+                except Exception as e:  # noqa: BLE001 (не даём одной проверке уронить диагностику)
+                    log(f"белые списки: не удалось проверить ({e})")
+                    return {"verdict": "unknown"}
+            self._run(check, second)
+        self._run(lambda log: diag.run_checks(), first)
 
     def on_diag_done(self, res):
         self.btn_diag.setEnabled(True)
@@ -84,7 +88,10 @@ class ActionsMixin(WindowBase):
             a = QTableWidgetItem(("●  " if r["level"] != "ok" else "") + r["label"])
             a.setForeground(QColor(col.get(r["level"], C["outline"])))
             t.setItem(i, 0, a)
-            t.setItem(i, 1, QTableWidgetItem(r["detail"]))
+            detail = r["detail"] or ""
+            cell = QTableWidgetItem(detail if len(detail) <= 180 else detail[:177].rstrip() + "…")
+            cell.setToolTip(detail)  # полный текст: в таблице он бы растянул строку на три
+            t.setItem(i, 1, cell)
             if r.get("fix"):
                 b = q(QPushButton(r.get("fix_label") or "Исправить"), objectName="tonal" if r["level"] != "ok" else "text")
                 b.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -106,21 +113,29 @@ class ActionsMixin(WindowBase):
             self.run_diag()
         self._run(lambda log: diag.apply_fix(fix), done)
 
+    def _update_list_count(self):
+        n = sum(1 for ln in self.list_edit.toPlainText().splitlines()
+                if ln.strip() and not ln.strip().startswith("#"))
+        self.lbl_list_count.setText(f"Записей: {n}")
+
     def load_list(self, *_):
         if self.list_combo.currentData() == "apps_exclude":
             self.list_edit.setPlainText("".join(x + "\n" for x in self.settings.get("apps_exclude", [])))
+            self._update_list_count()
             return
         p = lists.user_list_paths()[self.list_combo.currentData()]
         try:
             self.list_edit.setPlainText(p.read_text(encoding="utf-8"))
         except OSError:
             self.list_edit.setPlainText("")
+        self._update_list_count()
 
     def save_list(self):
         if self.list_combo.currentData() == "apps_exclude":
             apps = sorted({ln.strip().lower() for ln in self.list_edit.toPlainText().splitlines()
                            if ln.strip().lower().endswith(".exe")})
             self.save(apps_exclude=apps)
+            self._update_list_count()
             self.log("сохранён список программ, которые обход не трогает")
             return
         p = lists.user_list_paths()[self.list_combo.currentData()]
@@ -133,6 +148,7 @@ class ActionsMixin(WindowBase):
             self.list_edit.setPlainText(text)
         from app import paths
         paths.write_list(p, text)
+        self._update_list_count()
         self.log(f"сохранён {p.name}")
 
     def update_ipset(self):

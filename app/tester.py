@@ -458,8 +458,7 @@ def _auto_pick(log, use_shared, stop) -> dict:
         return current
     for i, s in enumerate(all_s, 1):
         if stop():
-            log("Подбор отменён.")
-            return {}
+            return {}  # «подбор отменён» пишет окно: иначе строка дублировалась
         r = test_strategy(runner, s, targets)
         results[s.name] = r
         log(f"[{i}/{len(all_s)}] {s.name}: " + ("не запустилась" if r is None else f"{score(r)[0]} из {n}"))
@@ -495,8 +494,7 @@ def _auto_pick(log, use_shared, stop) -> dict:
     log("Финальная проверка лучших вариантов…")
     for s in finalists:
         if stop():
-            log("Подбор отменён.")
-            return {}
+            return {}  # «подбор отменён» пишет окно: иначе строка дублировалась
         runs = [r for r in (test_strategy(runner, s, targets) for _ in range(ROUNDS)) if r]
         totals[s.name] = (sum(score(r)[0] for r in runs), sum(score(r)[1] for r in runs))
         results[f"final:{s.name}"] = runs

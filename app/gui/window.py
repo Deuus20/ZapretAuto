@@ -19,8 +19,8 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ZapretAuto")
-        self.resize(800, 560)
-        self.setMinimumSize(680, 480)
+        self.resize(900, 620)
+        self.setMinimumSize(880, 520)
         self.runner = Runner()
         self.watcher = None
         self.busy = False
@@ -78,7 +78,7 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
          "Программа сама перезапустит его, чтобы он заработал через обход.", True, "main"),
         ("autostart", "Запускать вместе с Windows",
          "ZapretAuto тихо стартует в трее при входе в Windows.", False, "main"),
-        ("notifications", "Уведомления",
+        ("notifications", "Уведомления в трее",
          "Всплывающие сообщения в трее: проверки, починка обхода, ошибки. Если выключить, всё останется только "
          "в журнале.", True, "main"),
         ("auto_hostlist", "Находить заблокированные сайты",
@@ -98,9 +98,6 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
         ("zapret2_auto", "Переключать движок самому",
          "Если обычный обход перестал работать и подбор не нашёл ни одной рабочей стратегии, программа предложит "
          "включить zapret2, а потом делает это сама. Не чаще раза в 6 часов.", True, "adv"),
-        ("pick_ignore_dns", "Подбирать при подмене DNS",
-         "Обычно подбор отменяется, если провайдер подменяет DNS: проверки врут, и стратегия выбирается случайно. "
-         "С этой галочкой подбор идёт всё равно. Лучше сначала починить DNS в разделе ниже.", False, "adv"),
     ]
     # ---------- diagnostics / lists ----------
     def _tray(self):
