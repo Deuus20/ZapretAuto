@@ -1,5 +1,6 @@
 """Страницы окна: главная, игры, списки, диагностика, журнал, настройки."""
 import html
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -63,6 +64,21 @@ GROUP_NAMES = {
 def group_name(key: str) -> str:
     """Подпись группы для человека; незнакомую группу показываем как есть, а не теряем."""
     return GROUP_NAMES.get(key, key)
+
+def short_name(name: str) -> str:
+    """«FAKE TLS AUTO ALT» → «FTAA»: в строке статуса важна компактность, полное имя - в подсказке.
+    Имена без пробелов (ALT8, EXP) остаются как есть, цифры в конце сохраняются (ALT 2 → ALT2)."""
+    words = re.findall(r"[A-Za-zА-Яа-я0-9]+", name)
+    if len(words) <= 1:
+        return name
+    alpha = [w for w in words if not w.isdigit()]
+    digits = "".join(w for w in words if w.isdigit())
+    tail = re.search(r"(\d+)$", words[-1])
+    if tail and not words[-1].isdigit():  # «FAKE TLS AUTO ALT2» → FTAA2: варианты не должны сливаться
+        digits += tail.group(1)
+    if len(alpha) == 1:  # «ALT 2» → «ALT2», а не «A2»
+        return (alpha[0] + digits).upper()
+    return ("".join(w[0] for w in alpha) + digits).upper()
 
 class PagesMixin(WindowBase):
     def _build(self):
@@ -516,6 +532,7 @@ class PagesMixin(WindowBase):
             + "</table>")
 
     def describe(self) -> str:
+        """Коротко: «комбинация ALT8+FTAA+ALT11». Полные имена и группы - в describe_full()."""
         if self._zapret2_on():
             from app import zapret2
             return zapret2.NAME
@@ -523,13 +540,20 @@ class PagesMixin(WindowBase):
         if not c:
             return "не выбрана"
         if c.get("picks"):
-            # какие именно стратегии собраны: базовая плюс те, что выиграли свои группы целей
-            by_name: dict[str, list[str]] = {}
-            for g, n in c["picks"].items():
-                by_name.setdefault(n, []).append(group_name(g))
-            parts = [c["base"]] + [f"{n} ({', '.join(gs)})" for n, gs in by_name.items() if n != c["base"]]
-            return "комбинация " + " + ".join(parts)
+            names = dict.fromkeys([c["base"], *c["picks"].values()])
+            return "комбинация " + "+".join(short_name(n) for n in names)
         return c["base"]
+
+    def describe_full(self) -> str:
+        """Полные имена и группы для подсказки: «комбинация ALT8 + FAKE TLS AUTO ALT (Google)»."""
+        c = self.settings.get("strategy") or {}
+        if not c.get("picks"):
+            return self.describe()
+        by_name: dict[str, list[str]] = {}
+        for g, n in c["picks"].items():
+            by_name.setdefault(n, []).append(group_name(g))
+        parts = [c["base"]] + [f"{n} ({', '.join(gs)})" for n, gs in by_name.items() if n != c["base"]]
+        return "комбинация " + " + ".join(parts)
 
     def refresh(self):
         run = self.runner.running
@@ -546,6 +570,10 @@ class PagesMixin(WindowBase):
         if self.status.text() != title:
             self.status.setText(title)
         desc = self.describe()  # once per tick: it builds strings and reads the saved strategy
+        full = self.describe_full()  # tooltip: abbreviations in the status line, full names on hover
+        if getattr(self, "_desc_tip", None) != full:
+            self._desc_tip = full
+            self.substatus.setToolTip(full)
         sub = ""
         if self.error and not self.busy:
             sub = self.error

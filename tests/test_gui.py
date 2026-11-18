@@ -310,15 +310,20 @@ def test_gui_whitelist_check(tmp_path, monkeypatch):
         _close(app, w)
 
 def test_gui_describe_names_the_strategy_mix(tmp_path, monkeypatch):
-    """Вместо «авто-комбинация из N стратегий» видно, какие стратегии и для каких групп взяты."""
+    """Вместо «авто-комбинация из N стратегий»: коротко в строке статуса, полностью - в подсказке."""
     app, w = _gui(tmp_path, monkeypatch)
     try:
+        from app.gui.window_pages import short_name
+        assert short_name("FAKE TLS AUTO ALT") == "FTAA"
+        assert short_name("FAKE TLS AUTO ALT2") == "FTAA2"  # варианты не сливаются
+        assert short_name("ALT8") == "ALT8" and short_name("ALT 2") == "ALT2"
         w.settings["strategy"] = {"base": "ALT8", "picks": {
             "tcp:443:list-google": "ALT11",
             "udp:19294-19344,50000-50100:discord,stun": "ALT11",
             "tcp:80,443:list-general": "FAKE TLS AUTO ALT"}}
-        assert w.describe() == ("комбинация ALT8 + ALT11 (Google, голос Discord) + "
-                                "FAKE TLS AUTO ALT (сайты)")
+        assert w.describe() == "комбинация ALT8+ALT11+FTAA"
+        assert w.describe_full() == ("комбинация ALT8 + ALT11 (Google, голос Discord) + "
+                                     "FAKE TLS AUTO ALT (сайты)")
     finally:
         _close(app, w)
 
