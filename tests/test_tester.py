@@ -176,6 +176,26 @@ def test_ipset_ranges_are_merged_and_searched_by_bisect(tmp_path, monkeypatch):
     assert (starts[0], ends[0]) == (int(__import__("ipaddress").IPv4Address("10.0.0.0")),
                                    int(__import__("ipaddress").IPv4Address("10.0.0.255")))
 
+def test_auto_pick_stops_on_forged_dns(monkeypatch):
+    """На подменённом DNS подбор не начинается: иначе стратегия выбирается случайно."""
+    from app import diag
+    monkeypatch.setattr(diag, "dns_poisoned", lambda: ["www.youtube.com"])
+    started = []
+    monkeypatch.setattr(tester, "_auto_pick", lambda *a: started.append(1) or {})
+    logs = []
+    assert tester.auto_pick(logs.append, use_shared=False) == {}
+    assert tester.blocked_reason() == "dns" and not started
+    assert any("Подбор отменён" in m for m in logs)
+
+
+def test_auto_pick_can_ignore_dns(monkeypatch):
+    from app import diag
+    monkeypatch.setattr(diag, "dns_poisoned", lambda: ["ya.ru"])
+    monkeypatch.setattr(tester, "_auto_pick", lambda *a: {"base": "ALT8"})
+    assert tester.auto_pick(lambda m: None, use_shared=False, ignore_dns=True) == {"base": "ALT8"}
+    assert tester.blocked_reason() is None
+
+
 def test_pick_restores_auto_hostlist(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LISTS", tmp_path)
     (tmp_path / "list-auto.txt").write_text("good.example\n", encoding="utf-8")

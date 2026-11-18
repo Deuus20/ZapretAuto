@@ -29,6 +29,12 @@ SCRIPTS: dict[str, str] = {
             r"-EA SilentlyContinue).EnableAutoDoh; "
             r"$d=((Get-DnsClientServerAddress -AddressFamily IPv4 -EA SilentlyContinue).ServerAddresses -join ' '); "
             "\"doh=$n;auto=$a;dns=$d\""),
+    # адаптер с маршрутом по умолчанию: ему и меняется DNS; имена серверов берём из вывода, а не от пользователя
+    "adapter": "(Get-NetIPConfiguration | Where-Object { $_.IPv4DefaultGateway -ne $null } | "
+               "Select-Object -First 1).InterfaceAlias",
+    "dnsservers": "Get-DnsClientServerAddress -AddressFamily IPv4 -EA SilentlyContinue | "
+                  "Where-Object { $_.ServerAddresses } | ForEach-Object { "
+                  "$_.InterfaceAlias + '=' + ($_.ServerAddresses -join ',') }",
 }
 def _decode(b: bytes, oem: int | None = None) -> str:
     """Console programs (sc, net, taskkill, powershell) print in the OEM code page, not UTF-8: decoding their
@@ -215,10 +221,10 @@ def run_checks(fresh: bool = False) -> list[dict]:
     elif bad:
         doh_on = _browser_doh_on()
         res.append(_item("Подмена DNS", "err", "провайдер подменяет адреса: " + ", ".join(bad) +
-                         (", защищённый DNS в браузерах уже включён; программам вне браузера (Discord) нужен DoH "
-                          "в Windows" if doh_on else
-                          ", обход не поможет без защищённого DNS. «Исправить» включит его в Chrome, Edge и "
-                          "Яндекс.Браузере"), None if doh_on else "browser_doh"))
+                         (", защищённый DNS в браузерах уже включён, но программам вне браузера нужен рабочий "
+                          "системный DNS. " if doh_on else ", обход не поможет без защищённого DNS. ") +
+                         "«Исправить» подберёт рабочий DNS для этой сети, включит DoH в браузерах и запишет "
+                         "адреса в hosts", "dns_repair"))
     else:
         res.append(_item("Подмена DNS", "ok", "ответы DNS совпадают с DNS-over-HTTPS"))
     try:
@@ -502,11 +508,15 @@ def _reinstall_vendor() -> str:
     """Скачать zapret заново: манифест целостности потом перезапишется сам."""
     from . import updater
     return "zapret скачан заново" if updater.update(force=True) else "обновлять нечего"
+def _dns_repair() -> str:
+    """Полная починка DNS: лучший резолвер этой сети, DoH в браузерах, адреса в hosts."""
+    from . import dns
+    return dns.repair()
 def apply_fix(fix_id: str) -> str:
     forget()  # состояние изменится: следующий прогон проверок должен быть новым
     funcs = {"disable_quic": _disable_quic, "browser_doh": _browser_doh, "discord_cache": _clear_discord_cache,
              "hosts_update": _hosts_update, "hosts_remove": _hosts_remove, "remove_windivert": _remove_windivert,
-             "reinstall_vendor": _reinstall_vendor}
+             "reinstall_vendor": _reinstall_vendor, "dns_repair": _dns_repair}
     if fix_id in funcs:
         try:
             return funcs[fix_id]()

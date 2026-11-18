@@ -61,6 +61,18 @@ GROUP_NAMES = {
     "udp:other": "STUN",
 }
 
+# Режимы DNS: «provider» и «auto» - особые, остальные совпадают с именами в app.dns.RESOLVERS
+DNS_MODES = (
+    ("От провайдера (как сейчас)", "provider"),
+    ("Авто (подобрать лучший)", "auto"),
+    ("Cloudflare", "Cloudflare"),
+    ("Google", "Google"),
+    ("Quad9", "Quad9"),
+    ("AdGuard", "AdGuard"),
+    ("Яндекс (Basic)", "Яндекс"),
+    ("Свой", "custom"),
+)
+
 def group_name(key: str) -> str:
     """Подпись группы для человека; незнакомую группу показываем как есть, а не теряем."""
     return GROUP_NAMES.get(key, key)
@@ -347,6 +359,41 @@ class PagesMixin(WindowBase):
                 f"Какие порты {proto.upper()} обходить для игр (когда обход для игр включён). Через запятую, "
                 f"диапазоны через дефис. Пусто, по умолчанию: {default}"
                 + (" (1935 пропущен, трансляции OBS)." if proto == "tcp" else "."), e))
+        bl.addWidget(q(QLabel("DNS"), objectName="section"))
+        dbox = q(QFrame(), objectName="group")
+        dl = QVBoxLayout(dbox)
+        dl.setContentsMargins(16, 14, 16, 16)
+        dl.setSpacing(8)
+        self.dns_combo = QComboBox()
+        self.dns_combo.setToolTip("Какой DNS ставить системе. «Авто» проверяет популярные и DNS провайдера и "
+                                  "выбирает самый быстрый среди тех, кто не подменяет ответы")
+        for label, mode in DNS_MODES:
+            self.dns_combo.addItem(label, mode)
+        idx = self.dns_combo.findData(s.get("dns_mode", "provider"))
+        self.dns_combo.setCurrentIndex(max(idx, 0))
+        self.dns_combo.currentIndexChanged.connect(lambda _i: self.dns_mode_changed())
+        dl.addWidget(InputRow("DNS", "Резолвер для всей системы. «От провайдера» вернёт автоматические настройки.",
+                              self.dns_combo))
+        self.dns_edit = q(QLineEdit(s.get("dns_custom") or "", placeholderText="1.1.1.1, 1.0.0.1"))
+        self.dns_edit.setToolTip("Свои серверы через запятую, только IPv4")
+        self.dns_custom_row = InputRow("Свой DNS", "Адреса через запятую, например 1.1.1.1, 1.0.0.1", self.dns_edit)
+        self.dns_custom_row.setVisible(self.dns_combo.currentData() == "custom")
+        dl.addWidget(self.dns_custom_row)
+        self.lbl_dns = q(QLabel(), objectName="muted", wordWrap=True, textFormat=Qt.TextFormat.PlainText)
+        dl.addWidget(self.lbl_dns)
+        drow = QHBoxLayout()
+        drow.setSpacing(8)
+        self.btn_dns = q(QPushButton("Проверить и применить"), objectName="tonal")
+        self.btn_dns.setToolTip("Проверить резолверы и поставить выбранный")
+        self.btn_dns.clicked.connect(self.dns_apply)
+        self.btn_dns_provider = QPushButton("Вернуть как у провайдера")
+        self.btn_dns_provider.setToolTip("Вернуть автоматические настройки DNS (DHCP)")
+        self.btn_dns_provider.clicked.connect(self.dns_restore)
+        drow.addWidget(self.btn_dns)
+        drow.addWidget(self.btn_dns_provider)
+        drow.addStretch()
+        dl.addLayout(drow)
+        bl.addWidget(dbox)
         bl.addWidget(q(QLabel("Обновления"), objectName="section"))
         upd = q(QFrame(), objectName="group")
         ul = QVBoxLayout(upd)
@@ -373,7 +420,25 @@ class PagesMixin(WindowBase):
         bl.addStretch(1)
         area.setWidget(body)
         lay.addWidget(area, 1)
+        self.fill_dns()
         return page
+
+    def fill_dns(self):
+        """Что стоит сейчас: из сохранённого результата, без PowerShell на каждый тик."""
+        cur = self.settings.get("dns_servers") or []
+        name = self.settings.get("dns_name") or ""
+        if cur:
+            text = ", ".join(cur) + (f" ({name})" if name else "")
+        elif self.settings.get("dns_checked"):
+            text = "как у провайдера (DHCP)"  # так решила программа; что стоит на самом деле, видно в диагностике
+        else:
+            text = "этой программой не менялся"
+        self.lbl_dns.setText("Сейчас: " + text)
+
+    def dns_mode_changed(self):
+        mode = self.dns_combo.currentData()
+        self.dns_custom_row.setVisible(mode == "custom")
+        self.save(dns_mode=mode)
 
     def _page_diag(self) -> QWidget:
         page, lay = self._page()

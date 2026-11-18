@@ -379,9 +379,34 @@ def quick_check(light: bool = False, speed: bool = False) -> dict[str, bool]:
         if got:
             out[name] = sum(got) * 2 > len(got) or (len(got) == 1 and got[0])
     return out
-def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False) -> dict:
-    """Test every strategy, mix the best profile per group, save to data/settings.json."""
-    global BIND
+_blocked: str | None = None  # why the last pick did not start: "dns" when the provider forges DNS answers
+
+
+def blocked_reason() -> str | None:
+    """Причина, по которой последний подбор даже не начинался (окно показывает её вместо «не помог»)."""
+    return _blocked
+
+
+def auto_pick(log=print, use_shared: bool | None = None, stop=lambda: False, ignore_dns: bool = False) -> dict:
+    """Test every strategy, mix the best profile per group, save to data/settings.json.
+
+    ignore_dns: пользователь сам решил подбирать на подменённом DNS (результат будет случайным)."""
+    global BIND, _blocked
+    _blocked = None
+    if not ignore_dns:  # на подменённом DNS проверки врут: подбор выбрал бы случайную стратегию
+        try:
+            from .diag import dns_poisoned
+            forged = dns_poisoned() or []
+        except Exception:  # noqa: BLE001 (диагностика не должна ломать подбор)
+            forged = []
+        # только то, что подбор и проверяет: подмена rutracker.org стратегию не портит
+        bad = [d for d in forged if d in ("discord.com", "www.youtube.com", "youtube.com")]
+        if bad:
+            _blocked = "dns"
+            log("Подбор отменён: провайдер подменяет DNS (" + ", ".join(bad) + "). Сначала почините DNS, иначе "
+                "проверки врут и подбор выберет случайную стратегию. Подобрать без этого можно, но результат "
+                "будет случайным.")
+            return {}
     auto = paths.LISTS / "list-auto.txt"
     try:
         before = auto.read_bytes()
@@ -414,13 +439,6 @@ def _auto_pick(log, use_shared, stop) -> dict:
     shared = _try_shared(runner, targets, log) if use_shared else None
     if shared:
         return shared
-    try:
-        from .diag import dns_poisoned
-        if forged := dns_poisoned():
-            log("Внимание: провайдер подменяет DNS (" + ", ".join(forged) + "). Пока не включён защищённый DNS "
-                "(DoH), обход не поможет, см. «Диагностику».")
-    except Exception:  # noqa: BLE001
-        pass
     results: dict[str, Any] = {"_baseline": probe_all(targets)}
     n = len(targets)
     base_ok = score(results["_baseline"])[0]

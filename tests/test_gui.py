@@ -4,7 +4,7 @@ import time
 import pytest
 from helpers import _close, _gui
 
-from app import gamewatch, lists, paths, settings, sharedb, tester, updater, whitelist, zapret2
+from app import dns, gamewatch, lists, paths, settings, sharedb, tester, updater, whitelist, zapret2
 
 
 def test_gui_smoke(tmp_path, monkeypatch):
@@ -324,6 +324,32 @@ def test_gui_describe_names_the_strategy_mix(tmp_path, monkeypatch):
         assert w.describe() == "комбинация ALT8+ALT11+FTAA"
         assert w.describe_full() == ("комбинация ALT8 + ALT11 (Google, голос Discord) + "
                                      "FAKE TLS AUTO ALT (сайты)")
+    finally:
+        _close(app, w)
+
+def test_gui_dns_card(tmp_path, monkeypatch):
+    """Карточка DNS: авто-подбор, свой адрес, проверка ввода. netsh и сеть подменены."""
+    from PySide6.QtWidgets import QMessageBox
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        shown, warned = [], []
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: warned.append(a[2])))
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: done(fn(None)))
+        monkeypatch.setattr(dns, "best", lambda log=print: {"name": "Cloudflare", "status": "ok",
+                                                            "ips": ("1.1.1.1", "1.0.0.1")})
+        monkeypatch.setattr(dns, "apply", lambda ips: (True, ", ".join(ips) + " на адаптере Ethernet"))
+        w.dns_combo.setCurrentIndex(w.dns_combo.findData("auto"))
+        w.dns_apply()
+        assert shown and "Cloudflare" in shown[-1]
+        assert settings.load_settings()["dns_servers"] == ["1.1.1.1", "1.0.0.1"]
+        w.dns_combo.setCurrentIndex(w.dns_combo.findData("custom"))
+        w.dns_edit.setText("8.8.8.8, 1.1.1.1")
+        w.dns_apply()
+        assert settings.load_settings()["dns_servers"] == ["8.8.8.8", "1.1.1.1"]
+        w.dns_edit.setText("не адрес")
+        w.dns_apply()
+        assert warned and settings.load_settings()["dns_servers"] == ["8.8.8.8", "1.1.1.1"]  # ничего не сломали
     finally:
         _close(app, w)
 

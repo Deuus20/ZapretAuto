@@ -25,6 +25,7 @@ from app.gui.shared import (
     UPDATE_EVERY,
     Worker,
     diag,
+    dns,
     lists,
     logs,
     q,
@@ -519,6 +520,123 @@ class ActionsMixin(WindowBase):
                                         "кабель или VPN. Проверку понять нельзя.")
         self._run(lambda log: whitelist.check(), done)
 
+    def _dns_servers(self, mode: str) -> list[str]:
+        """Адреса для режима карточки DNS; пустой список значит «нечего ставить»."""
+        if mode == "custom":
+            text = self.dns_edit.text().replace(";", ",")
+            return [x.strip() for x in text.split(",") if dns.valid_ip(x)]
+        for name, ips, _doh in dns.RESOLVERS:
+            if name == mode:
+                return list(ips)
+        return []
+
+    def dns_apply(self):
+        """Проверить и поставить DNS: авто-подбор лучшего, популярный из списка или свой."""
+        if self.busy:
+            return
+        mode = self.dns_combo.currentData()
+        if mode == "provider":
+            self.dns_restore()
+            return
+        servers = self._dns_servers(mode)
+        if mode == "custom" and not servers:
+            QMessageBox.warning(self, "DNS", "Укажите IPv4-адреса через запятую, например 1.1.1.1, 1.0.0.1")
+            return
+        self.btn_dns.setEnabled(False)
+        self.btn_dns.setText("Проверяю…")
+        name = self.dns_combo.currentText()  # читаем в GUI-потоке: из рабочего трогать виджеты нельзя
+        def work(log):
+            if mode == "auto":
+                b = dns.best(log)
+                if not b:
+                    return False, ("Не нашёл рабочий DNS: похоже, провайдер не пускает внешние DNS "
+                                   "(белые списки). Оставил как было."), [], ""
+                if b["name"].startswith("Провайдер"):  # уже стоит: не превращаем DHCP в статику без нужды
+                    return True, "DNS провайдера отвечает верно и быстрее всех: менять не нужно", [], \
+                        "провайдер (лучший)"
+                ok, msg = dns.apply(list(b["ips"]))
+                return ok, (f"{b['name']}: {msg}" if ok else msg), (list(b["ips"]) if ok else []), \
+                    f"{b['name']} (авто)"
+            ok, msg = dns.apply(servers)
+            return ok, msg, (servers if ok else []), name
+        def done(res):
+            ok, msg, cur, name = res or (False, "не удалось проверить DNS", [], "")
+            self.btn_dns.setEnabled(True)
+            self.btn_dns.setText("Проверить и применить")
+            self.log("DNS: " + msg)
+            if ok:
+                self.save(dns_servers=cur, dns_name=name, dns_checked=time.time())
+                self.fill_dns()
+            QMessageBox.information(self, "DNS", msg)
+        self._run(work, done)
+
+    def dns_restore(self):
+        """Вернуть DNS от провайдера (DHCP)."""
+        if self.busy:
+            return
+        def done(res):
+            ok, msg = res or (False, "не удалось вернуть DNS провайдера")
+            self.log("DNS: " + msg)
+            if ok:
+                self.save(dns_servers=[], dns_name="", dns_mode="provider", dns_checked=time.time())
+                i = self.dns_combo.findData("provider")
+                if i >= 0 and self.dns_combo.currentIndex() != i:
+                    self.dns_combo.setCurrentIndex(i)  # сохранит dns_mode через dns_mode_changed
+                self.fill_dns()
+            QMessageBox.information(self, "DNS", msg)
+        self._run(lambda log: dns.restore(), done)
+
+    def _dns_blocked_help(self):
+        """Подбор не начинался из-за подмены DNS: починить DNS или подобрать всё равно."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Подмена DNS")
+        box.setText("Провайдер подменяет DNS, подбор стратегии отменён: на таких ответах он выбрал бы случайную "
+                    "стратегию.")
+        box.setInformativeText("Можно починить DNS (программа подберёт рабочий сервер для этой сети, включит DoH "
+                               "в браузерах и запишет адреса в hosts) или подобрать без этого.")
+        fix = box.addButton("Починить DNS и подобрать", QMessageBox.ButtonRole.AcceptRole)
+        raw = box.addButton("Подобрать без DNS", QMessageBox.ButtonRole.RejectRole)
+        box.addButton("Позже", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is fix:
+            self._dns_repair_then_pick()
+        elif box.clickedButton() is raw:
+            self._pick_ignore_dns()
+
+    def _dns_repair_then_pick(self):
+        """Починить DNS и вернуться к подбору; если не вышло, предложить подбор без DNS."""
+        self.busy = True
+        self.busy_text = "Чиню DNS…"
+        self.refresh()
+        def work(log):
+            msg = dns.repair(log)
+            return msg, not diag.dns_poisoned(), dns.current()
+        def done(res):
+            self.busy = False
+            msg, ok, cur = res or ("не удалось починить DNS", False, [])
+            self.log("DNS: " + msg)
+            if ok:
+                self.save(dns_servers=cur, dns_name="починка DNS", dns_checked=time.time())
+                self.fill_dns()
+            self.refresh()
+            if self.isVisible():
+                QMessageBox.information(self, "DNS", msg)
+            if ok:
+                self.autopick()
+            elif self.isVisible() and QMessageBox.question(
+                    self, "DNS", "Починить DNS не удалось. Подобрать всё равно? Результат может быть случайным.") \
+                    == QMessageBox.StandardButton.Yes:
+                self._pick_ignore_dns()
+        self._run(work, done)
+
+    def _pick_ignore_dns(self):
+        """Подобрать, не трогая DNS: пользователь предупреждён, результат может быть случайным."""
+        self._pick_ignore = True
+        try:
+            self.autopick()
+        finally:
+            self._pick_ignore = False
+
     def _game_udp_wanted(self) -> bool:
         """A game was found: enable the game filter for TCP and UDP (some games log in over TCP high ports).
         Games the user keeps out of the bypass do not turn the game filter on."""
@@ -706,7 +824,9 @@ class ActionsMixin(WindowBase):
                 self.substatus.setText("Финальная проверка лучших вариантов…")
                 self.progress.setValue(self.progress.maximum() - 2)
         self._cancel, self._cancellable = False, True
-        self._run(lambda log: tester.auto_pick(log, stop=lambda: self._cancel), self._autopick_done, line)
+        ignore = bool(getattr(self, "_pick_ignore", False) or self.settings.get("pick_ignore_dns", False))
+        self._run(lambda log: tester.auto_pick(log, stop=lambda: self._cancel, ignore_dns=ignore),
+                  self._autopick_done, line)
 
     def _autopick_done(self, res):
         self.busy = False
@@ -719,6 +839,18 @@ class ActionsMixin(WindowBase):
         self._cancel = self._cancellable = False
         self.btn_cancel.setEnabled(True)
         self.log("автоподбор завершён" if res else ("подбор отменён" if cancelled else "автоподбор не дал результата"))
+        if not res and not cancelled and tester.blocked_reason() == "dns":
+            self.error = ""
+            self._repair = False
+            if self.settings.get("strategy"):  # autopick stopped the bypass: the pick never ran, bring it back
+                self.start_runner()
+            if self.isVisible():
+                self._dns_blocked_help()
+            else:  # never pop a dialog from an automatic repair behind the user's back
+                self.tray.showMessage("ZapretAuto", "Подбор отменён: провайдер подменяет DNS. "
+                                                    "Почините DNS в «Дополнительно», иначе стратегия случайна.")
+            self.refresh()
+            return
         if not res and not cancelled:
             self.error = "Подбор не удался, подробности в разделе «Журнал»."
         if getattr(self, "_repair", False):  # this pick was an automatic repair: tell how it ended

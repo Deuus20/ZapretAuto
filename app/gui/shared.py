@@ -6,7 +6,7 @@ from typing import Any
 
 from PySide6.QtWidgets import QWidget
 
-from app import diag, lists, logs, stats, strategies, tester, whitelist
+from app import diag, dns, lists, logs, stats, strategies, tester, whitelist
 from app.paths import ROOT
 from app.runner import Runner
 
@@ -33,4 +33,4 @@ UPDATE_EVERY = 6 * 3600  # s between background update checks
 
 __all__ = ["AUTO", "COLORS", "UPDATE_EVERY", "Any", "Bridge", "InputRow", "Pages", "PowerButton", "QWidget", "ROOT",
            "Rail", "Runner", "SettingRow", "StatusChip", "Switch", "TASK", "Worker", "app_icon", "diag", "gamewatch",
-           "init_fonts", "lists", "logs", "q", "stats", "strategies", "style", "tester", "updater", "whitelist"]
+           "init_fonts", "lists", "logs", "q", "stats", "strategies", "style", "tester", "updater", "whitelist", "dns"]

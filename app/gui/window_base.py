@@ -41,6 +41,7 @@ class WindowBase(QWidget):
     _next_health: Any
     _next_update_check: Any
     _on_game_check: Any
+    _pick_ignore: Any
     _pick_summary: Any
     _recent: Any
     _repair: Any
@@ -75,6 +76,8 @@ class WindowBase(QWidget):
     btn_check: Any
     btn_check_access: Any
     btn_diag: Any
+    btn_dns: Any
+    btn_dns_provider: Any
     btn_ignore: Any
     btn_ipset: Any
     btn_report: Any
@@ -95,11 +98,19 @@ class WindowBase(QWidget):
     chips: Any
     combo: Any
     describe: Any
+    describe_full: Any
     diag_table: Any
+    dns_apply: Any
+    dns_combo: Any
+    dns_custom_row: Any
+    dns_edit: Any
+    dns_mode_changed: Any
+    dns_restore: Any
     do_update: Any
     error: Any
     exclude_app: Any
     fill_games: Any
+    fill_dns: Any
     fill_isp: Any
     findChildren: Any
     games_empty: Any
