@@ -309,6 +309,19 @@ def test_gui_whitelist_check(tmp_path, monkeypatch):
     finally:
         _close(app, w)
 
+def test_gui_describe_names_the_strategy_mix(tmp_path, monkeypatch):
+    """Вместо «авто-комбинация из N стратегий» видно, какие стратегии и для каких групп взяты."""
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        w.settings["strategy"] = {"base": "ALT8", "picks": {
+            "tcp:443:list-google": "ALT11",
+            "udp:19294-19344,50000-50100:discord,stun": "ALT11",
+            "tcp:80,443:list-general": "FAKE TLS AUTO ALT"}}
+        assert w.describe() == ("комбинация ALT8 + ALT11 (Google, голос Discord) + "
+                                "FAKE TLS AUTO ALT (сайты)")
+    finally:
+        _close(app, w)
+
 def test_gui_no_pick_says_whitelist(tmp_path, monkeypatch):
     """Подбор не помог и проверка увидела белые списки: советуем VPN, а не крутим подбор снова."""
     from PySide6.QtWidgets import QMessageBox

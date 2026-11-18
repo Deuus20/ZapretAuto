@@ -49,6 +49,21 @@ from .window_base import WindowBase
 if TYPE_CHECKING:
     pass
 
+# Что за группа целей у профиля в комбинации: ключ приходит из tester.target_group (или target.group в списках)
+GROUP_NAMES = {
+    "tcp:443:list-google": "Google",
+    "tcp:80,443:list-general": "сайты",
+    "tcp:80,443,8443:ipset-all": "IP-список",
+    "udp:443:list-general": "QUIC",
+    "udp:443:ipset-all": "QUIC IP-список",
+    "udp:19294-19344,50000-50100:discord,stun": "голос Discord",
+    "udp:other": "STUN",
+}
+
+def group_name(key: str) -> str:
+    """Подпись группы для человека; незнакомую группу показываем как есть, а не теряем."""
+    return GROUP_NAMES.get(key, key)
+
 class PagesMixin(WindowBase):
     def _build(self):
         app = QApplication.instance()
@@ -508,8 +523,12 @@ class PagesMixin(WindowBase):
         if not c:
             return "не выбрана"
         if c.get("picks"):
-            n = len(set(c["picks"].values()) | {c["base"]})
-            return f"авто-комбинация из {n} стратегий"
+            # какие именно стратегии собраны: базовая плюс те, что выиграли свои группы целей
+            by_name: dict[str, list[str]] = {}
+            for g, n in c["picks"].items():
+                by_name.setdefault(n, []).append(group_name(g))
+            parts = [c["base"]] + [f"{n} ({', '.join(gs)})" for n, gs in by_name.items() if n != c["base"]]
+            return "комбинация " + " + ".join(parts)
         return c["base"]
 
     def refresh(self):

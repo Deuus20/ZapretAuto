@@ -495,7 +495,11 @@ def _auto_pick(log, use_shared, stop) -> dict:
                              "before": totals["current"][0] if cur_s else None,
                              "services": _services(results[f"final:{win}"])})
     remember_network(choice)
-    log(f"Готово. Выбрано: {'комбинация стратегий' if choice['picks'] else choice['base']}")
+    if choice["picks"]:  # name what was mixed, not just "a combination"
+        names = [choice["base"]] + [n for n in dict.fromkeys(choice["picks"].values()) if n != choice["base"]]
+        log("Готово. Выбрано: комбинация " + " + ".join(names))
+    else:
+        log(f"Готово. Выбрано: {choice['base']}")
     return choice
 def remember_network(choice: dict, who: tuple[str, str] | None = None) -> None:
     """Remember the pick for this ISP (ASN): back on that network, it is switched on at once, without a pick.
