@@ -90,7 +90,7 @@ def test_hosts_block_update_and_remove(tmp_path, monkeypatch):
     text = raw.decode("utf-8-sig")
     assert raw.startswith(b"\xef\xbb\xbf") and "\r\n" in text                    # encoding and line ends kept
     assert "1.1.1.1 discord.com" not in text and "162.159.135.232 discord.com" in text  # stale line replaced
-    assert "zapret-tracker.duckdns.org" in text and "myserver.lan" in text       # foreign lines untouched
+    assert text.count("zapret-tracker.duckdns.org") == 1 and "myserver.lan" in text  # foreign lines untouched
     assert diag.hosts_state(entries) == (13, True)
     diag.apply_fix("hosts_update")                                                # twice: still one block
     assert hosts.read_bytes().decode("utf-8-sig").count(diag.HOSTS_BEGIN) == 1

@@ -23,5 +23,8 @@ jobs:
       - uses: github/codeql-action/init@9418214df1f2c4b8128c770156c409013b07d6b9  # v3.39.3
         with:
           languages: python
-          queries: security-and-quality
+          # Только безопасность. Пакет security-and-quality тянет стилевые правила (empty-except, cyclic-import,
+          # unnecessary-lambda и т. п.): они дублируют ruff и pyright, а их срабатывания на намеренные приёмы
+          # (ленивые импорты, best-effort очистка) только шумят в Security tab.
+          queries: security-extended
       - uses: github/codeql-action/analyze@9418214df1f2c4b8128c770156c409013b07d6b9  # v3.39.3

@@ -248,7 +248,7 @@ def run_checks(fresh: bool = False) -> list[dict]:
     except Exception:  # noqa: BLE001 (GitHub unreachable / hosts unreadable: no verdict)
         entries = None
     if entries:
-        dns_bad = bool(bad) and "discord.com" in bad
+        dns_bad = bool(bad) and any(d == "discord.com" for d in bad)
         if have == len(entries):
             res.append(_item("Адреса Flowseal в hosts", "ok",
                              f"записаны и актуальны ({have})" + ("" if ours else ", добавлены не этой программой"),
