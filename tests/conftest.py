@@ -53,8 +53,11 @@ def _isolated_data(tmp_path, monkeypatch):
     data = tmp_path / "data"
     lists = data / "lists"
     lists.mkdir(parents=True, exist_ok=True)
+    presets = data / "presets"
+    presets.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(paths, "DATA", data)
     monkeypatch.setattr(paths, "LISTS", lists)
+    monkeypatch.setattr(paths, "PRESETS", presets)
     settings._cache = None
     yield
     settings._cache = None

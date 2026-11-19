@@ -6,20 +6,23 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
+    QMenu,
     QMessageBox,
     QPushButton,
     QTableWidgetItem,
     QWidget,
 )
 
+from app import paths
 from app.gui.shared import (
+    AUTO,
     ROOT,
     TASK,
     UPDATE_EVERY,
@@ -102,6 +105,7 @@ class ActionsMixin(WindowBase):
                 cl.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
                 t.setCellWidget(i, 2, cell)
         t.resizeRowsToContents()
+        self.diag_hint.setVisible(not t.rowCount())  # после прогона пояснение больше не нужно
 
     def apply_fix(self, fix):
         """Fixes may hit the network or kill processes: run them off the UI thread, then show the result."""
@@ -151,10 +155,6 @@ class ActionsMixin(WindowBase):
         self._update_list_count()
         self.log(f"сохранён {p.name}")
 
-    def update_ipset(self):
-        self.btn_ipset.setEnabled(False)
-        self._run(lambda log: lists.update_ipset(log), lambda ok: self.btn_ipset.setEnabled(True))
-
     def start_runner(self):
         if self.busy:
             return False
@@ -200,7 +200,9 @@ class ActionsMixin(WindowBase):
         def done(p):
             if p:
                 self.log(f"отчёт сохранён: {p}")
-                QMessageBox.information(self, "ZapretAuto", f"Отчёт сохранён:\n{p}\n\nОтправьте этот файл разработчику.")
+                QMessageBox.information(self, "ZapretAuto", f"Отчёт сохранён:\n{p}\n\nОтправьте этот файл "
+                                                           "разработчику. В архиве есть настройки, в том числе "
+                                                           "ваши адреса проверок.")
         def work(log):
             rows = diag_rows
             if rows is None:  # diagnostics not run yet: the report is much less useful without them
@@ -312,11 +314,12 @@ class ActionsMixin(WindowBase):
         if getattr(self, "_tg_advised", False):
             return
         self._tg_advised = True
-        if web is False:
-            self.log("Telegram: не отвечают ни сайт, ни серверы. Похоже на блокировку по IP: нужен прокси или VPN.")
-        else:
-            self.log("Telegram: сайт открывается, а приложение не подключается к серверам. Похоже на блокировку "
-                     "по IP: стратегия обхода тут не поможет, нужен прокси или VPN.")
+        # зонд WS идёт в Worker: это сетевой вызов до 4 с, а _telegram_hint выполняется в GUI-потоке
+        def done(ws):
+            msg = tester.telegram_hint(app, web, ws)
+            if msg:
+                self.log(msg)
+        self._run(lambda log: tester.telegram_ws_alive(), done)
 
     def _zapret2_revert(self, bad: str):
         """zapret2 не справился: вернуться к обычному движку и сохранённой стратегии этой сети."""
@@ -507,10 +510,22 @@ class ActionsMixin(WindowBase):
         return w
 
     def check_access(self, notify: bool = False):
+        if getattr(self, "_check_running", False):  # уже идёт: второй прогон только испортил бы результат
+            self._check_pending = True
+            self._check_notify = bool(notify) or bool(getattr(self, "_check_notify", False))
+            return
+        self._check_running = True
         self.substatus.setText("Проверяю доступ…")
         self.btn_check_access.setEnabled(False)
         def done(res):
+            self._check_running = False
             self.btn_check_access.setEnabled(True)
+            if getattr(self, "_check_pending", False):
+                self._check_pending = False
+                pending_notify = self._check_notify
+                self._check_notify = False
+                self.check_access(pending_notify)  # изменения пришли во время прогона: проверяем заново
+                return
             if not res:
                 self.substatus.setText("VPN не пускает трафик мимо себя, проверка невозможна, пока он включён"
                                        if tester.vpn_active() else "Не удалось проверить")
@@ -686,6 +701,142 @@ class ActionsMixin(WindowBase):
         if self.runner.running:
             self.start_runner()
         self.refresh()
+
+    def reload_strategies(self):
+        """Перечитать список: после добавления своего пресета он должен появиться сразу, без перезапуска."""
+        cur = self.combo.currentText()
+        names = [s.name for s in strategies.load_all()]
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        self.combo.addItem(AUTO)
+        self.combo.addItems(names)
+        self.combo.setCurrentIndex(max(self.combo.findText(cur), 0))
+        self.combo.blockSignals(False)
+        base = (self.settings.get("strategy") or {}).get("base")
+        if base and base not in names:  # файл пресета удалили мимо приложения: ссылка на него мертва
+            self.save(strategy={})
+            self.log(f"стратегия {base} больше не найдена: выберите другую в списке")
+
+    def add_preset(self):
+        """Свой general*.bat: файл не выполняется, а проверяется и копируется в data/presets."""
+        if self.busy:
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Свой пресет стратегии", "", "Пресеты zapret (*.bat)")
+        if not path:
+            return
+        try:
+            name = strategies.import_preset(Path(path))
+        except (OSError, ValueError) as e:
+            QMessageBox.warning(self, "Не получилось добавить пресет", str(e))
+            return
+        self.reload_strategies()
+        self.log(f"пресет {name} добавлен: выберите его в списке стратегий")
+        self.notify(f"Пресет {name} добавлен. Выберите его в списке стратегий.")
+
+    def open_mix_page(self):
+        """Ручной микс живёт на отдельной странице: в диалоге длинные группы наезжали друг на друга."""
+        c = self.settings.get("strategy") or {}
+        self.page_mix.reload(c.get("base"), c.get("picks"))
+        self.tabs.setCurrentWidget(self.page_mix)
+
+    def on_mix_saved(self, name: str):
+        """Микс сохранён пресетом: выбрать его в списке и включить, не открывая главную вручную."""
+        if self.busy:  # идёт подбор: он всё равно перезапишет strategy= своим результатом
+            self.log(f"микс {name} сохранён, но сейчас идёт подбор: выберите его после")
+            return
+        self.reload_strategies()
+        i = self.combo.findText(name)
+        if i < 0:  # файл записан, но не разобрался: молчать нельзя, winws на нём не запустится
+            self.log(f"микс {name} сохранён, но в списке не появился: проверьте data/presets")
+            return
+        self.combo.setCurrentIndex(i)
+        self.on_combo(i)
+        self.log(f"ручной микс сохранён как {name}")
+
+    @staticmethod
+    def _preset_used(c: dict | None, name: str) -> bool:
+        """Комбинация ссылается на пресет: он основа или замена одной из групп."""
+        return bool(c) and (c.get("base") == name or name in (c.get("picks") or {}).values())
+
+    @staticmethod
+    def _without_preset(c: dict, name: str) -> dict | None:
+        """Комбинация без ссылок на удалённый пресет. Заменённая группа снова берётся из основы, а если
+        основой был он, комбинации больше нет."""
+        if c.get("base") == name:
+            return None
+        picks = {g: n for g, n in (c.get("picks") or {}).items() if n != name}
+        return {"base": c["base"], "picks": picks}
+
+    def on_mix_deleted(self, name: str):
+        """Пресет удалён: перечитать список и убрать ссылки на него из сохранённых комбинаций."""
+        self.reload_strategies()
+        auto = self.settings.get("auto_choice")
+        if auto and self._preset_used(auto, name):  # на него мог опираться «Авто» (результат подбора)
+            self.save(auto_choice=self._without_preset(dict(auto), name) or {})
+        c = self.settings.get("strategy") or {}
+        if not self._preset_used(c, name):
+            self.refresh()
+            return
+        if c.get("base") != name:  # была замена группы: она снова берётся из основы
+            self.save(strategy=self._without_preset(dict(c), name) or {})
+            self.log(f"пресет {name} удалён: эта группа снова из основы")
+            if self.runner.running and not self.busy:
+                self.start_runner()
+            self.refresh()
+            return
+        auto = self._auto_choice()
+        if auto and auto.get("base") in {s.name for s in strategies.load_all()} \
+                and not self._preset_used(auto, name):
+            self.save(strategy=auto, auto_choice=auto)
+            self.log(f"пресет {name} удалён, включена прежняя комбинация")
+            if self.runner.running and not self.busy:
+                self.start_runner()
+        else:
+            self.save(strategy={})
+            self.log(f"пресет {name} удалён: выберите стратегию в списке")
+        self.refresh()
+
+    def _report_actions(self) -> QMenu:
+        """Меню отчёта: оба действия в одном месте, без двух похожих кнопок на странице диагностики."""
+        m = QMenu(self.btn_report)
+        m.addAction("Сохранить в zip…", self.save_report)
+        m.addAction("Отправить разработчику…", lambda: self.send_report())
+        return m
+
+    def report_menu(self):
+        """Открыть меню отчёта под кнопкой «Отчёт…»."""
+        self._report_actions().exec(self.btn_report.mapToGlobal(QPoint(0, self.btn_report.height() + 4)))
+
+    def on_checks_saved(self, cfg: dict):
+        """Карточка «Проверки» изменилась: сохранить и обновить плашки (одним прогоном на серию правок)."""
+        old = self.settings.get("checks") or {}
+        if cfg == old:
+            return
+        self.save(checks=cfg)
+        if cfg.get("hidden") != old.get("hidden"):
+            self.log("проверки: плашки на главной изменены")
+        self._checks_later()
+
+    def _checks_later(self):
+        """Одна проверка доступа на серию изменений: иначе каждый дописанный символ звал полный прогон."""
+        t = getattr(self, "_checks_timer", None)
+        if t is None:
+            t = self._checks_timer = QTimer(self)
+            t.setSingleShot(True)
+            t.timeout.connect(self._check_after_edits)
+        t.start(1200)
+
+    def _check_after_edits(self):
+        """Отложенная проверка: во время подбора не мешаем ему лишним трафиком."""
+        if self.busy:
+            self._checks_timer.start(3000)  # подбор закончится, тогда и проверим
+            return
+        self.check_access()
+
+    def open_presets(self):
+        import os
+        paths.PRESETS.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(paths.PRESETS))
 
     def on_check(self, key, v):
         self.save(**{key: v})

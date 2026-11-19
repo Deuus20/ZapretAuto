@@ -1,6 +1,8 @@
 """Разбор general*.bat, mix, списки."""
 import re
 
+import pytest
+
 from app import paths, strategies
 
 
@@ -98,6 +100,106 @@ def test_slim_lists(tmp_path):
     (tmp_path / "ipset-exclude-vpn.txt").write_text("138.124.5.202\n", encoding="utf-8")
     assert runner.stale(snap)  # winws no longer watches it: the app restarts it
     assert runner.slim([r"C:\z\winws2.exe", f"--ipset={tg}"])[0] == [r"C:\z\winws2.exe", f"--ipset={tg}"]
+
+def test_preset_may_share_a_name_with_a_vendor_strategy(tmp_path, monkeypatch):
+    """Свой пресет с именем штатной стратегии не сливается с ней: у него префикс «свой: »."""
+    monkeypatch.setattr(paths, "PRESETS", tmp_path)
+    by = {s.name: s for s in strategies.load_all()}
+    saved = strategies.save_preset("ALT8", strategies.mix("x", {}, by["ALT8"]))
+    assert saved == "свой: ALT8"
+    names = {s.name for s in strategies.load_all()}
+    assert {"ALT8", "свой: ALT8"} <= names
+
+def test_user_preset_is_listed_and_resolved(tmp_path, monkeypatch):
+    """Свой .bat из data/presets идёт рядом со штатными и переводится в argv теми же подстановками."""
+    src = next(paths.VENDOR.glob("general.bat")).read_text(encoding="utf-8")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path)
+    (tmp_path / "general (EXP-LMU3).bat").write_text(src, encoding="utf-8")
+    by = {s.name: s for s in strategies.load_all()}
+    assert "свой: EXP-LMU3" in by
+    argv = by["свой: EXP-LMU3"].argv(game_tcp=True, game_udp=True)
+    assert argv[0].endswith("winws.exe")
+    assert not any(re.search(r"%[\w~]+%", a) for a in argv)
+
+def test_import_preset_validates_and_copies(tmp_path, monkeypatch):
+    """Кнопка «Добавить пресет» не выполняет .bat: файл разбирается и копируется в data/presets."""
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    src = next(paths.VENDOR.glob("general.bat")).read_text(encoding="utf-8")
+    f = tmp_path / "general (LMU).bat"
+    f.write_text(src, encoding="utf-8")
+    assert strategies.import_preset(f) == "свой: LMU"
+    assert (paths.PRESETS / "LMU.bat").read_text(encoding="utf-8") == src
+
+def test_import_preset_rejects_junk(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    no_command = tmp_path / "x.bat"
+    no_command.write_text("@echo off\necho nothing\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        strategies.import_preset(no_command)
+    not_bat = tmp_path / "x.txt"
+    not_bat.write_text("winws.exe", encoding="utf-8")
+    with pytest.raises(ValueError):
+        strategies.import_preset(not_bat)
+
+def test_import_preset_rejects_unknown_variable(tmp_path, monkeypatch):
+    """Пресет с %ЧУЖОЙ% переменной не должен попасть в папку: winws потом не запустится."""
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    src = next(paths.VENDOR.glob("general.bat")).read_text(encoding="utf-8")
+    f = tmp_path / "z.bat"
+    f.write_text(src.replace("--wf-tcp=", "--wf-tcp=%NOT_A_VAR%,", 1), encoding="utf-8")
+    with pytest.raises(ValueError):
+        strategies.import_preset(f)
+    assert not (paths.PRESETS / "z.bat").exists()
+
+def test_broken_preset_is_skipped_not_fatal(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths, "PRESETS", tmp_path)
+    (tmp_path / "bad.bat").write_text("@echo off\n", encoding="utf-8")
+    logs = []
+    got = strategies.load_all(logs.append)
+    assert got and "свой: bad" not in [s.name for s in got]
+    assert any("пресет bad.bat пропущен" in m for m in logs)
+
+def test_manual_mix_round_trip_through_a_preset(tmp_path, monkeypatch):
+    """Ручной микс сохраняется .bat-пресетом и читается обратно тем же разбором, иначе winws не запустится."""
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    by = {s.name: s for s in strategies.load_all()}
+    base, other = by["ALT8"], by["FAKE TLS AUTO ALT"]
+    group = "tcp:443:list-google"
+    mixed = strategies.mix("микс", {group: other}, base)
+    assert strategies.save_preset("микс ALT8+FTAA", mixed) == "свой: микс ALT8+FTAA"
+    again = {s.name: s for s in strategies.load_all()}["свой: микс ALT8+FTAA"]
+    assert [p.group for p in again.profiles] == [p.group for p in mixed.profiles]
+    assert again.argv(game_tcp=True, game_udp=True) == mixed.argv(game_tcp=True, game_udp=True)
+    assert strategies.save_preset("a<b>c", mixed) == "свой: a_b_c"  # имя файла без запрещённых символов
+
+def test_import_preset_does_not_overwrite_existing(tmp_path, monkeypatch):
+    """Второй файл с тем же именем не должен молча затирать уже добавленный пресет."""
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    src = next(paths.VENDOR.glob("general.bat")).read_text(encoding="utf-8")
+    f = tmp_path / "general (MY).bat"
+    f.write_text(src, encoding="utf-8")
+    strategies.import_preset(f)
+    with pytest.raises(ValueError, match="уже есть"):
+        strategies.import_preset(f)
+
+def test_duplicate_preset_names_are_numbered(tmp_path, monkeypatch):
+    """MY.bat и general (MY).bat дают два пункта «свой: MY»: второй должен стать «свой: MY (2)»."""
+    src = next(paths.VENDOR.glob("general.bat")).read_text(encoding="utf-8")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path)
+    (tmp_path / "MY.bat").write_text(src, encoding="utf-8")
+    (tmp_path / "general (MY).bat").write_text(src, encoding="utf-8")
+    names = [s.name for s in strategies.load_all()]
+    assert "свой: MY" in names and "свой: MY (2)" in names
+
+def test_delete_preset_only_removes_user_files(tmp_path, monkeypatch):
+    """Удаление пресета не должно трогать штатные стратегии Flowseal."""
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    by = {s.name: s for s in strategies.load_all()}
+    saved = strategies.save_preset("на удаление", strategies.mix("x", {}, by["ALT8"]))
+    assert (tmp_path / "presets" / "на удаление.bat").exists()
+    assert strategies.delete_preset(saved) is True
+    assert not (tmp_path / "presets" / "на удаление.bat").exists()
+    assert strategies.delete_preset("ALT8") is False
 
 def test_strategies_cached_until_vendor_changes(tmp_path, monkeypatch):
     from app import strategies

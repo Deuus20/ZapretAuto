@@ -222,6 +222,7 @@ def _pick_data() -> Path:
     return d
 DATA = _pick_data()
 LISTS = DATA / "lists"  # runtime lists dir passed to winws (upstream lists + user/game lists)
+PRESETS = DATA / "presets"  # user strategies (general*.bat): survive zapret and app updates
 USER_LISTS = {
     "ipset-exclude-user.txt": "203.0.113.113/32\n",
     "list-general-user.txt": "# Never leave this file empty\ndomain.example.abc\n",
@@ -240,6 +241,7 @@ VALVE_NETS = ("103.10.124.0/23", "103.28.54.0/23", "146.66.152.0/21", "155.133.2
 def sync_lists() -> None:
     """Copy upstream lists into data/lists, keeping user-owned files."""
     LISTS.mkdir(parents=True, exist_ok=True)
+    PRESETS.mkdir(parents=True, exist_ok=True)
     for f in (VENDOR / "lists").iterdir():
         if f.is_file() and f.name not in USER_LISTS:
             if f.name == "ipset-all.txt" and (LISTS / "ipset-all.txt.custom").exists():

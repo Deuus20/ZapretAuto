@@ -67,6 +67,8 @@ class WindowBase(QWidget):
     adv_box: Any
     apply_theme: Any
     ask_autopick: Any
+    add_game: Any
+    add_preset: Any
     autopick: Any
     box_settings: Any
     bridge: Any
@@ -80,9 +82,10 @@ class WindowBase(QWidget):
     btn_dns: Any
     btn_dns_provider: Any
     btn_desc_help: Any
-    btn_ipset: Any
+    btn_mix: Any
+    btn_preset_add: Any
+    btn_presets_open: Any
     btn_report: Any
-    btn_send: Any
     btn_site: Any
     btn_toggle: Any
     btn_update: Any
@@ -97,6 +100,7 @@ class WindowBase(QWidget):
     combo: Any
     describe: Any
     describe_full: Any
+    diag_hint: Any
     diag_table: Any
     dns_apply: Any
     dns_combo: Any
@@ -136,16 +140,26 @@ class WindowBase(QWidget):
     on_diag_done: Any
     on_games_changed: Any
     on_ports: Any
+    on_checks_saved: Any
+    on_mix_deleted: Any
+    on_mix_saved: Any
     on_update_checked: Any
+    open_mix_page: Any
+    open_presets: Any
+    checks_box: Any
     page_games: Any
+    page_mix: Any
     pause: Any
     ports: Any
     progress: Any
     quit: Any
     raise_: Any
     refresh: Any
+    reload_strategies: Any
     reset_game: Any
     resize: Any
+    _report_actions: Any
+    report_menu: Any
     run_diag: Any
     runner: Any
     save: Any
@@ -178,7 +192,6 @@ class WindowBase(QWidget):
     toggle: Any
     tray: Any
     update: Any
-    update_ipset: Any
     watcher: Any
     winId: Any
     windowState: Any

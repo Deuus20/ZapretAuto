@@ -143,9 +143,11 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
     # ---------- helpers ----------
     def log(self, text: str):
         self.logbox.appendPlainText(time.strftime("%H:%M:%S ") + text)
-        if not text.startswith(("gamewatch:", "zapret2: скачиваю")):  # home card: events for people, not internals
-            self._recent = (getattr(self, "_recent", []) + [time.strftime("%H:%M ") + text])[-8:]
-            self.lbl_recent.setText("\n".join(self._recent))
+        if not text.startswith(("gamewatch:", "zapret2: скачиваю", "вывод обхода:")):  # карточка: события для
+            first = text.splitlines()[0].strip() if text else ""  # людей, а вывод winws - только в журнал
+            if first:
+                self._recent = (getattr(self, "_recent", []) + [time.strftime("%H:%M ") + first])[-8:]
+                self.lbl_recent.setText("\n".join(self._recent))
         logs.log.info(text)
     def showEvent(self, e):
         super().showEvent(e)

@@ -46,6 +46,7 @@ def set_theme(light: bool) -> bool:
 # Segoe Fluent Icons (Win11) and Segoe MDL2 Assets (Win10) share these code points
 ICONS = {"home": "", "games": "", "settings": "", "diag": "", "log": "",
          "lists": ""}
+ICONS["mix"] = "\ue8b1"  # E8B1 (shuffle): глиф есть в Segoe MDL2 Assets, проверено рендером шрифта
 ICON_FONT = "Segoe MDL2 Assets"
 def glyph(name: str) -> str:
     return ICONS.get(name, "")
@@ -114,7 +115,10 @@ QLabel#sub, QLabel#muted {{ color: {C['on_surface_variant']}; }}
 QLabel#sub[error="yes"] {{ color: {C['error']}; }}
 QLabel#rowTitle {{ font-size: 10pt; }}
 QLabel#rowTitle:disabled {{ color: {C['outline']}; }}
-QLabel#section {{ color: {C['primary']}; font-weight: 600; font-size: 9pt; padding: 10px 12px 4px 12px; }}
+QLabel#section {{ color: {C['primary']}; font-weight: 600; font-size: 9pt; padding: 12px 0 6px 0; }}
+QPushButton#section {{ color: {C['primary']}; font-weight: 600; font-size: 9pt; padding: 12px 0 6px 0;
+                      border: none; background: transparent; text-align: left; }}
+QPushButton#section:hover {{ color: {C['on_surface']}; }}
 QLabel#empty {{ color: {C['on_surface_variant']}; padding: 24px; font-size: 10pt; }}
 
 QFrame#card, QFrame#group {{ background: {C['surface_low']}; border-radius: 12px; }}
@@ -141,8 +145,11 @@ QComboBox:hover {{ border-color: {C['on_surface']}; }}
 QComboBox:focus {{ border: 2px solid {C['primary']}; }}
 QComboBox:disabled {{ color: {off_fg}; border-color: {off_bg}; }}
 QComboBox::drop-down {{ border: none; width: 28px; }}
-QComboBox QAbstractItemView {{ background: {C['surface_cont']}; border: none; padding: 6px; outline: none;
-                               selection-background-color: {C['secondary_container']}; }}
+QComboBox QAbstractItemView {{ background: {C['surface_cont']}; border: 1px solid {C['outline_variant']};
+                               border-radius: 10px; padding: 4px; outline: none;
+                               selection-background-color: {C['secondary_container']};
+                               selection-color: {C['on_secondary_container']}; }}
+QComboBox QAbstractItemView::item {{ min-height: 26px; padding: 0 8px; }}
 
 QPlainTextEdit, QTableWidget {{ background: {C['surface_low']}; border: none; border-radius: 12px; padding: 6px;
                                selection-background-color: {C['primary_container']}; }}

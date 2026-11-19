@@ -1,7 +1,6 @@
 """Страницы окна: главная, игры, списки, диагностика, журнал, настройки."""
 import html
 import os
-import re
 import time
 from typing import TYPE_CHECKING
 
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QLineEdit,
     QPlainTextEdit,
     QProgressBar,
@@ -30,6 +30,7 @@ from app import paths
 from app.gui.shared import (
     AUTO,
     COLORS,
+    FlowLayout,
     InputRow,
     Pages,
     PowerButton,
@@ -39,6 +40,7 @@ from app.gui.shared import (
     Switch,
     TextLine,
     app_icon,
+    fit_combo,
     gamewatch,
     init_fonts,
     lists,
@@ -50,21 +52,13 @@ from app.gui.shared import (
     updater,
 )
 
+from .checks_box import ChecksBox
+from .labels import group_name, short_name
+from .mix_page import MixPage
 from .window_base import WindowBase
 
 if TYPE_CHECKING:
     pass
-
-# Что за группа целей у профиля в комбинации: ключ приходит из tester.target_group (или target.group в списках)
-GROUP_NAMES = {
-    "tcp:443:list-google": "Google",
-    "tcp:80,443:list-general": "сайты",
-    "tcp:80,443,8443:ipset-all": "IP-список",
-    "udp:443:list-general": "QUIC",
-    "udp:443:ipset-all": "QUIC IP-список",
-    "udp:19294-19344,50000-50100:discord,stun": "голос Discord",
-    "udp:other": "STUN",
-}
 
 # Режимы DNS: «provider» и «auto» - особые, остальные совпадают с именами в app.dns.RESOLVERS
 DNS_MODES = (
@@ -78,24 +72,6 @@ DNS_MODES = (
     ("Свой", "custom"),
 )
 
-def group_name(key: str) -> str:
-    """Подпись группы для человека; незнакомую группу показываем как есть, а не теряем."""
-    return GROUP_NAMES.get(key, key)
-
-def short_name(name: str) -> str:
-    """«FAKE TLS AUTO ALT» → «FTAA»: в строке статуса важна компактность, полное имя - в подсказке.
-    Имена без пробелов (ALT8, EXP) остаются как есть, цифры в конце сохраняются (ALT 2 → ALT2)."""
-    words = re.findall(r"[A-Za-zА-Яа-я0-9]+", name)
-    if len(words) <= 1:
-        return name
-    alpha = [w for w in words if not w.isdigit()]
-    digits = "".join(w for w in words if w.isdigit())
-    tail = re.search(r"(\d+)$", words[-1])
-    if tail and not words[-1].isdigit():  # «FAKE TLS AUTO ALT2» → FTAA2: варианты не должны сливаться
-        digits += tail.group(1)
-    if len(alpha) == 1:  # «ALT 2» → «ALT2», а не «A2»
-        return (alpha[0] + digits).upper()
-    return ("".join(w[0] for w in alpha) + digits).upper()
 
 class PagesMixin(WindowBase):
     def _build(self):
@@ -116,6 +92,10 @@ class PagesMixin(WindowBase):
         self.tabs.addTab(self._page_home(), "Главная", "home")
         self.page_games = self._page_games()
         self.tabs.addTab(self.page_games, "Игры", "games")
+        self.page_mix = MixPage()
+        self.tabs.addTab(self.page_mix, "Микс", "mix")
+        self.page_mix.saved.connect(self.on_mix_saved)
+        self.page_mix.deleted.connect(self.on_mix_deleted)
         self.tabs.addTab(self._page_settings(), "Настройки", "settings")
         self.tabs.addTab(self._page_diag(), "Диагностика", "diag")
         log = self._page_log()
@@ -125,6 +105,8 @@ class PagesMixin(WindowBase):
                                          else None)
         lists_page = self._page_lists()
         self.tabs.addTab(lists_page, "Списки", "lists")
+        self.tabs.currentChanged.connect(lambda i: self.page_mix.reload_keep()
+                                         if self.tabs.widget(i) is self.page_mix else None)
         from PySide6.QtGui import QKeySequence, QShortcut
         for i in range(self.tabs.count()):  # keyboard navigation for the rail
             shortcut = QShortcut(QKeySequence(f"Ctrl+{i + 1}"), self)
@@ -193,9 +175,7 @@ class PagesMixin(WindowBase):
         srow.addWidget(self.btn_desc_help, 0, Qt.AlignmentFlag.AlignBottom)
         srow.addStretch(1)
         col.addLayout(srow)
-        self.chips = QHBoxLayout()
-        self.chips.setSpacing(6)
-        self.chips.setContentsMargins(0, 0, 0, 0)
+        self.chips = FlowLayout()
         col.addStretch()
         hero.addLayout(col, 1)
         acts = QVBoxLayout()
@@ -236,7 +216,7 @@ class PagesMixin(WindowBase):
         cl.setContentsMargins(14, 12, 14, 14)
         cl.setSpacing(8)
         cl.addWidget(q(QLabel("Стратегия"), objectName="h2"))
-        self.combo = QComboBox()
+        self.combo = fit_combo(QComboBox())
         self.combo.setToolTip("«Авто», результат подбора. Можно выбрать стратегию вручную.")
         self.combo.addItem(AUTO)
         self.combo.addItems([s.name for s in strategies.load_all()])
@@ -253,6 +233,11 @@ class PagesMixin(WindowBase):
         self.btn_auto.clicked.connect(self.autopick)
         row = QHBoxLayout()
         row.addWidget(self.btn_auto)
+        self.btn_mix = q(QPushButton("Собрать микс вручную…"), objectName="text")
+        self.btn_mix.setToolTip("Взять Discord из одной стратегии, YouTube из другой, игры из третьей. "
+                                "Откроется страница «Микс», результат сохранится пресетом «свой: …».")
+        self.btn_mix.clicked.connect(self.open_mix_page)
+        row.addWidget(self.btn_mix)
         row.addStretch()
         cl.addLayout(row)
         cl.addStretch()
@@ -276,6 +261,7 @@ class PagesMixin(WindowBase):
         grid.addWidget(games, 1)
         lay.addLayout(grid)
         recent = q(QFrame(), objectName="card")
+        recent.setMinimumHeight(120)  # как у соседних карточек, иначе полоска в две строки
         rl = QVBoxLayout(recent)
         rl.setContentsMargins(14, 12, 14, 12)
         rl.setSpacing(4)
@@ -284,7 +270,8 @@ class PagesMixin(WindowBase):
         self.lbl_recent.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         rl.addWidget(self.lbl_recent)
         rl.addStretch()
-        lay.addWidget(recent, 1)
+        lay.addWidget(recent)
+        lay.addStretch(1)  # карточка по содержимому: растянутая пустая карточка выглядела недоделанной
         return page
 
     def _page_games(self) -> QWidget:
@@ -339,12 +326,15 @@ class PagesMixin(WindowBase):
         bl = QVBoxLayout(body)
         bl.setContentsMargins(0, 0, 8, 24)
         bl.setSpacing(0)
+        # карточки добавляют строки уже после постройки окна: без этого QScrollArea сожмёт тело ниже
+        # минимума и строки наедут друг на друга (как было на странице «Микс»)
+        bl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         s = self.settings
         self.cb = {}
         groups = {}
         for sec, title in (("main", "Основное"), ("adv", "Дополнительно")):
             if sec == "adv":
-                self.btn_adv = q(QPushButton(), objectName="text")
+                self.btn_adv = q(QPushButton(), objectName="section")  # тот же вид, что у подписей секций
                 self.btn_adv.setCursor(Qt.CursorShape.PointingHandCursor)
                 self.btn_adv.clicked.connect(lambda: self.set_advanced(not self.adv_box.isVisible()))
                 bl.addWidget(self.btn_adv, 0, Qt.AlignmentFlag.AlignLeft)
@@ -376,12 +366,30 @@ class PagesMixin(WindowBase):
                 f"Какие порты {proto.upper()} обходить для игр (когда обход для игр включён). Через запятую, "
                 f"диапазоны через дефис. Пусто, по умолчанию: {default}"
                 + (" (1935 пропущен, трансляции OBS)." if proto == "tcp" else "."), e))
+        prow = QHBoxLayout()
+        prow.setContentsMargins(12, 8, 8, 8)
+        prow.setSpacing(8)
+        self.btn_preset_add = q(QPushButton("Добавить пресет…"), objectName="tonal")
+        self.btn_preset_add.setToolTip("Свой general*.bat из Flowseal: файл проверится, скопируется в data/presets "
+                                       "и появится в списке стратегий как «свой: …». Обновление zapret его не тронет.")
+        self.btn_preset_add.clicked.connect(self.add_preset)
+        self.btn_presets_open = q(QPushButton("Открыть папку пресетов"), objectName="text")
+        self.btn_presets_open.setToolTip("Папка data/presets: можно положить .bat туда вручную")
+        self.btn_presets_open.clicked.connect(self.open_presets)
+        prow.addWidget(self.btn_preset_add)
+        prow.addWidget(self.btn_presets_open)
+        prow.addStretch()
+        groups["adv"].addLayout(prow)
+        bl.addWidget(q(QLabel("Проверки"), objectName="section"))
+        self.checks_box = ChecksBox()  # своя карточка, а не внутри «Дополнительно»: иначе её не найти
+        self.checks_box.changed.connect(self.on_checks_saved)
+        bl.addWidget(self.checks_box)
         bl.addWidget(q(QLabel("DNS"), objectName="section"))
         dbox = q(QFrame(), objectName="group")
         dl = QVBoxLayout(dbox)
         dl.setContentsMargins(16, 14, 16, 16)
         dl.setSpacing(8)
-        self.dns_combo = QComboBox()
+        self.dns_combo = fit_combo(QComboBox())
         self.dns_combo.setToolTip("Какой DNS ставить системе. «Авто» проверяет популярные и DNS провайдера и "
                                   "выбирает самый быстрый среди тех, кто не подменяет ответы")
         for label, mode in DNS_MODES:
@@ -476,18 +484,16 @@ class PagesMixin(WindowBase):
         self.btn_diag = q(QPushButton("Найти проблемы"), objectName="primary")
         self.btn_diag.clicked.connect(self.run_diag)
         drow.addWidget(self.btn_diag)
-        self.btn_report = QPushButton("Сохранить в zip…")
-        self.btn_report.setToolTip("Собрать журнал, диагностику и настройки в zip, чтобы отправить разработчику. "
-                                   "Имя пользователя Windows в отчёте скрыто.")
-        self.btn_report.clicked.connect(self.save_report)
+        self.btn_report = q(QPushButton("Отчёт…"), objectName="tonal")
+        self.btn_report.setToolTip("Собрать журнал, диагностику и настройки в zip или открыть страницу отправки "
+                                   "на GitHub. Имя пользователя Windows в отчёте скрыто.")
+        self.btn_report.clicked.connect(self.report_menu)
         drow.addWidget(self.btn_report)
-        self.btn_send = q(QPushButton("Отправить отчёт разработчику…"), objectName="tonal")
-        self.btn_send.setToolTip("Не помогло? Откроется страница GitHub с готовым отчётом: версии, найденные "
-                                 "проблемы и конец журнала. Имя пользователя и IP-адреса скрыты. Нужен аккаунт GitHub.")
-        self.btn_send.clicked.connect(lambda: self.send_report())
-        drow.addWidget(self.btn_send)
         drow.addStretch()
         lay.addLayout(drow)
+        self.diag_hint = q(QLabel("Пока не проверяли. «Найти проблемы» занимает пару секунд и обход не трогает."),
+                           objectName="muted", wordWrap=True)
+        lay.addWidget(self.diag_hint)
         self.diag_table = QTableWidget(0, 3)
         self.diag_table.setHorizontalHeaderLabels(["Проверка", "Результат", ""])
         hh = self.diag_table.horizontalHeader()
@@ -515,13 +521,14 @@ class PagesMixin(WindowBase):
         lay.addWidget(stats)
         self.logbox = q(QPlainTextEdit(), readOnly=True)
         self.logbox.setMaximumBlockCount(5000)  # runs for weeks: keep the widget small
+        self.logbox.setPlaceholderText("Пока ничего не записано: программа пишет сюда запуски, проверки и подбор.")
         lay.addWidget(self.logbox, 1)
         return page
 
     def _page_lists(self) -> QWidget:
         page, lay = self._page()
         self._header(lay, "Списки", "Ваши списки сайтов и адресов. Обход перечитывает их сам после сохранения.")
-        self.list_combo = QComboBox()
+        self.list_combo = fit_combo(QComboBox())
         names = {"list-general-user.txt": "Сайты, для которых включить обход",
                  "list-exclude-user.txt": "Сайты, которые обход не трогает",
                  "ipset-exclude-user.txt": "IP-адреса, которые обход не трогает",
@@ -537,22 +544,16 @@ class PagesMixin(WindowBase):
         self.lbl_list_count = q(QLabel(), objectName="muted")
         lay.addWidget(self.lbl_list_count)
         self.list_edit = q(QPlainTextEdit(), objectName="editor")
-        self.list_edit.setMaximumHeight(260)  # не растягивать пустое поле на пол-экрана
-        lay.addWidget(self.list_edit, 1)
+        lay.addWidget(self.list_edit, 1)  # редактор забирает всю высоту: без этого пустота расползалась между строками
         r = QHBoxLayout()
         r.setSpacing(8)
         b = q(QPushButton("Сохранить"), objectName="primary")
         b.setMinimumWidth(140)
         b.clicked.connect(self.save_list)
-        self.btn_ipset = QPushButton("Обновить IP-список с GitHub")
-        self.btn_ipset.setMinimumWidth(220)
-        self.btn_ipset.setToolTip("Скачать свежий список IP-диапазонов (Cloudflare и др.) для обхода")
-        self.btn_ipset.clicked.connect(self.update_ipset)
         b_open = q(QPushButton("Открыть папку списков"), objectName="text")
         b_open.setToolTip("Открыть папку с файлами списков в проводнике")
         b_open.clicked.connect(lambda: os.startfile(str(paths.LISTS)))
         r.addWidget(b)
-        r.addWidget(self.btn_ipset)
         r.addStretch()
         r.addWidget(b_open)
         lay.addLayout(r)
@@ -600,7 +601,7 @@ class PagesMixin(WindowBase):
         for name, ok in res.items():
             slow = name == "YouTube" and ok and speed is False
             self.chips.addWidget(StatusChip(name, ok and not slow, "медленно" if slow else ""))
-        self.chips.addStretch()
+        self.chips.invalidate()
 
     def set_advanced(self, on: bool, save: bool = True):
         """Show/hide expert settings and the raw lists editor."""

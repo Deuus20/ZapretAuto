@@ -213,15 +213,17 @@ def test_smart_app_control_reported(monkeypatch):
     assert rows["Smart App Control"]["level"] == "err"
     assert "Smart App Control" in diag.first_problem()            # also the cause shown when winws won't start
 
-def test_diagnostics_read_services_and_doh_in_two_calls(monkeypatch):
-    """Раньше прогон диагностики запускал 10 процессов PowerShell только на службы; теперь, один."""
+def test_diagnostics_read_services_timestamps_and_doh_in_one_call(monkeypatch):
+    """Один процесс PowerShell на службы, TCP timestamps и DoH вместо трёх (по ~1,1 с каждый)."""
+    import json
+
     from app import diag
     calls = []
+    payload = json.dumps({"services": {"BFE": "Running", "zapret": "Stopped", "WinDivert": "Running"},
+                          "timestamps": "Enabled", "doh": 2, "auto": 2, "dns": "1.1.1.1 8.8.8.8"})
     def fake_ps(name):
         calls.append(name)
-        return {"services": (0, "BFE=Running\nzapret=Stopped\nWinDivert=Running"),
-                "timestamps": (0, "enabled"),
-                "doh": (0, "doh=2;auto=2;dns=1.1.1.1 8.8.8.8")}[name]
+        return 0, payload
     monkeypatch.setattr(diag, "_ps", fake_ps)
     monkeypatch.setattr(diag, "_procs", lambda: set())
     monkeypatch.setattr(diag, "missing_files", lambda: [])
@@ -230,11 +232,33 @@ def test_diagnostics_read_services_and_doh_in_two_calls(monkeypatch):
     monkeypatch.setattr(diag, "_discord_caches", lambda: [])
     monkeypatch.setattr(diag, "_quic_disabled", lambda: True)
     rows = {r["label"]: r for r in diag.run_checks()}
-    assert calls.count("services") == 1 and sorted(set(calls)) == ["doh", "services", "timestamps"]
+    assert calls == ["env"]
     assert rows["Base Filtering Engine"]["level"] == "ok" and rows["Служба zapret"]["level"] == "ok"
-    assert rows["DNS и DoH"]["level"] == "ok"
+    assert rows["TCP timestamps"]["level"] == "ok" and rows["DNS и DoH"]["level"] == "ok"
     with pytest.raises(ValueError):  # чужое имя службы в сценарий PowerShell не подставляем
         diag._svc_status("BFE'; rm -rf /; '")
+
+def test_diagnostics_fall_back_to_separate_calls(monkeypatch):
+    """Старый PowerShell или мусор в выводе: три отдельных вызова, как раньше, вместо пустых строк."""
+    from app import diag
+    calls = []
+    def fake_ps(name):
+        calls.append(name)
+        return {"env": (0, "не JSON вовсе"),
+                "services": (0, "BFE=Running"),
+                "timestamps": (0, "Disabled"),
+                "doh": (0, "doh=1;auto=2;dns=1.1.1.1")}[name]
+    monkeypatch.setattr(diag, "_ps", fake_ps)
+    monkeypatch.setattr(diag, "_procs", lambda: set())
+    monkeypatch.setattr(diag, "missing_files", lambda: [])
+    monkeypatch.setattr(diag, "flowseal_hosts", lambda: [])
+    monkeypatch.setattr(diag, "dns_poisoned", lambda: [])
+    monkeypatch.setattr(diag, "_discord_caches", lambda: [])
+    monkeypatch.setattr(diag, "_quic_disabled", lambda: True)
+    rows = {r["label"]: r for r in diag.run_checks(fresh=True)}
+    assert sorted(set(calls)) == ["doh", "env", "services", "timestamps"]
+    assert rows["Base Filtering Engine"]["level"] == "ok"
+    assert rows["TCP timestamps"]["detail"] == "disabled"
 
 def test_diagnostics_cache_expires_after_fix(monkeypatch):
     from app import diag

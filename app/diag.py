@@ -1,5 +1,6 @@
 """Environment diagnostics for winws/WinDivert."""
 import ctypes
+import json
 import re
 import subprocess
 import time
@@ -37,6 +38,24 @@ SCRIPTS: dict[str, str] = {
     "dnsservers": "Get-DnsClientServerAddress -AddressFamily IPv4 -EA SilentlyContinue | "
                   "Where-Object { $_.ServerAddresses } | ForEach-Object { "
                   "$_.InterfaceAlias + '=' + ($_.ServerAddresses -join ',') }",
+    # Всё, что нужно прогону, одним процессом: службы, TCP timestamps и DoH. Раньше на это уходило три
+    # запуска PowerShell (около 1,1 с каждый), теперь один. Ошибки не печатаем в stdout: там должен быть
+    # только JSON, поэтому каждая проверка в try и с $ErrorActionPreference.
+    "env": (
+        "$ErrorActionPreference='SilentlyContinue';"
+        f"$want=@({_SVC_NAMES});"
+        "$svc=@{}; Get-Service -EA SilentlyContinue | Where-Object { $want -contains $_.Name } | "
+        "ForEach-Object { $svc[$_.Name]=[string]$_.Status };"
+        "try { $ts=[string](Get-NetTCPSetting -SettingName Internet).Timestamps } catch { $ts='' };"
+        r"$n=0; $p='HKLM:\System\CurrentControlSet\Services\Dnscache\InterfaceSpecificParameters'; "
+        r"if(Test-Path $p){ Get-ChildItem $p -Recurse -ErrorAction SilentlyContinue | ForEach-Object { "
+        r"$v=(Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DohFlags; if($v -gt 0){$n++} } }; "
+        r"$a=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Dnscache\Parameters' "
+        r"-EA SilentlyContinue).EnableAutoDoh; "
+        "if($null -eq $a){ $a=-1 };"
+        r"$d=((Get-DnsClientServerAddress -AddressFamily IPv4 -EA SilentlyContinue).ServerAddresses -join ' '); "
+        "[pscustomobject]@{ services=$svc; timestamps=$ts; doh=$n; auto=$a; dns=$d } | ConvertTo-Json -Compress"
+    ),
 }
 def _decode(b: bytes, oem: int | None = None) -> str:
     """Console programs (sc, net, taskkill, powershell) print in the OEM code page, not UTF-8: decoding their
@@ -57,6 +76,39 @@ def _run(args: list[str], timeout=20) -> tuple[int, str]:
 def _ps(name: str) -> tuple[int, str]:
     """Запустить один из SCRIPTS по имени. Текст команды берётся только оттуда."""
     return _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", SCRIPTS[name]])
+def _env() -> dict:
+    """Службы, TCP timestamps и DoH одним вызовом PowerShell. Пусто, если JSON не разобрался: тогда
+    run_checks спрашивает то же по отдельности, как раньше."""
+    global _svc_cache
+    rc, out = _ps("env")
+    if rc != 0:
+        return {}
+    i, j = out.find("{"), out.rfind("}")
+    if not 0 <= i < j:
+        return {}
+    try:
+        data = json.loads(out[i:j + 1])
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    svc = data.get("services")
+    if isinstance(svc, dict) and svc:  # пустой словарь не кэшируем: иначе службы больше не спросятся отдельно
+        _svc_cache = {str(k): str(v) for k, v in svc.items() if v}
+    return data
+def _tcp_timestamps(env: dict) -> str | None:
+    """Enabled/Disabled из общего вызова, иначе отдельный скрипт."""
+    if "timestamps" in env:
+        return str(env.get("timestamps") or "").strip().lower()
+    rc, out = _ps("timestamps")
+    return out.strip().lower() if rc == 0 else None
+def _doh_fields(env: dict) -> dict[str, str]:
+    """doh/auto/dns из общего вызова, иначе отдельный скрипт."""
+    if "doh" in env:
+        return {"doh": str(env.get("doh")), "auto": str(env.get("auto")),
+                "dns": str(env.get("dns") or "")}
+    rc, out = _ps("doh")
+    return dict(part.split("=", 1) for part in out.strip().split(";") if "=" in part)
 _svc_cache: dict[str, str] | None = None
 def _svc_status(name: str) -> str | None:
     """Service status string (Running/Stopped/...) or None if absent. Все службы читаются одним вызовом."""
@@ -154,12 +206,12 @@ def run_checks(fresh: bool = False) -> list[dict]:
     _svc_cache = None
     res = []
     procs = _procs()
+    env = _env()  # один вызов PowerShell на службы, timestamps и DoH
     st = _svc_status("BFE")
     res.append(_item("Base Filtering Engine", "ok" if st == "Running" else "err",
                      f"служба: {st or 'не найдена'}" + ("" if st == "Running" else ", WinDivert не заработает")))
-    rc, out = _ps("timestamps")
-    ts = out.strip().lower()
-    if rc == 0 and ts in ("enabled", "disabled"):
+    ts = _tcp_timestamps(env)
+    if ts in ("enabled", "disabled"):
         res.append(_item("TCP timestamps", "ok" if ts == "enabled" else "warn", ts,
                          None if ts == "enabled" else "tcp_timestamps"))
     else:
@@ -208,8 +260,7 @@ def run_checks(fresh: bool = False) -> list[dict]:
         res.append(_item("WinDivert", "err", "служба отключена, обход из-за неё не запустится", "windivert_repair"))
     else:
         res.append(_item("WinDivert", "ok", f"служба готова к запуску ({wst.start})"))
-    rc, out = _ps("doh")
-    fields = dict(part.split("=", 1) for part in out.strip().split(";") if "=" in part)
+    fields = _doh_fields(env)
     try:
         n = int(fields.get("doh", ""))
     except ValueError:

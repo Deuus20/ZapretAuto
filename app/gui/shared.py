@@ -12,7 +12,19 @@ from app.runner import Runner
 
 from . import style
 from .style import COLORS, app_icon, init_fonts
-from .widgets import InputRow, Pages, PowerButton, Rail, SettingRow, StatusChip, Switch, TextLine, q
+from .widgets import (
+    FlowLayout,
+    InputRow,
+    Pages,
+    PowerButton,
+    Rail,
+    SettingRow,
+    StatusChip,
+    Switch,
+    TextLine,
+    fit_combo,
+    q,
+)
 from .worker import Bridge, Worker
 
 try:  # модули приложения есть всегда, кроме урезанной сборки: тогда окно работает без обновлений/игр
@@ -31,7 +43,7 @@ TASK = "ZapretAuto"
 AUTO = "Авто (результат подбора)"
 UPDATE_EVERY = 6 * 3600  # s between background update checks
 
-__all__ = ["AUTO", "COLORS", "UPDATE_EVERY", "Any", "Bridge", "InputRow", "Pages", "PowerButton", "QWidget", "ROOT",
-           "Rail", "Runner", "SettingRow", "StatusChip", "Switch", "TASK", "TextLine", "Worker", "app_icon", "diag",
-           "gamewatch", "init_fonts", "lists", "logs", "q", "stats", "strategies", "style", "tester", "updater",
-           "whitelist", "dns"]
+__all__ = ["AUTO", "COLORS", "UPDATE_EVERY", "Any", "Bridge", "FlowLayout", "InputRow", "Pages", "PowerButton",
+           "QWidget", "ROOT", "Rail", "Runner", "SettingRow", "StatusChip", "Switch", "TASK", "TextLine", "Worker",
+           "app_icon", "diag", "fit_combo", "gamewatch", "init_fonts", "lists", "logs", "q", "stats", "strategies",
+           "style", "tester", "updater", "whitelist", "dns"]

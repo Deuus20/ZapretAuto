@@ -51,6 +51,88 @@ def test_quick_check_speed_sample_is_hourly(monkeypatch):
     assert "YouTubeSpeedLight" in seen and r["Скорость YouTube"] is True
     assert "TelegramDC2" in seen and "TelegramDC4" in seen  # Telegram gets its own probes in every check
 
+def test_telegram_ws_alive(monkeypatch):
+    """WS-канал Telegram жив, если отвечает хотя бы один из kws*: тогда нужен прокси, а не VPN."""
+    monkeypatch.setattr(tester, "probe_all", lambda ts: {"TelegramWS1": None, "TelegramWS2": 0.2})
+    assert tester.telegram_ws_alive() is True
+    monkeypatch.setattr(tester, "probe_all", lambda ts: {"TelegramWS1": None, "TelegramWS2": None})
+    assert tester.telegram_ws_alive() is False
+
+def test_telegram_hint_offers_a_proxy_when_ws_is_alive():
+    msg = tester.telegram_hint(False, True, True)
+    assert msg and "tg-ws-proxy" in msg and "не обязательно" in msg
+    assert "нужен VPN" in tester.telegram_hint(False, True, False)     # и прокси-путь закрыт
+    assert "ни сайт, ни серверы" in tester.telegram_hint(False, False, None)
+    assert "нужен прокси или VPN" in tester.telegram_hint(False, True, None)
+    assert tester.telegram_hint(True, True, True) is None               # приложение работает: молчим
+
+
+def test_quick_check_custom_and_hidden_checks(tmp_path, monkeypatch):
+    """«Настроить проверки»: свой адрес становится плашкой, скрытая встроенная исчезает, битый адрес - нет."""
+    monkeypatch.setattr(tester, "vpn_active", lambda: None)
+    monkeypatch.setattr(tester, "egress_ip", lambda: "1.2.3.4")
+    monkeypatch.setattr(tester, "load_targets", lambda: [tester.Target("DiscordMain", "https://x")])
+    settings.save_settings(checks={"hidden": ["Telegram (веб)"], "custom": [
+        {"name": "Мой сайт", "url": "https://example.com"},
+        {"name": "Плохой", "url": "ftp://example.com"},
+    ]})
+    seen = []
+    def probe_all(ts):
+        seen.extend(t.key for t in ts)
+        return {t.key: (None if t.key.endswith("Мой сайт") else 0.1) for t in ts}
+    monkeypatch.setattr(tester, "probe_all", probe_all)
+    monkeypatch.setattr(tester.time, "sleep", lambda s: None)
+    r = tester.quick_check()
+    assert "Telegram (веб)" not in r and "Telegram (приложение)" in r   # скрыли только веб
+    assert r["Мой сайт"] is False                                        # свой адрес проверен и не ответил
+    assert "ftp://example.com" not in seen and "Плохой" not in r         # чужой протокол отброшен
+
+def test_hidden_builtin_check_is_not_even_probed(tmp_path, monkeypatch):
+    """Скрытая плашка не только не показывается: её адреса вообще не проверяются (экономия и точность)."""
+    monkeypatch.setattr(tester, "vpn_active", lambda: None)
+    monkeypatch.setattr(tester, "egress_ip", lambda: "1.2.3.4")
+    monkeypatch.setattr(tester, "load_targets", lambda: [tester.Target("DiscordMain", "https://x"),
+                                                         tester.Target("DiscordGateway", "https://y")])
+    settings.save_settings(checks={"hidden": ["Discord"], "custom": []})
+    seen = []
+    def probe_all(ts):
+        seen.extend(t.key for t in ts)
+        return {t.key: 0.1 for t in ts}
+    monkeypatch.setattr(tester, "probe_all", probe_all)
+    monkeypatch.setattr(tester.time, "sleep", lambda s: None)
+    r = tester.quick_check()
+    assert "Discord" not in r
+    assert "DiscordMain" not in seen and "DiscordGateway" not in seen  # цели скрытой проверки не проверялись
+
+def test_hidden_speed_check_is_not_probed(tmp_path, monkeypatch):
+    """Скрытая «Скорость YouTube» не тратит трафик даже в фоновом прогоне с образцом скорости."""
+    monkeypatch.setattr(tester, "vpn_active", lambda: None)
+    monkeypatch.setattr(tester, "egress_ip", lambda: "1.2.3.4")
+    monkeypatch.setattr(tester, "load_targets", lambda: [])
+    settings.save_settings(checks={"hidden": ["Скорость YouTube"], "custom": []})
+    seen = []
+    def probe_all(ts):
+        seen.extend(t.key for t in ts)
+        return {t.key: 0.1 for t in ts}
+    monkeypatch.setattr(tester, "probe_all", probe_all)
+    monkeypatch.setattr(tester.time, "sleep", lambda s: None)
+    r = tester.quick_check(light=True, speed=True)
+    assert "YouTubeSpeedLight" not in seen and "Скорость YouTube" not in r
+
+def test_valid_target_checks_the_port():
+    assert tester.valid_target("https://example.com") and tester.valid_target("tcp://example.com:443")
+    assert not tester.valid_target("tcp://example.com:0") and not tester.valid_target("tcp://example.com:99999")
+    assert not tester.valid_target("ftp://example.com") and not tester.valid_target("tcp://example.com")
+
+def test_checks_config_ignores_broken_settings(tmp_path, monkeypatch):
+    """Ручная правка settings.json не должна ронять окно: мусор в checks отбрасывается."""
+    settings.save_settings(checks="не словарь")
+    assert tester.checks_config() == ([], [])
+    settings.save_settings(checks={"hidden": ["Нет такой", 5], "custom": [{"name": "Discord", "url": "https://x"},
+                                                                          "junk", {"name": "X", "url": "ftp://y"}]})
+    hidden, custom = tester.checks_config()
+    assert hidden == [] and custom == []  # имя встроенной проверки и чужой протокол не проходят
+
 def test_telegram_targets_are_checked_with_and_without_the_option(tmp_path, monkeypatch):
     """Web, the t.me site and two data centres: the app talks to them directly, so this is its own answer."""
     monkeypatch.setattr(paths, "VENDOR", tmp_path)

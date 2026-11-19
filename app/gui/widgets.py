@@ -1,13 +1,15 @@
 """Custom widgets of the Material 3 look: switch, navigation rail, pages, power button, setting rows."""
 from typing import Any, TypeVar
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QEasingCurve, QPoint, QPointF, QRect, QRectF, QSize, Qt, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
+    QComboBox,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -159,6 +161,84 @@ class InputRow(QWidget):
         edit.setToolTip(text)
         edit.setFixedWidth(width)
         lay.addWidget(edit, 0, Qt.AlignmentFlag.AlignVCenter)
+def fit_combo(cb: QComboBox, rows: int = 12) -> QComboBox:
+    """Длинный список не разворачивается на весь экран: не больше rows строк с прокруткой, ширина по
+    содержимому, длинные имена обрезаются справа. Один вид для всех выпадающих списков в программе."""
+    cb.setMaxVisibleItems(rows)
+    cb.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+    view = cb.view()
+    if view is not None:
+        view.setTextElideMode(Qt.TextElideMode.ElideRight)
+    return cb
+
+
+def fit_font(font: QFont, text: str, room: int) -> QFont:
+    """Шрифт не крупнее исходного, при котором подпись влезает в room пикселей (минимум 8 px)."""
+    f = QFont(font)
+    while f.pixelSize() > 8 and QFontMetrics(f).horizontalAdvance(text) > room:
+        f.setPixelSize(f.pixelSize() - 1)
+    return f
+
+
+class FlowLayout(QLayout):
+    """Плашки переносятся на следующую строку, а не уезжают за край карточки.
+
+    Число проверок не ограничено: своих адресов может быть сколько угодно, и в одну строку они не влезают.
+    Раскладка спрашивает heightForWidth, поэтому родительский QVBoxLayout сам отводит нужную высоту."""
+    def __init__(self, parent=None, spacing: int = 6):
+        super().__init__(parent)
+        self._items: list[Any] = []
+        self.setSpacing(spacing)
+        self.setContentsMargins(0, 0, 0, 0)
+    def addItem(self, item) -> None:  # noqa: N802 (Qt API)
+        self._items.append(item)
+        self.invalidate()
+    def count(self) -> int:
+        return len(self._items)
+    def itemAt(self, i: int):  # noqa: N802
+        return self._items[i] if 0 <= i < len(self._items) else None
+    def takeAt(self, i: int):  # noqa: N802
+        item = self._items.pop(i) if 0 <= i < len(self._items) else None
+        self.invalidate()
+        return item
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+    def expandingDirections(self) -> Qt.Orientation:  # noqa: N802
+        # по умолчанию layout просит всё свободное место и пустая строка плашек съедала высоту страницы
+        return Qt.Orientation(0)
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        return self._lay_out(QRect(0, 0, width, 0), test=True)
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802
+        super().setGeometry(rect)
+        self._lay_out(rect, test=False)
+    def sizeHint(self) -> QSize:
+        return self.minimumSize()
+    def minimumSize(self) -> QSize:
+        size = QSize(0, 0)
+        for it in self._items:
+            size = size.expandedTo(it.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+    def _lay_out(self, rect: QRect, test: bool) -> int:
+        m = self.contentsMargins()
+        x0 = rect.x() + m.left()
+        y = rect.y() + m.top()
+        x = x0
+        right = rect.x() + rect.width() - m.right()
+        row = 0
+        for it in self._items:
+            hint = it.sizeHint()
+            if row and x + hint.width() > right:  # не влезло в строку: начинаем следующую
+                x = x0
+                y += row + self.spacing()
+                row = 0
+            if not test:
+                it.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + self.spacing()
+            row = max(row, hint.height())
+        return y + row - rect.y() + m.bottom()
+
+
 class RailButton(QAbstractButton):
     """Navigation rail destination: icon in a pill-shaped active indicator, label below."""
     def __init__(self, icon: str, text: str, parent=None):
@@ -169,7 +249,7 @@ class RailButton(QAbstractButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # Ctrl+1..6 switch pages; a focus pill on start looked like a 2nd selection
-        self.setFixedSize(68, 54)
+        self.setFixedSize(96, 54)
         self.setToolTip(text)
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
@@ -190,7 +270,14 @@ class RailButton(QAbstractButton):
         f.setWeight(QFont.Weight.DemiBold if on else QFont.Weight.Medium)
         p.setFont(f)
         p.setPen(QColor(C["on_surface"] if on else C["on_surface_variant"]))
-        p.drawText(QRectF(0, 34, self.width(), 16), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self.text())
+        # «Диагностика» шире кнопки: уменьшаем шрифт, а если и это не помогло - многоточие, иначе текст
+        # вылезал за край рейла
+        room = self.width() - 6
+        f = fit_font(f, self.text(), room)
+        p.setFont(f)
+        fm = QFontMetrics(f)
+        label = fm.elidedText(self.text(), Qt.TextElideMode.ElideRight, room)
+        p.drawText(QRectF(0, 34, self.width(), 16), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, label)
         p.end()
 class Rail(QWidget):
     """Vertical navigation rail; emits the index of the chosen destination."""
@@ -199,7 +286,7 @@ class Rail(QWidget):
         super().__init__(parent)
         self.setObjectName("rail")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedWidth(76)
+        self.setFixedWidth(104)
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(4, 10, 4, 10)
         self._lay.setSpacing(4)

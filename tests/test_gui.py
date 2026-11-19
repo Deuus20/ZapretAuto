@@ -1,4 +1,4 @@
-"""Тесты окна и трея: поднимают QApplication и MainWindow."""
+﻿"""Тесты окна и трея: поднимают QApplication и MainWindow."""
 import time
 
 import pytest
@@ -197,6 +197,608 @@ def test_gui_add_game_shows_it_and_turns_watch_on(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
+
+def test_gui_adds_a_user_preset(tmp_path, monkeypatch):
+    """«Добавить пресет»: файл проверяется, копируется в data/presets и сразу виден в списке стратегий."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    src = next(paths.VENDOR.glob("general.bat")).read_text(encoding="utf-8")
+    f = tmp_path / "general (MY).bat"
+    f.write_text(src, encoding="utf-8")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **k: (str(f), ""))
+    w = MainWindow()
+    try:
+        w.tray.showMessage = lambda *a, **k: None
+        w.add_preset()
+        assert w.combo.findText("свой: MY") >= 0
+        assert (paths.PRESETS / "MY.bat").read_text(encoding="utf-8") == src
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_mix_rows_are_not_squeezed():
+    """Строки групп получают свою высоту: карточка больше не сжимается и текст не наезжает."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.mix_page import MixPage
+    page = MixPage()
+    page.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    page.resize(900, 620)
+    page.show()
+    try:
+        page.reload("ALT8")
+        app.processEvents()
+        assert page._rows
+        for _group, cb in page._rows:
+            row = cb.parentWidget()
+            assert row.height() >= row.minimumSizeHint().height()
+        assert page.presets_box.isHidden()  # пустая карточка «Мои пресеты» не рисует полоску
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+
+def test_home_after_revert_keeps_the_old_order(tmp_path, monkeypatch):
+    """Главная как была: прогресс скрыт, плашки отдельной строкой, «?» только у комбинации."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        assert w.progress.isHidden()
+        assert w.chips.parentWidget() is w.tabs.widget(0)  # плашки отдельной строкой страницы, а не в шапке
+        w.save(strategy={"base": "ALT8", "picks": {}})
+        w.refresh()
+        assert w.btn_desc_help.isHidden()  # полное имя совпадает с коротким
+        w.save(strategy={"base": "ALT8", "picks": {"tcp:443:list-google": "FAKE TLS AUTO ALT"}})
+        w.refresh()
+        assert not w.btn_desc_help.isHidden()  # у комбинации есть что показать
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_checks_box_does_not_save_on_load(tmp_path, monkeypatch):
+    """Загрузка карточки проверок не считается правкой: иначе при каждом открытии шло бы сохранение."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.checks_box import ChecksBox
+    settings.save_settings(checks={"hidden": ["Скорость YouTube"], "custom": [
+        {"name": "x.example", "url": "https://x.example"}]})
+    page = ChecksBox()
+    try:
+        got = []
+        page.changed.connect(got.append)
+        page.load()
+        assert got == []  # ни одного «сохранения» от загрузки
+        assert not page.boxes["Скорость YouTube"].isChecked()
+        assert len(page._rows) == 1
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+def test_check_access_does_not_run_twice(tmp_path, monkeypatch):
+    """Второй запрос проверки во время прогона не запускает второй: он ждёт и повторяется после."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        started = []
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: started.append(done))
+        w.check_access()
+        w.check_access()  # пока идёт первый прогон
+        assert len(started) == 1 and w._check_pending
+        started[0]({"Discord": True})  # прогон закончился
+        assert len(started) == 2 and not w._check_pending
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_gui_deleted_preset_base_resets_strategy(tmp_path, monkeypatch):
+    """Удалили пресет, который был основой: стратегия очищается, ссылки на файл не остаётся."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app import strategies
+    from app.gui.window import MainWindow
+    by = {s.name: s for s in strategies.load_all()}
+    saved = strategies.save_preset("основа", strategies.mix("x", {}, by["ALT8"]))
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        w.save(strategy={"base": saved, "picks": {}})
+        w.on_mix_deleted(saved)
+        assert not w.settings.get("strategy")  # выбирать нечего: прошлой комбинации нет
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_diag_hint_hides_after_the_run(tmp_path, monkeypatch):
+    """Подсказка «Пока не проверяли» исчезает после прогона, таблица видна всегда и не ломает раскладку."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        assert not w.diag_hint.isHidden() and not w.diag_table.isHidden()
+        w.on_diag_done([{"label": "BFE", "level": "ok", "detail": "служба: Running", "fix": None}])
+        assert w.diag_hint.isHidden() and not w.diag_table.isHidden()
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_mix_counter_and_reset():
+    """Внизу микса видно, сколько групп заменено, и замены можно сбросить одной кнопкой."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.mix_page import MixPage
+    page = MixPage()
+    try:
+        page.reload("ALT8")
+        total = len(page._rows)
+        assert page.lbl_changed.text() == f"заменено 0 из {total}"
+        assert not page.btn_reset.isEnabled()
+        group, cb = next((g, c) for g, c in page._rows if c.count() > 1)
+        cb.setCurrentIndex(1)
+        assert page.lbl_changed.text() == f"заменено 1 из {total}"
+        assert page.btn_reset.isEnabled()
+        page._reset()
+        assert page.lbl_changed.text() == f"заменено 0 из {total}"
+        assert all(c.currentIndex() == 0 for _g, c in page._rows)
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+def test_gui_report_menu_has_both_actions(tmp_path, monkeypatch):
+    """«Отчёт…» - одно меню на два действия: zip-файл и страница отправки. Отдельной кнопки нет."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        assert [a.text() for a in w._report_actions().actions()] == ["Сохранить в zip…", "Отправить разработчику…"]
+        assert not hasattr(w, "btn_send")
+        assert w.btn_report.text() == "Отчёт…"
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_mix_name_lives_in_the_preset_card():
+    """Имя пресета и основа - строки одной карточки, а не поле, висящее на фоне страницы."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QWidget
+    app = QApplication.instance() or QApplication([])
+    from app.gui.mix_page import MixPage
+    page = MixPage()
+
+    def card_of(widget) -> QWidget | None:
+        p = widget.parentWidget()
+        while p is not None and p.objectName() != "card":
+            p = p.parentWidget()
+        return p
+    try:
+        assert card_of(page.name) is not None
+        assert card_of(page.name) is card_of(page.base)  # обе строки в карточке «Пресет»
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+def test_gui_missing_preset_file_is_dropped_from_the_list(tmp_path, monkeypatch):
+    """Пресет удалили мимо приложения: список перечитывается, мёртвая ссылка в настройках снимается."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app import strategies
+    from app.gui.window import MainWindow
+    by = {s.name: s for s in strategies.load_all()}
+    saved = strategies.save_preset("пропавший", strategies.mix("x", {}, by["ALT8"]))
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        w.save(strategy={"base": saved, "picks": {}})
+        (paths.PRESETS / "пропавший.bat").unlink()  # удалили в проводнике, приложение не знает
+        w.reload_strategies()
+        assert w.combo.findText(saved) < 0
+        assert not w.settings.get("strategy")  # мёртвая ссылка снята, а не осталась в настройках
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_mix_page_collects_picks_from_another_strategy():
+    """Страница «Микс»: группа по умолчанию остаётся из основы, выбранная берётся из другой стратегии."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.mix_page import MixPage
+    page = MixPage()
+    try:
+        page.reload("ALT8")
+        assert page.base.currentText() == "ALT8" and page.name.text().startswith("микс ")
+        group, cb = next((g, c) for g, c in page._rows if c.count() > 1)
+        cb.setCurrentIndex(1)
+        picks = {g: c.currentData() for g, c in page._rows if c.currentData()}
+        assert picks == {group: cb.currentData()}
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+def test_gui_mix_page_saves_a_preset(tmp_path, monkeypatch):
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        page = w.page_mix
+        page.reload("ALT8")
+        group, cb = next((g, c) for g, c in page._rows if c.count() > 1)
+        cb.setCurrentIndex(1)
+        page.name.setText("тест микс")
+        page._save()
+        saved = w.settings["strategy"]["base"]
+        assert saved == "свой: тест микс" and w.combo.findText(saved) >= 0
+        assert (paths.PRESETS / "тест микс.bat").exists()
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_checks_page_hides_and_adds_addresses():
+    """Своя строка: тип выбирается списком, адрес и порт вводятся как обычные поля, без tcp:// вручную."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.checks_box import ChecksBox
+    page = ChecksBox()
+    try:
+        page.boxes["Скорость YouTube"].setChecked(False)
+        page.add_row("site", "example.com", "")
+        cfg, err = page.result_checks()
+        assert err == "" and cfg["hidden"] == ["Скорость YouTube"]
+        assert {"name": "example.com", "url": "https://example.com"} in cfg["custom"]
+        page.add_row("tcp", "192.168.1.10", "27015")
+        cfg, err = page.result_checks()
+        assert {"name": "192.168.1.10:27015", "url": "tcp://192.168.1.10:27015"} in cfg["custom"]
+        page.add_row("tcp", "192.168.1.11", "99999")  # порт вне диапазона
+        cfg, err = page.result_checks()
+        assert "порт" in err and cfg["custom"] == [{"name": "example.com", "url": "https://example.com"},
+                                                   {"name": "192.168.1.10:27015", "url": "tcp://192.168.1.10:27015"}]
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+def test_checks_page_saves_toggles_with_a_broken_row():
+    """Ошибка в одной строке не отменяет галочки: иначе человек снял её, а сохраниться она не успела."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.checks_box import ChecksBox
+    page = ChecksBox()
+    try:
+        page.add_row("tcp", "10.0.0.1", "")  # порт ещё не вписан
+        got = []
+        page.changed.connect(got.append)
+        page.boxes["Скорость YouTube"].setChecked(False)
+        assert got and "Скорость YouTube" in got[-1]["hidden"]
+        assert "порт" in page.status.text()
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+def test_checks_page_keeps_the_last_good_address():
+    """Недописанный порт не стирает уже сохранённый адрес и не сохраняет тот же конфиг второй раз."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.checks_box import ChecksBox
+    page = ChecksBox()
+    try:
+        page.add_row("tcp", "10.0.0.1", "27015")
+        page._changed()
+        cfg, err = page.result_checks()
+        assert err == "" and cfg["custom"] == [{"name": "10.0.0.1:27015", "url": "tcp://10.0.0.1:27015"}]
+        got = []
+        page.changed.connect(got.append)
+        row = page._rows[0]
+        row[3].setText("")  # порт стёрли: строка недописана
+        page._changed()
+        assert got == []  # конфиг не изменился: присылать его второй раз незачем
+        assert page.result_checks()[0]["custom"] == cfg["custom"]  # прошлый адрес остался
+        assert "порт" in page.status.text()
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+def test_checks_page_splits_a_stored_url():
+    """Адрес без порта из ручной правки settings.json не превращается в строку с портом «host»."""
+    pytest.importorskip("PySide6")
+    from app.gui.checks_box import ChecksBox
+    assert ChecksBox._split("tcp://example.com") == ("tcp", "example.com", "")
+    assert ChecksBox._split("stun://example.com:3478") == ("stun", "example.com", "3478")
+    assert ChecksBox._split("https://example.com/x") == ("site", "example.com/x", "")
+
+def test_gui_checks_apply_without_a_save_button(tmp_path, monkeypatch):
+    """Галочки и строки применяются сразу, но проверка доступа одна на серию правок."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.window import MainWindow
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        calls = []
+        monkeypatch.setattr(w, "check_access", lambda *a, **k: calls.append(1))
+        page = w.checks_box  # карточка в «Настройках», а не отдельная вкладка
+        page.boxes["Telegram (веб)"].setChecked(False)  # галочка сохраняется сразу
+        page.add_row("site", "x.example", "")
+        page._changed()  # то же, что делает таймер после ввода адреса
+        assert w.settings["checks"]["custom"] == [{"name": "x.example", "url": "https://x.example"}]
+        assert "Telegram (веб)" in w.settings["checks"]["hidden"]
+        assert calls == [] and w._checks_timer.isActive()  # иначе полный прогон на каждый дописанный символ
+        w._checks_timer.timeout.emit()  # пауза ввода закончилась
+        assert calls
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_gui_mix_page_deletes_own_preset(tmp_path, monkeypatch):
+    """На странице «Микс» свой пресет можно удалить, и файл действительно исчезает."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app import strategies
+    from app.gui.window import MainWindow
+    by = {s.name: s for s in strategies.load_all()}
+    saved = strategies.save_preset("на удаление", strategies.mix("x", {}, by["ALT8"]))
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        from PySide6.QtWidgets import QMessageBox
+        monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+        w.page_mix._delete(saved)
+        assert not (paths.PRESETS / "на удаление.bat").exists()
+        assert w.combo.findText(saved) < 0
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_gui_preset_delete_asks_first(tmp_path, monkeypatch):
+    """Случайный клик по «Удалить» не должен уносить файл: сначала вопрос, «Нет» ничего не удаляет."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    app = QApplication.instance() or QApplication([])
+    from app import strategies
+    from app.gui.window import MainWindow
+    by = {s.name: s for s in strategies.load_all()}
+    saved = strategies.save_preset("не удалять", strategies.mix("x", {}, by["ALT8"]))
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+        w.page_mix._delete(saved)
+        assert (paths.PRESETS / "не удалять.bat").exists()
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_mix_page_does_not_restore_a_reset_group():
+    """«Как в основе» не должно возвращаться после переключения вкладок: выбор человека важнее прошлого."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app.gui.mix_page import MixPage
+    page = MixPage()
+    try:
+        page.reload("ALT8")
+        group, cb = next((g, c) for g, c in page._rows if c.count() > 1)
+        cb.setCurrentIndex(1)
+        chosen = cb.currentText()
+        page.reload_keep()  # ушли на другую вкладку и вернулись
+        assert next(c for g, c in page._rows if g == group).currentText() == chosen
+        next(c for g, c in page._rows if g == group).setCurrentIndex(0)  # вернули «как в основе»
+        page.reload_keep()
+        assert next(c for g, c in page._rows if g == group).currentText() == "как в основе"
+        page.reload("ALT8", None)  # открыли страницу с главной, сохранённых замен нет
+        assert next(c for g, c in page._rows if g == group).currentText() == "как в основе"
+    finally:
+        page.deleteLater()
+        app.processEvents()
+
+def test_gui_deleted_preset_leaves_the_combination(tmp_path, monkeypatch):
+    """Удалённый пресет был заменой группы: ссылка на него не должна остаться ни в стратегии, ни в статусе."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "LISTS", tmp_path / "lists")
+    monkeypatch.setattr(paths, "PRESETS", tmp_path / "presets")
+    settings._cache = None
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from app import strategies
+    from app.gui.window import MainWindow
+    by = {s.name: s for s in strategies.load_all()}
+    saved = strategies.save_preset("замена", strategies.mix("x", {}, by["ALT8"]))
+    w = MainWindow()
+    try:
+        w.runner.stop()
+        w.save(strategy={"base": "ALT8", "picks": {"tcp:443:list-google": saved}})
+        w.on_mix_deleted(saved)
+        c = w.settings["strategy"]
+        assert c["base"] == "ALT8" and c["picks"] == {}  # группа снова берётся из основы
+        assert saved not in w.describe_full()
+    finally:
+        w.tray.hide()
+        w._timer.stop()
+        w.deleteLater()
+        app.processEvents()
+
+def test_chips_wrap_instead_of_running_off_the_card():
+    """Свои проверки добавляют плашки: они переносятся на следующую строку, а не уезжают за край."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QWidget
+    app = QApplication.instance() or QApplication([])
+    from app.gui.widgets import FlowLayout
+    box = QWidget()
+    flow = FlowLayout(box)
+    for _ in range(3):
+        chip = QWidget(box)
+        chip.setFixedSize(100, 20)
+        flow.addWidget(chip)
+    assert flow.heightForWidth(1000) == 20  # всё в одну строку
+    assert flow.heightForWidth(250) == 46  # две строки: 20 + 6 + 20
+    assert flow.heightForWidth(150) == 72  # три: в строку влезает только одна плашка
+    box.deleteLater()
+    app.processEvents()
+
+def test_rail_label_shrinks_instead_of_clipping():
+    """«Диагностика» не влезала в рейл: подпись уменьшается, а не обрезается краем окна."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QFont, QFontMetrics
+    from PySide6.QtWidgets import QApplication
+    _app = QApplication.instance() or QApplication([])  # держим ссылку: без неё Qt может освободить приложение
+    from app.gui.widgets import fit_font
+    f = QFont()
+    f.setPixelSize(11)
+    fitted = fit_font(f, "Диагностика", 90)
+    assert QFontMetrics(fitted).horizontalAdvance("Диагностика") <= 90
+    assert 8 <= fitted.pixelSize() <= 11
+    assert fit_font(f, "Игры", 90).pixelSize() == 11  # короткая подпись не мельчает
+
+def test_long_combo_lists_are_capped_and_scroll():
+    """Длинный список стратегий не разворачивается на весь экран: не больше 12 строк и прокрутка."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QComboBox
+    _app = QApplication.instance() or QApplication([])
+    from app.gui.widgets import fit_combo
+    cb = fit_combo(QComboBox())
+    assert cb.maxVisibleItems() == 12
+    assert cb.view() is not None and cb.view().textElideMode() == Qt.TextElideMode.ElideRight
 
 def test_gui_update_check_shows_result(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
@@ -718,6 +1320,26 @@ def test_gui_switched_off_game_filter_stays_off(tmp_path, monkeypatch):
         assert w._game_flags() == (True, False)  # человек выключил, обратно не включаем
         w.save(game_tcp=False, game_udp=False)
         assert w._game_flags() == (False, False)
+    finally:
+        _close(app, w)
+
+def test_gui_unchecked_game_filter_stays_off_after_auto_enable(tmp_path, monkeypatch):
+    """Автовключение один раз, затем снятая галочка не возвращается и winws не перезапускается во время игры."""
+    app, w = _gui(tmp_path, monkeypatch, game_watch=True)
+    try:
+        monkeypatch.setattr(w.tray, "showMessage", lambda *a: None)
+        class _W:
+            def games(self):
+                return {"game.exe": {"path": "x", "ips": {"9.9.9.9"}, "active": True, "ping_ms": None}}
+        w.watcher = _W()
+        w.on_games_changed()  # первая игра: фильтр включился сам и запомнился
+        assert w.settings.get("game_tcp") is True and w.settings.get("game_udp") is True
+        w.save(game_tcp=False, game_udp=False)
+        w._run_flags = (False, False)  # winws уже работает без игровых портов
+        applied = []
+        monkeypatch.setattr(w, "_apply_game_flags", lambda: applied.append(1))
+        w.on_games_changed()  # игра найдена снова, но человек выключил
+        assert w._game_flags() == (False, False) and applied == []
     finally:
         _close(app, w)
 

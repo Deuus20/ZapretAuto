@@ -22,11 +22,33 @@ def is_admin() -> bool:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except OSError:
         return False
-def _stray_winws() -> bool:
+def _same_file(exe: str, want: Path) -> bool:
+    """Тот же файл, даже если путь записан коротко (8.3) или в другом регистре."""
     try:
-        return any((p.info["name"] or "").lower() in EXES for p in psutil.process_iter(["name"]))
+        return os.path.samefile(exe, want)
+    except OSError:
+        return str(Path(exe)).lower() == str(want).lower()
+
+
+def _stray_winws() -> bool:
+    """winws от прошлого запуска или .bat этой же установки (лежит в нашем bin).
+
+    Чужие копии не считаем: taskkill идёт по имени образа и убивает все winws сразу, поэтому прогон
+    тестов или инструмента рядом с запущенной программой не должен трогать её обход."""
+    want = [paths.BIN / exe for exe in EXES]
+    try:
+        for p in psutil.process_iter(["name"]):
+            if (p.info["name"] or "").lower() not in EXES:
+                continue
+            try:
+                exe = p.exe()
+            except (psutil.Error, OSError):
+                continue  # чужой процесс без прав на путь: не наш, не трогаем
+            if exe and any(_same_file(exe, w) for w in want):
+                return True
     except psutil.Error:
         return True
+    return False
 class Runner:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None

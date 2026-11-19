@@ -153,6 +153,12 @@ TELEGRAM_TARGETS = [
     Target("TelegramDC2", "tcp://149.154.167.50:443"),
     Target("TelegramDC4", "tcp://149.154.167.91:443"),
 ]
+# WebSocket-канал, которым ходит отдельный MTProto-прокси (tg-ws-proxy): если дата-центры закрыты, а он живой,
+# человеку нужен не VPN, а такой прокси. Отдельно от плашек: проверяется только когда приложение не работает.
+TELEGRAM_WS = [
+    Target("TelegramWS1", "tcp://kws1.web.telegram.org:443"),
+    Target("TelegramWS2", "tcp://kws2.web.telegram.org:443"),
+]
 STUN_TARGETS = [
     Target("STUN_Google19302", "stun://stun.l.google.com:19302",
            "udp:19294-19344,50000-50100:discord,stun"),  # = the voice profile's group, else never tuned
@@ -351,10 +357,46 @@ QUICK = {"Discord": ("DiscordMain", "DiscordGateway", "DiscordCDN"),
          "Скорость YouTube": ("YouTubeSpeed", "YouTubeSpeedLight"), "Голос Discord": ("STUN_Google19302",),
          "Telegram (веб)": ("TelegramWeb",),
          "Telegram (приложение)": ("TelegramDC2", "TelegramDC4")}
+_CUSTOM_URL = re.compile(r"^(?:https?://\S+|(?:tcp|stun)://[^\s/:]+:(\d{1,5}))$")
+
+
+def valid_target(url: str) -> bool:
+    """Адрес своей проверки: http(s)://…, tcp://host:port или stun://host:port (порт 1..65535)."""
+    m = _CUSTOM_URL.match((url or "").strip())
+    if not m:
+        return False
+    port = m.group(1)
+    return port is None or 1 <= int(port) <= 65535
+
+
+def checks_config() -> tuple[list[str], list[tuple[str, Target]]]:
+    """(скрытые встроенные проверки, свои адреса) из настроек. Битые записи молча отбрасываются:
+    их мог оставить старый формат или ручная правка settings.json."""
+    from .settings import load_settings
+    c = load_settings().get("checks")
+    if not isinstance(c, dict):
+        return [], []
+    hidden = {str(x) for x in (c.get("hidden") or []) if isinstance(x, str)}
+    hidden = [x for x in hidden if x in QUICK]
+    custom, seen = [], set()
+    items = c.get("custom")
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()[:60]
+        url = str(item.get("url") or "").strip()
+        if not name or name in seen or name in QUICK or not valid_target(url):
+            continue
+        seen.add(name)
+        custom.append((name, Target(f"custom:{name}", url)))
+    return hidden, custom
+
+
 def quick_check(light: bool = False, speed: bool = False) -> dict[str, bool]:
     """Check key services through the currently running bypass (does not touch winws).
     light=True skips the ~1 MB YouTube speed test (periodic background checks: ~144 MB/day otherwise).
-    speed=True adds a short 320 KB sample instead: an hourly check that catches throttling."""
+    speed=True adds a short 320 KB sample instead: an hourly check that catches throttling.
+    Свои адреса и скрытые встроенные проверки берутся из настроек (карточка «Проверки» в «Настройках»)."""
     global BIND
     from . import vpn as vpnmod
     if egress_ip() is None:
@@ -362,11 +404,15 @@ def quick_check(light: bool = False, speed: bool = False) -> dict[str, bool]:
     BIND = vpnmod.bind_ip() if vpn_active() else None  # check the direct path, not the VPN
     if BIND is None and vpn_active():
         return {}  # full tunnel with a kill switch: the bypass isn't on the path, failures would be false alarms
-    keys = {k for ks in QUICK.values() for k in ks}
+    hidden, custom = checks_config()
+    keys = {k for name, ks in QUICK.items() if name not in hidden for k in ks}
     ts = [t for t in load_targets() if t.key in keys and not (light and t.is_speed)]
     have = {t.key for t in ts}
-    ts += [t for t in TELEGRAM_TARGETS if t.key not in have]  # its own answer, even with the option off
-    if light and speed:
+    tg_hidden = {k for name, ks in QUICK.items() if name in hidden for k in ks}
+    # its own answer, even with the option off (unless the user hid it in «Проверки»)
+    ts += [t for t in TELEGRAM_TARGETS if t.key not in have and t.key not in tg_hidden]
+    ts += [t for _name, t in custom if t.key not in have]
+    if light and speed and "Скорость YouTube" not in hidden:  # скрытую проверку не гоняем даже фоном
         ts.append(Target("YouTubeSpeedLight", "speed://youtube?light", "tcp:443:list-google"))
     res = probe_all(ts)
     retry = [t for t in ts if res.get(t.key) is None and not t.is_speed]  # speed probes are slow and costly
@@ -375,10 +421,43 @@ def quick_check(light: bool = False, speed: bool = False) -> dict[str, bool]:
         res.update({k: v for k, v in probe_all(retry).items() if v is not None})
     out = {}
     for name, ks in QUICK.items():
+        if name in hidden:
+            continue
         got = [res[k] is not None for k in ks if k in res]
         if got:
             out[name] = sum(got) * 2 > len(got) or (len(got) == 1 and got[0])
+    for name, t in custom:  # свой адрес: одна проверка, но с повтором выше; ключ с префиксом, чтобы не
+        out[name] = res.get(t.key) is not None  # перекрыть встроенную плашку с тем же именем
     return out
+def telegram_ws_alive() -> bool | None:
+    """Отвечает ли WebSocket-канал Telegram (kws*): True, если хоть один ответил, False, если ни один,
+    None, если проверка вообще не запустилась (нет сокетов)."""
+    try:
+        res = probe_all(TELEGRAM_WS)
+    except Exception:  # noqa: BLE001 (нет сети/сокетов: вердикта нет)
+        return None
+    if not res:
+        return None
+    return any(v is not None for v in res.values())
+
+
+def telegram_hint(app: bool | None, web: bool | None, ws: bool | None) -> str | None:
+    """Что сказать, когда приложение Telegram не подключается. None, если с ним всё в порядке."""
+    if app is not False:
+        return None
+    if ws:
+        return ("Telegram: приложение не подключается к серверам, но WebSocket-канал Telegram (kws*) отвечает. "
+                "Похоже на блокировку по IP: обход тут не поможет, поможет отдельный MTProto-прокси вроде "
+                "tg-ws-proxy, трогать VPN не обязательно.")
+    if ws is False:
+        return ("Telegram: приложение не подключается, и WebSocket-канал Telegram тоже закрыт. Обход тут не "
+                "поможет: нужен VPN.")
+    if web is False:
+        return "Telegram: не отвечают ни сайт, ни серверы. Похоже на блокировку по IP: нужен прокси или VPN."
+    return ("Telegram: сайт открывается, а приложение не подключается к серверам. Похоже на блокировку "
+            "по IP: стратегия обхода тут не поможет, нужен прокси или VPN.")
+
+
 _blocked: str | None = None  # why the last pick did not start: "dns" when the provider forges DNS answers
 
 
