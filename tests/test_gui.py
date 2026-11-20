@@ -1,4 +1,4 @@
-﻿"""Тесты окна и трея: поднимают QApplication и MainWindow."""
+"""Тесты окна и трея: поднимают QApplication и MainWindow."""
 import time
 
 import pytest
@@ -381,6 +381,142 @@ def test_diag_hint_hides_after_the_run(tmp_path, monkeypatch):
         w._timer.stop()
         w.deleteLater()
         app.processEvents()
+
+DIAG_ROWS = (
+    {"label": "DNS и DoH", "level": "err", "detail": "провайдер подменяет адреса", "fix": "dns_repair"},
+    {"label": "QUIC в браузерах", "level": "warn", "detail": "QUIC не проходит", "fix": "disable_quic"},
+    {"label": "Base Filtering Engine", "level": "ok", "detail": "Running", "fix": None},
+    {"label": "Кэш Discord", "level": "ok", "detail": "если завис", "fix": "discord_cache"},
+    {"label": "Адреса Flowseal в hosts", "level": "ok", "detail": "записаны", "fix": "hosts_remove",
+     "fix_label": "Убрать"},
+)
+
+def _diag_window(tmp_path, monkeypatch):
+    """Окно с заполненной диагностикой и перехваченным _run: исправление не запускается, тест сам решает когда."""
+    app, w = _gui(tmp_path, monkeypatch)
+    calls: list = []
+    monkeypatch.setattr(w, "_run", lambda fn, done, line=None: calls.append((fn, done)))
+    shown: list[str] = []
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+    w.on_diag_done([dict(r) for r in DIAG_ROWS])
+    return app, w, calls, shown
+
+def test_diag_fix_runs_one_at_a_time(tmp_path, monkeypatch):
+    """Пока одно исправление идёт, второе не запускается, а строка показывает загрузку жёлтым."""
+    app, w, calls, shown = _diag_window(tmp_path, monkeypatch)
+    try:
+        assert w.btn_fix_all.isEnabled()
+        w.apply_fix("dns_repair")
+        assert len(calls) == 1
+        w.apply_fix("disable_quic")  # второе нажатие ждёт: идёт первое
+        assert len(calls) == 1
+        w.apply_fix("dns_repair")    # и повторное по той же кнопке тоже
+        assert len(calls) == 1
+        btn, busy = w._fix_cells["dns_repair"]
+        assert btn.isHidden() and not busy.isHidden()          # «Исправляю…» и полоска
+        assert not w._fix_buttons["disable_quic"].isEnabled()  # соседние кнопки выключены
+        assert not w.btn_diag.isEnabled() and not w.btn_fix_all.isEnabled()
+        calls[0][1]("готово")  # исправление закончилось: сводка и повторный прогон проверок
+        assert shown and "готово" in shown[0]
+        assert w._diag_running and w.btn_diag.text() == "Проверка..."
+        assert not w._fix_busy and not w._fix_buttons["dns_repair"].isHidden()  # кнопка вернулась
+    finally:
+        _close(app, w)
+
+def test_diag_fix_all_goes_in_order(tmp_path, monkeypatch):
+    """«Исправить все» берёт только найденные проблемы, идёт по одной и показывает одну сводку."""
+    app, w, calls, shown = _diag_window(tmp_path, monkeypatch)
+    try:
+        assert w._fixable() == ["dns_repair", "disable_quic"]  # ok-строки и «Убрать» не трогаем
+        w.fix_all()
+        assert len(calls) == 1 and w._fix_active == "dns_repair"
+        assert w.btn_fix_all.text() == "Исправляю…"
+        calls[0][1]("готово")  # первое готово: сразу второе
+        assert len(calls) == 2 and w._fix_active == "disable_quic"
+        calls[1][1]("не удалось: нет прав")
+        text = shown[0]
+        assert "DNS и DoH: готово" in text and "QUIC в браузерах: не удалось: нет прав" in text
+        assert w.btn_fix_all.text() == "Исправить все"
+        assert w._diag_running and not w.btn_fix_all.isEnabled()  # идёт повторный прогон проверок
+        w.on_diag_done([dict(r) for r in DIAG_ROWS])
+        assert w.btn_fix_all.isEnabled()
+    finally:
+        _close(app, w)
+
+def test_diag_buttons_locked_while_checking(tmp_path, monkeypatch):
+    """Второй «Найти проблемы» и исправления во время прогона не запускаются."""
+    app, w, calls, shown = _diag_window(tmp_path, monkeypatch)
+    try:
+        w.run_diag()
+        assert len(calls) == 1 and w._diag_running
+        assert not w.btn_diag.isEnabled() and not w.btn_fix_all.isEnabled()
+        assert not w._fix_buttons["dns_repair"].isEnabled()
+        w.run_diag()          # второе нажатие игнорируется
+        w.fix_all()
+        w.apply_fix("dns_repair")
+        assert len(calls) == 1
+        w.on_diag_done([dict(r) for r in DIAG_ROWS])
+        assert w.btn_diag.isEnabled() and w.btn_fix_all.isEnabled() and w._fix_buttons["dns_repair"].isEnabled()
+    finally:
+        _close(app, w)
+
+def test_game_watch_is_on_by_default(tmp_path, monkeypatch):
+    """Свежие настройки без ключа: слежение за играми включено и в окне, и в трее."""
+    app, w = _gui(tmp_path, monkeypatch)
+    try:
+        assert w.cb["game_watch"].isChecked()
+        assert "Пока игр не найдено" in w.lbl_games.text()
+        w._fill_tray_games()
+        assert [a.text() for a in w.menu_games.actions()] == ["Игр пока не найдено"]
+    finally:
+        _close(app, w)
+
+def test_switch_is_compact():
+    """Тумблер настроек стал ниже: строки настроек плотнее, но состояние по-прежнему читается."""
+    pytest.importorskip("PySide6")
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from app.gui.widgets import Switch
+    assert Switch().sizeHint().height() <= 38
+
+def test_gui_dns_runs_one_change_at_a_time(tmp_path, monkeypatch):
+    """Пока DNS ставится или возвращается, обе кнопки ждут: два прогона подряд меняли бы DNS дважды."""
+    from PySide6.QtWidgets import QMessageBox
+    app, w = _gui(tmp_path, monkeypatch)
+    calls: list = []
+    try:
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: calls.append((fn, done)))
+        monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
+        w.dns_combo.setCurrentIndex(w.dns_combo.findData("Cloudflare"))
+        w.dns_apply()
+        assert len(calls) == 1 and not w.btn_dns.isEnabled() and not w.btn_dns_provider.isEnabled()
+        w.dns_apply()    # второе нажатие ничего не запускает
+        w.dns_restore()  # и «вернуть как у провайдера» тоже
+        assert len(calls) == 1
+        calls[0][1]((True, "поставлен", ["1.1.1.1"], "Cloudflare"))
+        assert w.btn_dns.isEnabled() and w.btn_dns_provider.isEnabled()
+        assert not w._dns_busy
+    finally:
+        _close(app, w)
+
+def test_gui_zapret2_waits_for_the_download(tmp_path, monkeypatch):
+    """Первая загрузка zapret2: галочка ждёт, второе переключение не оставляет настройку и движок разными."""
+    app, w = _gui(tmp_path, monkeypatch)
+    calls: list = []
+    try:
+        monkeypatch.setattr(w, "_run", lambda fn, done, line=None: calls.append((fn, done)))
+        monkeypatch.setattr(zapret2, "installed", lambda: False)
+        monkeypatch.setattr(zapret2, "install", lambda log: True)
+        monkeypatch.setattr(w, "start_runner", lambda: True)
+        w.set_zapret2(True)
+        assert len(calls) == 1 and not w.cb["zapret2"].isEnabled() and w._zapret2_busy
+        w.set_zapret2(False)  # пока идёт загрузка, переключение не применяется
+        assert len(calls) == 1
+        calls[0][1](True)
+        assert w.cb["zapret2"].isEnabled() and not w._zapret2_busy
+    finally:
+        _close(app, w)
 
 def test_mix_counter_and_reset():
     """Внизу микса видно, сколько групп заменено, и замены можно сбросить одной кнопкой."""
@@ -1260,7 +1396,7 @@ def test_gui_quiet_updates_defer_for_a_day_at_most(tmp_path, monkeypatch):
         _close(app, w)
 
 def test_gui_tray_strategy_and_games(tmp_path, monkeypatch):
-    app, w = _gui(tmp_path, monkeypatch)
+    app, w = _gui(tmp_path, monkeypatch, game_watch=False)
     try:
         w._fill_tray_strategies()
         acts = w.menu_strat.actions()

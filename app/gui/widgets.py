@@ -49,7 +49,7 @@ def _alpha(color: str, a: float) -> QColor:
     c.setAlphaF(a)
     return c
 class Switch(QAbstractButton):
-    """M3 switch: 52×32 track; the handle grows and slides right when on. Behaves like a QCheckBox."""
+    """M3 switch: 46×28 track; the handle grows and slides right when on. Behaves like a QCheckBox."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCheckable(True)
@@ -66,7 +66,7 @@ class Switch(QAbstractButton):
         self._kbd = e.reason() in (Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
         super().focusInEvent(e)
     def sizeHint(self) -> QSize:
-        return QSize(60, 40)
+        return QSize(56, 38)
     def _set_pos(self, v) -> None:
         self._pos = float(v)
         self.update()
@@ -90,7 +90,7 @@ class Switch(QAbstractButton):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         en = self.isEnabled()
         t = self._pos
-        track = QRectF(4, 4, 52, 32)
+        track = QRectF(4, 5, 46, 28)
         on_track, off_track = QColor(C["primary"]), QColor(C["surface_highest"])
         mix = QColor.fromRgbF(off_track.redF() * (1 - t) + on_track.redF() * t,
                               off_track.greenF() * (1 - t) + on_track.greenF() * t,
@@ -99,14 +99,14 @@ class Switch(QAbstractButton):
             mix = _alpha(C["on_surface"], .12)
         p.setPen(QPen(QColor(C["outline"]) if en else _alpha(C["on_surface"], .12), 2) if t < .5 else Qt.PenStyle.NoPen)
         p.setBrush(mix)
-        p.drawRoundedRect(track.adjusted(1, 1, -1, -1) if t < .5 else track, 16, 16)
-        d = 16 + 8 * t + (4 if self.isDown() else 0)
-        cx, cy = 4 + 16 + 20 * t, 20.0
+        p.drawRoundedRect(track.adjusted(1, 1, -1, -1) if t < .5 else track, 14, 14)
+        d = 14 + 7 * t + (3 if self.isDown() else 0)
+        cx, cy = 18 + 18 * t, 19.0
         kbd = self.hasFocus() and self._kbd
         if (self.underMouse() or kbd) and en:  # state layer; focus shows only when it came from the keyboard
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_alpha(C["primary"] if t > .5 else C["on_surface"], .12 if kbd else .08))
-            p.drawEllipse(QPointF(cx, cy), 20, 20)
+            p.drawEllipse(QPointF(cx, cy), 18, 18)
         p.setPen(Qt.PenStyle.NoPen)
         handle = QColor(C["on_primary"]) if t > .5 else QColor(C["outline"])
         if not en:
@@ -116,9 +116,9 @@ class Switch(QAbstractButton):
         if t > .5:  # check mark inside the handle: the state is readable without color
             p.setPen(QPen(QColor(C["on_primary_container"] if en else C["surface"]), 2, Qt.PenStyle.SolidLine,
                           Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-            path = QPainterPath(QPointF(cx - 5, cy))
-            path.lineTo(cx - 1.5, cy + 3.5)
-            path.lineTo(cx + 5, cy - 3.5)
+            path = QPainterPath(QPointF(cx - 4.5, cy))
+            path.lineTo(cx - 1.5, cy + 3)
+            path.lineTo(cx + 4.5, cy - 3)
             p.drawPath(path)
         p.end()
     def hitButton(self, pos) -> bool:  # noqa: N802

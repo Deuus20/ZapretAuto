@@ -32,6 +32,18 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
         self._expect_running = False
         self._hint_shown = False
         self._auto_check = False
+        # диагностика: прогон проверок и исправления идут по одному, чтобы кнопки не запускали их дважды
+        self._diag_running = False
+        self._fix_busy = False
+        self._fix_active = None
+        self._fix_queue = []
+        self._fix_results = []
+        self._fix_labels = {}
+        self._fix_summary = False
+        self._fix_buttons = {}
+        self._fix_cells = {}
+        self._dns_busy = False
+        self._zapret2_busy = False
         self.bridge = Bridge()
         self.bridge.log.connect(self.log)
         self.bridge.games_changed.connect(self.on_games_changed)
@@ -61,7 +73,7 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
     SETTINGS = [  # key, title, supporting text, default, section
         ("game_watch", "Следить за играми",
          "Находить запущенные игры и включать обход для их серверов. Если с обходом стало хуже, адрес убирается.",
-         False, "main"),
+         True, "main"),
         ("game_capture", "Перехватывать подключения игр",
          "Добавлять серверы найденных игр в обход zapret. Выключите, если с обходом игра работает хуже: серверы "
          "игр останутся вне обхода, а слежение за играми можно оставить.", True, "main"),
@@ -189,7 +201,7 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
         m.clear()
         games = self.watcher.games() if self.watcher else {}
         excl = {x.lower() for x in self.settings.get("games_exclude", [])}
-        if not self.settings.get("game_watch"):
+        if not self.settings.get("game_watch", True):
             m.addAction("Слежение за играми выключено").setEnabled(False)
             return
         if not self.settings.get("game_capture", True):
@@ -226,7 +238,7 @@ class MainWindow(PagesMixin, ActionsMixin, GamesMixin, UpdatesMixin, QWidget):
             self.ask_autopick()
         if updater:
             QTimer.singleShot(5000, self.fill_isp)
-        if self.settings.get("game_watch"):
+        if self.settings.get("game_watch", True):
             self.start_watcher()
     def quit(self):
         self._cancel = True  # let a running pick stop at its next step

@@ -21,6 +21,8 @@ class WindowBase(QWidget):
     _crashes: Any
     _deferred_since: Any
     _diag_rows: Any
+    _diag_running: Any
+    _fix_busy: Any
     _expect_running: Any
     _game_flags: Any
     _game_running: Any
@@ -79,6 +81,8 @@ class WindowBase(QWidget):
     btn_check: Any
     btn_check_access: Any
     btn_diag: Any
+    btn_fix_all: Any
+    _sync_diag_controls: Any
     btn_dns: Any
     btn_dns_provider: Any
     btn_desc_help: Any
@@ -112,6 +116,7 @@ class WindowBase(QWidget):
     error: Any
     exclude_app: Any
     fill_games: Any
+    fix_all: Any
     fill_dns: Any
     fill_isp: Any
     findChildren: Any

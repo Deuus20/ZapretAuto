@@ -11,12 +11,14 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QHBoxLayout,
     QInputDialog,
+    QLabel,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTableWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -53,10 +55,11 @@ class ActionsMixin(WindowBase):
 
     def run_diag(self):
         """Сначала обычные проверки, потом белые списки: их видно только без обхода, его выключаем на 5-10 с."""
-        if self.busy:
-            return
-        self.btn_diag.setEnabled(False)
+        if self.busy or self._diag_running or self._fix_busy:
+            return  # второе нажатие «Найти проблемы» только смешало бы два прогона
+        self._diag_running = True
         self.btn_diag.setText("Проверка...")
+        self._sync_diag_controls()
         def first(rows):
             self._diag_rows = rows or []
             was = self.runner.running
@@ -77,16 +80,32 @@ class ActionsMixin(WindowBase):
         self._run(lambda log: diag.run_checks(), first)
 
     def on_diag_done(self, res):
-        self.btn_diag.setEnabled(True)
-        self.btn_diag.setText("Найти проблемы")
+        self._diag_running = False
         self._last_diag = res
+        self.btn_diag.setText("Найти проблемы")
+        self._render_diag()  # после прогона пояснение больше не нужно
+        self._sync_diag_controls()
+
+    def _fixable(self) -> list[str]:
+        """Исправления для «Исправить все»: только найденные проблемы, без «Убрать» (это удаление, а не починка)."""
+        out: list[str] = []
+        for r in getattr(self, "_last_diag", None) or []:
+            fix = r.get("fix")
+            if fix and r.get("level") in ("err", "warn") and r.get("fix_label") != "Убрать" and fix not in out:
+                out.append(fix)
+        return out
+
+    def _render_diag(self):
+        """Таблица по последнему прогону: кнопки исправлений, а у идущей строки «Исправляю…» и полоска."""
         t = self.diag_table
         t.setRowCount(0)
+        self._fix_buttons = {}
+        self._fix_cells = {}
         from app.gui.style import C
         col = {"ok": C["good"], "warn": C["warn"], "err": C["error"]}
         order = {"err": 0, "warn": 1}
-        for r in sorted(res or [], key=lambda r: order.get(r["level"], 2)):  # problems first
-            i = t.rowCount()
+        for r in sorted(getattr(self, "_last_diag", None) or [], key=lambda r: order.get(r["level"], 2)):
+            i = t.rowCount()  # problems first
             t.insertRow(i)
             a = QTableWidgetItem(("●  " if r["level"] != "ok" else "") + r["label"])
             a.setForeground(QColor(col.get(r["level"], C["outline"])))
@@ -96,26 +115,100 @@ class ActionsMixin(WindowBase):
             cell.setToolTip(detail)  # полный текст: в таблице он бы растянул строку на три
             t.setItem(i, 1, cell)
             if r.get("fix"):
-                b = q(QPushButton(r.get("fix_label") or "Исправить"), objectName="tonal" if r["level"] != "ok" else "text")
-                b.setCursor(Qt.CursorShape.PointingHandCursor)
-                b.clicked.connect(lambda _=False, f=r["fix"]: self.apply_fix(f))
-                cell = QWidget()  # centered, natural height: a bare cell widget stretched over a tall row
-                cl = QHBoxLayout(cell)
-                cl.setContentsMargins(4, 2, 4, 2)
-                cl.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
-                t.setCellWidget(i, 2, cell)
+                t.setCellWidget(i, 2, self._fix_cell(r["fix"], r))
         t.resizeRowsToContents()
-        self.diag_hint.setVisible(not t.rowCount())  # после прогона пояснение больше не нужно
+        self.diag_hint.setVisible(not t.rowCount())
+
+    def _fix_cell(self, fix: str, r: dict) -> QWidget:
+        """Кнопка исправления и её загрузка: «Исправляю…» жёлтым и тонкая полоска, вместо второй кнопки."""
+        cell = QWidget()  # centered, natural height: a bare cell widget stretched over a tall row
+        lay = QVBoxLayout(cell)
+        lay.setContentsMargins(4, 2, 4, 2)
+        lay.setSpacing(2)
+        b = q(QPushButton(r.get("fix_label") or "Исправить"), objectName="tonal" if r["level"] != "ok" else "text")
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.clicked.connect(lambda _=False, f=fix: self.apply_fix(f))
+        busy = QWidget()
+        bl = QVBoxLayout(busy)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(2)
+        bl.addWidget(q(QLabel("Исправляю…"), objectName="warn"))
+        bar = q(QProgressBar(), objectName="thin")
+        bar.setRange(0, 0)  # indeterminate: the fix has no total to show
+        bar.setTextVisible(False)
+        bl.addWidget(bar)
+        busy.hide()  # hidden until this row's fix runs: no empty space in the cell
+        lay.addWidget(b)
+        lay.addWidget(busy)
+        self._fix_buttons[fix] = b
+        self._fix_cells[fix] = (b, busy)
+        return cell
+
+    def _sync_diag_controls(self):
+        """Кнопки диагностики: во время прогона проверок, исправления или подбора нажимать нечего."""
+        locked = self._diag_running or self._fix_busy or bool(self.busy)
+        for b in getattr(self, "_fix_buttons", {}).values():
+            b.setEnabled(not locked)
+        self.btn_diag.setEnabled(not locked)
+        self.btn_fix_all.setEnabled(not locked and bool(self._fixable()))
+        self.btn_fix_all.setText("Исправляю…" if self._fix_busy and self._fix_summary else "Исправить все")
 
     def apply_fix(self, fix):
-        """Fixes may hit the network or kill processes: run them off the UI thread, then show the result."""
-        self.btn_diag.setEnabled(False)
-        def done(msg):
-            msg = msg or "не удалось, подробности в журнале"
-            self.log(f"исправление {fix}: {msg}")
-            QMessageBox.information(self, "Диагностика", msg)
-            self.run_diag()
-        self._run(lambda log: diag.apply_fix(fix), done)
+        """Одно исправление; пока оно идёт, ни его, ни соседние кнопки нажать нельзя."""
+        if self._fix_busy or self._diag_running or self.busy:
+            return  # двойное нажатие не запускает исправление дважды
+        self._start_fixes([fix])
+
+    def fix_all(self):
+        """По очереди выполнить все найденные исправления и проверить обход один раз в конце."""
+        if self._fix_busy or self._diag_running or self.busy:
+            return
+        fixes = self._fixable()
+        if fixes:
+            self._start_fixes(fixes)
+
+    def _start_fixes(self, fixes: list[str]):
+        self._fix_labels = {r["fix"]: r["label"] for r in getattr(self, "_last_diag", None) or [] if r.get("fix")}
+        self._fix_queue = list(fixes)
+        self._fix_results = []
+        self._fix_summary = len(fixes) > 1
+        self._fix_busy = True
+        self._next_fix()
+
+    def _next_fix(self):
+        if not self._fix_queue:  # всё сделано: сводка и повторная проверка
+            self._finish_fixes()
+            return
+        fix = self._fix_queue.pop(0)
+        self._fix_active = fix
+        for b, busy in self._fix_cells.values():  # прошлая строка возвращает кнопку
+            b.show()
+            busy.hide()
+        pair = self._fix_cells.get(fix)
+        if pair:  # эта строка показывает загрузку вместо кнопки
+            b, busy = pair
+            b.hide()
+            busy.show()
+            self.diag_table.resizeRowsToContents()
+        self._sync_diag_controls()
+        self._run(lambda log: diag.apply_fix(fix), lambda msg: self._fix_done(fix, msg))
+
+    def _fix_done(self, fix, msg):
+        msg = msg or "не удалось, подробности в журнале"
+        self.log(f"исправление {fix}: {msg}")
+        self._fix_results.append((self._fix_labels.get(fix, fix), msg))
+        self._next_fix()
+
+    def _finish_fixes(self):
+        results, summary = self._fix_results, self._fix_summary
+        self._fix_busy, self._fix_active = False, None
+        self._fix_queue, self._fix_results, self._fix_summary = [], [], False
+        self._render_diag()  # кнопки на место: сводка показывается уже поверх обычной таблицы
+        self._sync_diag_controls()
+        if results:
+            text = "\n".join(f"{label}: {msg}" for label, msg in results) if summary else results[0][1]
+            QMessageBox.information(self, "Диагностика", text)
+        self.run_diag()  # после исправлений обход проверяется заново
 
     def _update_list_count(self):
         n = sum(1 for ln in self.list_edit.toPlainText().splitlines()
@@ -510,6 +603,8 @@ class ActionsMixin(WindowBase):
         return w
 
     def check_access(self, notify: bool = False):
+        if self._diag_running or self._fix_busy:
+            return  # проверка доступа во время диагностики видит выключенный обход и врёт
         if getattr(self, "_check_running", False):  # уже идёт: второй прогон только испортил бы результат
             self._check_pending = True
             self._check_notify = bool(notify) or bool(getattr(self, "_check_notify", False))
@@ -551,8 +646,8 @@ class ActionsMixin(WindowBase):
 
     def dns_apply(self):
         """Проверить и поставить DNS: авто-подбор лучшего, популярный из списка или свой."""
-        if self.busy:
-            return
+        if self.busy or self._dns_busy:
+            return  # второе нажатие во время проверки не меняло бы DNS ещё раз
         mode = self.dns_combo.currentData()
         if mode == "provider":
             self.dns_restore()
@@ -561,6 +656,8 @@ class ActionsMixin(WindowBase):
         if mode == "custom" and not servers:
             QMessageBox.warning(self, "DNS", "Укажите IPv4-адреса через запятую, например 1.1.1.1, 1.0.0.1")
             return
+        self._dns_busy = True
+        self.btn_dns_provider.setEnabled(False)
         self.btn_dns.setEnabled(False)
         self.btn_dns.setText("Проверяю…")
         name = self.dns_combo.currentText()  # читаем в GUI-потоке: из рабочего трогать виджеты нельзя
@@ -580,6 +677,8 @@ class ActionsMixin(WindowBase):
             return ok, msg, (servers if ok else []), name
         def done(res):
             ok, msg, cur, name = res or (False, "не удалось проверить DNS", [], "")
+            self._dns_busy = False
+            self.btn_dns_provider.setEnabled(True)
             self.btn_dns.setEnabled(True)
             self.btn_dns.setText("Проверить и применить")
             self.log("DNS: " + msg)
@@ -591,10 +690,18 @@ class ActionsMixin(WindowBase):
 
     def dns_restore(self):
         """Вернуть DNS от провайдера (DHCP)."""
-        if self.busy:
+        if self.busy or self._dns_busy:
             return
+        self._dns_busy = True
+        self.btn_dns.setEnabled(False)
+        self.btn_dns_provider.setEnabled(False)
+        self.btn_dns_provider.setText("Возвращаю…")
         def done(res):
             ok, msg = res or (False, "не удалось вернуть DNS провайдера")
+            self._dns_busy = False
+            self.btn_dns.setEnabled(True)
+            self.btn_dns_provider.setEnabled(True)
+            self.btn_dns_provider.setText("Вернуть как у провайдера")
             self.log("DNS: " + msg)
             if ok:
                 self.save(dns_servers=[], dns_name="", dns_mode="provider", dns_checked=time.time())
@@ -664,8 +771,8 @@ class ActionsMixin(WindowBase):
                                         for exe, g in self.watcher.games().items()))
 
     def toggle(self):
-        if self.busy:
-            return
+        if self.busy or self._diag_running or self._fix_busy:
+            return  # диагностика на время проверки выключает обход: включение посреди неё испортило бы результат
         self.error = ""
         self._resume_at = 0  # a manual on/off cancels a timed pause
         if self.runner.running:
@@ -888,6 +995,8 @@ class ActionsMixin(WindowBase):
     def set_zapret2(self, on: bool):
         """Switch the engine: download winws2 on first use, then restart the bypass with it (or back)."""
         from app import zapret2
+        if self._zapret2_busy:
+            return  # первая загрузка уже идёт: второе переключение оставило бы настройку и движок разными
         def switched(ok):
             if not ok:
                 self.error = "Не удалось скачать zapret2, подробности в журнале."
@@ -901,7 +1010,13 @@ class ActionsMixin(WindowBase):
                 self.start_runner()
             self.refresh()
         if on and not zapret2.installed():
-            self._run(lambda log: zapret2.install(log), switched)
+            self._zapret2_busy = True
+            self.cb["zapret2"].setEnabled(False)  # галочка ждёт загрузки: иначе она включит и выключит движок
+            def installed(ok):
+                self._zapret2_busy = False
+                self.cb["zapret2"].setEnabled(True)
+                switched(ok)
+            self._run(lambda log: zapret2.install(log), installed)
         else:
             switched(True)
 
@@ -942,7 +1057,7 @@ class ActionsMixin(WindowBase):
             self.autopick()
 
     def autopick(self, *_):
-        if self.busy:
+        if self.busy or self._diag_running or self._fix_busy:
             return
         if self._zapret2_on():  # the pick tests winws strategies: it would not change anything in zapret2 mode
             self.log("режим zapret2: стратегии переключаются сами, подбор не нужен")

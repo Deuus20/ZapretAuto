@@ -120,6 +120,7 @@ QPushButton#section {{ color: {C['primary']}; font-weight: 600; font-size: 9pt; 
                       border: none; background: transparent; text-align: left; }}
 QPushButton#section:hover {{ color: {C['on_surface']}; }}
 QLabel#empty {{ color: {C['on_surface_variant']}; padding: 24px; font-size: 10pt; }}
+QLabel#warn {{ color: {C['warn']}; }}
 
 QFrame#card, QFrame#group {{ background: {C['surface_low']}; border-radius: 12px; }}
 QWidget#row {{ border-radius: 8px; }}

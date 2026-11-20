@@ -484,6 +484,12 @@ class PagesMixin(WindowBase):
         self.btn_diag = q(QPushButton("Найти проблемы"), objectName="primary")
         self.btn_diag.clicked.connect(self.run_diag)
         drow.addWidget(self.btn_diag)
+        self.btn_fix_all = q(QPushButton("Исправить все"), objectName="tonal")
+        self.btn_fix_all.setToolTip("Выполнить по очереди все найденные исправления и проверить обход заново. "
+                                    "Пока одно исправление идёт, остальные кнопки ждут.")
+        self.btn_fix_all.setEnabled(False)  # пока проверок не было, исправлять нечего
+        self.btn_fix_all.clicked.connect(self.fix_all)
+        drow.addWidget(self.btn_fix_all)
         self.btn_report = q(QPushButton("Отчёт…"), objectName="tonal")
         self.btn_report.setToolTip("Собрать журнал, диагностику и настройки в zip или открыть страницу отправки "
                                    "на GitHub. Имя пользователя Windows в отчёте скрыто.")
@@ -709,18 +715,20 @@ class PagesMixin(WindowBase):
             self._tray_tip = tip
             self.tray.setToolTip(tip[:127])  # Windows truncates tray tooltips at 127 chars
         self.btn_toggle.setAccessibleName(title)
+        locked = self.busy or self._diag_running or self._fix_busy  # проверка или исправление: обход не трогаем
         for w in (self.btn_toggle, self.combo, self.box_settings, self.btn_check_access, self.btn_site):
-            w.setEnabled(not self.busy)
+            w.setEnabled(not locked)
         if self._zapret2_on():  # zapret2 picks strategies per site itself: the winws list does not apply
             self.combo.setEnabled(False)
         self.btn_toggle.set_state(state)
         self.act_toggle.setText("Выключить" if run else "Включить")
-        self.btn_auto.setEnabled(not self.busy)
+        self.btn_auto.setEnabled(not locked)
         c = self.settings.get("strategy")
         manual = c and not c.get("picks") and c != self._auto_choice()
         idx = max(0, self.combo.findText(c["base"])) if manual and c else 0
         if self.combo.currentIndex() != idx:
             self.combo.setCurrentIndex(idx)
+        self._sync_diag_controls()  # во время подбора или исправления кнопки диагностики не нажимаются
 
     def fill_games(self):
         games = self.watcher.games() if self.watcher else {}
@@ -746,8 +754,8 @@ class PagesMixin(WindowBase):
             r["out"] = not capture or all(e in excl for e in r["exes"])
         self.games_empty.setVisible(not rows)
         self.games_empty.setText(
-            "Пока игр не найдено. Запустите игру, она появится здесь сама." if self.settings.get("game_watch") else
-            "Включите «Следить за играми» в настройках, запущенные игры появятся здесь сами.")
+            "Пока игр не найдено. Запустите игру, она появится здесь сама." if self.settings.get("game_watch", True)
+            else "Включите «Следить за играми» в настройках, запущенные игры появятся здесь сами.")
         self.table.setVisible(bool(rows))
         self.table.blockSignals(True)  # a check state set while filling must not call back
         try:
@@ -806,7 +814,7 @@ class PagesMixin(WindowBase):
 
     def _fill_home_games(self, rows: list[dict]) -> None:
         """Home card: running games first, then the ones with most servers; three at most."""
-        if not self.settings.get("game_watch"):
+        if not self.settings.get("game_watch", True):
             text = "Слежение за играми выключено, включите его в «Настройках»."
         elif not rows:
             text = "Пока игр не найдено. Запустите игру, она появится здесь сама."
