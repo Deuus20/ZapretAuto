@@ -11,4 +11,4 @@ pyright==1.1.414
 pip-audit==2.10.1
 cyclonedx-bom==8.0.1
 pip-tools==7.7.0
-pyyaml==6.0.3
+pyyaml==6.0.4
