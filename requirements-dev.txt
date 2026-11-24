@@ -9,6 +9,6 @@ pyflakes==4.0.3
 ruff==0.17.4
 pyright==1.1.414
 pip-audit==2.10.1
-cyclonedx-bom==8.0.1
+cyclonedx-bom==9.0.0
 pip-tools==7.7.0
 pyyaml==6.0.3
